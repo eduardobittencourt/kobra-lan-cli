@@ -1,12 +1,12 @@
 # Kobra LAN CLI
 
-Cliente LAN direto para Anycubic Kobra X, com saída JSON e foco em automação por CLI/agentes. O fatiamento é feito separadamente pelo Anycubic Slicer Next oficial. Este cliente preserva os bytes do G-code e não usa KX-Bridge, Moonraker, desktop ou Home Assistant em runtime.
+A direct Anycubic Kobra X LAN client with JSON output for CLI and agent automation. Slicing is handled separately by the official Anycubic Slicer Next. This client preserves G-code bytes and does not require KX-Bridge, Moonraker, a desktop, or Home Assistant at runtime.
 
-**Estado:** upload validado em hardware Kobra X / firmware 2.0.2.2. Início de impressão experimental: testes offline e plano conferido por consultas reais; nenhum comando de início foi enviado no desenvolvimento desta versão. Uso do arquivo local com `url=""` ainda exige validação física.
+**Status:** upload validated on Kobra X hardware running firmware 2.0.2.2. Print start is experimental: offline tests and a plan checked through live read-only queries; no start command was sent while developing this version. Starting a stored file with `url=""` still requires hardware validation.
 
-## Execução
+## Running the client
 
-Python padrão >=3.11, sem dependências pip ou daemon. O launcher Linux usa `/usr/bin/python3`.
+Python standard library only, Python >=3.11. No pip dependencies or daemon. The Linux launcher uses `/usr/bin/python3`.
 
 ```sh
 git clone https://github.com/eduardobittencourt/kobra-lan-cli.git
@@ -14,63 +14,63 @@ cd kobra-lan-cli
 ./kobra-lan --help
 ./kobra-lan status
 ./kobra-lan files
-./kobra-lan inspect /caminho/modelo.gcode --name agent-modelo.gcode
-./kobra-lan upload /caminho/modelo.gcode --name agent-modelo.gcode
-# Upload real: mesmo arquivo e SHA-256 revisados na simulação
-./kobra-lan upload /caminho/modelo.gcode --name agent-modelo.gcode --sha256 HASH --execute
-./kobra-lan file agent-modelo.gcode
+./kobra-lan inspect /path/to/model.gcode --name agent-model.gcode
+./kobra-lan upload /path/to/model.gcode --name agent-model.gcode
+# Actual upload: use the same file and SHA-256 reviewed in the dry run
+./kobra-lan upload /path/to/model.gcode --name agent-model.gcode --sha256 HASH --execute
+./kobra-lan file agent-model.gcode
 ```
 
-`upload` é simulação local até receber `--execute` e o hash revisado. Nunca inicia impressão. Retorno JSON; códigos 0 (sucesso), 2 (protocolo/validação), 3 (configuração/rede). `--config` e `--state-dir` são opções globais, antes do subcomando.
+`upload` is a local dry run unless given `--execute` and the reviewed hash. It never starts a print. Output is JSON; exit codes are 0 (success), 2 (protocol/validation error), and 3 (configuration/network error). Global options `--config` and `--state-dir` go before the subcommand.
 
-## Configuração privada
+## Private configuration
 
-Configuração em `~/.config/kobra-lan/config.json`, modo 0600, diretório 0700. Campos:
+Store configuration in `~/.config/kobra-lan/config.json`, with file permissions 0600 and directory permissions 0700. Fields:
 
-- `host`: IPv4 LAN da impressora; `type_id`: 20030; `printer_id`: identidade retornada pelo provisionamento LAN.
-- `mqtt_username`, `mqtt_password`: credenciais LAN por dispositivo.
-- `client_cert`, `client_key`: caminhos dos arquivos PEM privados (0600).
-- `tls_sha256`: SHA-256 do certificado DER do servidor MQTT, obtido por um caminho confiável.
-- `mqtt_port`: 9883; `http_port`: 18910 (opcionais, esses são os padrões).
+- `host`: printer LAN IPv4 address; `type_id`: 20030; `printer_id`: device identity returned by LAN provisioning.
+- `mqtt_username`, `mqtt_password`: per-device LAN credentials.
+- `client_cert`, `client_key`: paths to private PEM files, with permissions 0600.
+- `tls_sha256`: SHA-256 of the MQTT server's DER certificate, obtained through a trusted path.
+- `mqtt_port`: 9883; `http_port`: 18910. Both are optional and use these defaults.
 
-Credenciais/certificado são obtidos pelo provisionamento LAN Anycubic; podem ser importados de uma integração existente. O cliente não inclui ferramenta pública de pareamento nem certificados/credenciais de terceiros. Não versionar config, chaves, tokens ou recibos. Conexões verificam o pin TLS **antes** de enviar usuário/senha MQTT; não atualizar o pin automaticamente se houver divergência. A confiança inicial precisa ser estabelecida pelo operador. Não é validação por CA pública.
+Obtain credentials and the certificate through Anycubic LAN provisioning, or import them from an existing integration. This client does not include a public pairing tool or third-party certificates/credentials. Do not commit configuration, keys, tokens, or receipts. Connections verify the TLS pin **before** sending the MQTT username/password; do not automatically update a mismatched pin. The operator must establish initial trust. This is certificate pinning rather than public CA validation.
 
-A sessão/token de upload vem de `info/report`. URLs com token não são impressas nem gravadas nos recibos. O destino é limitado ao host/porta configurados e `/gcode_upload?s=...`. A implementação se baseia em interoperabilidade comunitária, não em SDK oficialmente suportado pela Anycubic.
+The upload session token comes from `info/report`. URLs containing tokens are neither printed nor stored in receipts. The destination is restricted to the configured host/port and `/gcode_upload?s=...`. This implementation relies on community interoperability research, rather than an officially supported Anycubic SDK.
 
-## Início experimental
+## Experimental print start
 
-O plano padrão apenas consulta a impressora. Exige arquivo já enviado, slot **1..4** (numeração humana), material compatível, uma única cor/paint index 0 e os quatro slots internos. ACE externo e multicolorido não são suportados nesta versão.
+By default, the command only queries the printer and builds a plan. It requires an already uploaded file, slot **1..4** (human numbering), matching material, one color/paint index 0, and the onboard four-slot configuration. External ACE units and multicolor prints are not supported in this version.
 
 ```sh
-./kobra-lan start /caminho/modelo.gcode --name agent-modelo.gcode --slot 1 \
+./kobra-lan start /path/to/model.gcode --name agent-model.gcode --slot 1 \
   --auto-leveling on --vibration-compensation off --flow-calibration off
 ```
 
-As três opções de preparação são obrigatórias: o exemplo não afirma reproduzir os padrões da interface gráfica. O JSON mostra o payload e `plan_sha256`. Alterar arquivo, slot ou opções altera o hash. O plano contém `experimental=true` e `hardware_start_validated=false`.
+All three preparation options are required. The example does not claim to reproduce the graphical application's defaults. JSON output includes the payload and `plan_sha256`. Changing the file, slot, or options changes the hash. The plan includes `experimental=true` and `hardware_start_validated=false`.
 
-Execução futura é explicitamente solicitada adicionando `--execute --plan-sha256 HASH_DO_PLANO` aos mesmos argumentos. Isso é uma ação física: só fazê-la quando houver autorização para imprimir e a impressora estiver preparada. Exige recibo de upload verificado desta CLI, reconfere arquivo/estado/material e registra uma reserva persistente antes de publicar **um único** MQTT `print/start`. Não faz novo upload. ACK recebido não é tratado como prova de impressão física; o cliente consulta depois o projeto ativo e distingue confirmação de estado incerto. Nunca repete o comando automaticamente.
+To request execution later, add `--execute --plan-sha256 REVIEWED_PLAN_HASH` to the same arguments. This is a physical action: run it only when printing is authorized and the printer is prepared. It requires a verified upload receipt from this CLI, rechecks the file/state/material, and writes a durable reservation before publishing **one** MQTT `print/start` command. It does not upload again. An ACK is not treated as proof of physical printing; the client subsequently queries the active project and distinguishes observed activity from an uncertain result. It never automatically repeats the command.
 
-## Garantias e limites
+## Guarantees and limitations
 
-- Upload atualmente qualificado somente para modelo 20030 / firmware 2.0.2.2, G-code Next e perfil Kobra X. Exige estado livre e nenhum projeto ativo.
-- Hash e multipart usam os mesmos bytes em memória. Sem tradução de G-code, sem `print=true`, sem redirecionamento HTTP.
-- Reserva exclusiva/fsync por dispositivo e hash em `~/.local/share/kobra-lan/uploads/`. Upload e início têm marcadores separados. A segunda tentativa é bloqueada após sucesso ou timeout, inclusive entre processos/reinícios.
-- Em resposta ambígua, consultar estado/arquivos/recibos. Não apagar marcadores para reenviar cegamente. Outro diretório de estado ou outro programa não compartilha a proteção; repetir intencionalmente a mesma peça exige revisão operacional.
-- Arquivos remotos não são sobrescritos. Nomes ASCII seguros, `.gcode` até 128 MiB.
-- Verificação remota por nome/tamanho/camadas/modelo. Os endpoints usados não forneceram checksum dos bytes armazenados: `remote_byte_hash_verified=false` explicita que não houve download/hash independente da cópia interna.
-- Firmware 2.0.2.2 envia ACK correlacionado, seguido de report com outro msgid. Consultas são síncronas e aceitam report fresco após ACK. Ociosa, a impressora não produz report para `print/query`; status usa `info/report`.
-- Não existe bloqueio transacional com outro computador entre consulta e ação. Credenciais/pin podem mudar após firmware/modo LAN; reavaliar o provisionamento.
+- Upload is currently qualified only for model 20030 / firmware 2.0.2.2, Next-generated G-code, and the Kobra X profile. It requires an idle printer with no active project.
+- Hashing and multipart construction use the same bytes in memory. No G-code translation, `print=true` flag, or HTTP redirects.
+- Exclusive reservations are persisted with fsync per device and file hash in `~/.local/share/kobra-lan/uploads/`. Upload and start use separate markers. A second attempt is blocked after success or timeout, including across processes and restarts.
+- After an ambiguous response, inspect status/files/receipts. Do not delete markers to retry blindly. A different state directory or program does not share this protection; intentionally printing the same part again requires operational review.
+- Existing remote files are not overwritten. Names must be safe ASCII basenames; only `.gcode` files up to 128 MiB are accepted.
+- Remote verification checks filename, size, layers, and printer model. The endpoints used did not provide a checksum of stored bytes: `remote_byte_hash_verified=false` explicitly indicates that the internal copy was not downloaded and independently hashed.
+- Firmware 2.0.2.2 sends a correlated ACK followed by a report with a different msgid. Queries are synchronous and accept a fresh report after the ACK. An idle printer does not produce a report for `print/query`; status uses `info/report`.
+- There is no transactional lock against another computer between a query and an action. Credentials/pins may change after firmware or LAN-mode changes; reassess provisioning.
 
-## Testes
+## Tests
 
 ```sh
 /usr/bin/python3 -m unittest discover -s tests -v
 ```
 
-27 testes offline cobrem preservação multipart, framing MQTT, TLS pin, correlação de respostas, hash, simulação, arquivo existente, estado ocupado, mapeamento de slot/material, plano revisado, recibo de upload, ACK versus confirmação e timeout sem replay. Nenhum teste automatizado acessa impressoras reais.
+27 offline tests cover multipart preservation, MQTT framing, TLS pinning, response correlation, hashes, dry runs, existing files, busy state, slot/material mapping, reviewed plans, upload receipts, ACK versus confirmation, and timeouts without replay. Automated tests never access real printers.
 
-Validação manual de upload: um único POST real de um Autodesk FDM Test gerado pelo Next 2.0.0.3, 6.856.570 bytes, 460 camadas, HTTP 200/code 200; listagem e metadados confirmaram 1h44m09s e aproximadamente 31,74 g. A impressora permaneceu livre e sem aquecimento. Isso não valida a qualidade física nem o início experimental.
+Manual upload validation: one actual POST of an Autodesk FDM Test generated by Next 2.0.0.3, 6,856,570 bytes, 460 layers, HTTP 200/code 200. Listing and metadata confirmed an estimated time of 1h44m09s and approximately 31.74 g. The printer remained idle without heating. This does not validate physical print quality or the experimental start operation.
 
-## Licença e referências
+## License and references
 
-GPL-3.0-only. Implementação independente baseada nas referências de protocolo [KX-Bridge](https://gitea.it-drui.de/viewit/KX-Bridge-Release), commit `f0ce700fbcc9b3aed54f1a142b4e0318bc11638e`, e [integração HA Anycubic Kobra X](https://github.com/stribor/anycubic_kobrax), versão 0.1.6. Nenhum módulo desses projetos é importado em runtime. Veja [NOTICE.md](NOTICE.md) e [LICENSE](LICENSE).
+GPL-3.0-only. Independent implementation based on protocol references from [KX-Bridge](https://gitea.it-drui.de/viewit/KX-Bridge-Release), commit `f0ce700fbcc9b3aed54f1a142b4e0318bc11638e`, and the [Anycubic Kobra X Home Assistant integration](https://github.com/stribor/anycubic_kobrax), version 0.1.6. No modules from either project are imported at runtime. See [NOTICE.md](NOTICE.md) and [LICENSE](LICENSE).
