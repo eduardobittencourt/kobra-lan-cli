@@ -1,0 +1,9 @@
+[project]
+name = "kobra-lan-cli"
+version = "0.2.0"
+description = "Direct, auditable Anycubic Kobra X LAN upload client"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+kobra-lan = "kobra_lan.cli:main"

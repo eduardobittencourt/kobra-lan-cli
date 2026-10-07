@@ -1,0 +1,6 @@
+#!/bin/sh
+set -eu
+script_path=$(readlink -f -- "$0")
+project_dir=$(CDPATH= cd -- "$(dirname -- "$script_path")" && pwd)
+export PYTHONPATH="$project_dir${PYTHONPATH:+:$PYTHONPATH}"
+exec /usr/bin/python3 -m kobra_lan.cli "$@"
