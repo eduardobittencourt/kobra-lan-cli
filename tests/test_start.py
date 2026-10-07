@@ -73,6 +73,11 @@ class StartTests(unittest.TestCase):
         self.assertEqual(p["task_settings"]["auto_leveling"], 1)
         self.assertEqual(p["task_settings"]["flow_calibration"], 0)
         self.assertEqual(p["url"], "")
+    def test_hardware_qualification_is_limited_to_observed_case(self):
+        self.assertTrue(self.plan(slot=1)["hardware_start_validated"])
+        self.assertFalse(self.plan(slot=4)["hardware_start_validated"])
+        p = build_plan(config(), Client(config()), self.file, "test.gcode", 1, True, True, False)
+        self.assertFalse(p["hardware_start_validated"])
     def test_material_mismatch_blocks_plan(self):
         Client.material = "PETG"
         with self.assertRaises(ProtocolError): self.plan()
