@@ -43,7 +43,7 @@ def request_json(host, method, target):
             raise ProtocolError("Provisioning: HTTP status or response size rejected")
         try:
             result = json.loads(raw)
-        except (ValueError, UnicodeError, RecursionError):
+        except (ValueError, RecursionError):
             raise ProtocolError("Provisioning: invalid JSON response") from None
         if not isinstance(result, dict):
             raise ProtocolError("Provisioning: expected an object response")
@@ -126,6 +126,8 @@ def decrypt_object(token, data):
         if len(key) != 16 or len(iv) != 16 or len(encoded) > MAX_RESPONSE:
             raise ValueError
         ciphertext = base64.b64decode(encoded, validate=True)
+        # Printer-mandated decrypt-only wire format, not a new encryption scheme.
+        # CBC gives no authenticity; see docs/pairing-security-review.md.
         decryptor = Cipher(algorithms.AES(key), modes.CBC(iv)).decryptor()
         padded = decryptor.update(ciphertext) + decryptor.finalize()
         unpadder = padding.PKCS7(128).unpadder()
@@ -136,7 +138,7 @@ def decrypt_object(token, data):
         return result
     except ProtocolError:
         raise
-    except (ValueError, TypeError, UnicodeError, RecursionError):
+    except (ValueError, TypeError, RecursionError):
         raise ProtocolError("Response validation: invalid encrypted credential object") from None
 
 
@@ -159,7 +161,7 @@ def decode_bundle(token, data):
         return Bundle(device_id, model, username, password, certificate, private_key)
     except ProtocolError:
         raise
-    except (ValueError, TypeError, UnicodeError, RecursionError, UnsupportedAlgorithm):
+    except (ValueError, TypeError, RecursionError, UnsupportedAlgorithm):
         raise ProtocolError("Response validation: invalid encrypted credentials or certificate/key") from None
 
 

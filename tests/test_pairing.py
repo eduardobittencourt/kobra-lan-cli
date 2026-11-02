@@ -50,17 +50,17 @@ class TrustTests(unittest.TestCase):
     def test_declined_empty_eof_noninteractive(self):
         for answer in ('n\n','\n','','sure\n', 'yes' + ' ' * 32 + 'no\n'):
             stdin = io.StringIO(answer); stdin.isatty = lambda: True
-            with self.assertRaises(ProtocolError): p.accept_trust(config(),PIN,stdin=stdin,stderr=io.StringIO())
-        with self.assertRaises(ProtocolError): p.accept_trust(config(),PIN,stdin=io.StringIO('yes\n'))
+            self.assertRaises(ProtocolError, p.accept_trust, config(), PIN, stdin=stdin, stderr=io.StringIO())
+        self.assertRaises(ProtocolError, p.accept_trust, config(), PIN, stdin=io.StringIO('yes\n'))
         stdin = Mock(); stdin.isatty.return_value = True; stdin.readline.side_effect = EOFError
-        with self.assertRaises(ProtocolError): p.accept_trust(config(),PIN,stdin=stdin,stderr=io.StringIO())
+        self.assertRaises(ProtocolError, p.accept_trust, config(), PIN, stdin=stdin, stderr=io.StringIO())
 
     def test_exact_pin_without_prompt_or_fallback(self):
         stdin = Mock(); stderr = io.StringIO()
         p.accept_trust(config(),PIN,PIN.upper(),stdin=stdin,stderr=stderr)
         self.assertEqual(stderr.getvalue(),''); stdin.readline.assert_not_called()
         for pin in ('0'*64, 'a'*63, 'g'*64, PIN+'\n', ''):
-            with self.assertRaises(ProtocolError): p.accept_trust(config(),PIN,pin,stdin=stdin,stderr=stderr)
+            self.assertRaises(ProtocolError, p.accept_trust, config(), PIN, pin, stdin=stdin, stderr=stderr)
         stdin.readline.assert_not_called()
 
     def test_terminal_safe_bounded_metadata(self):
@@ -78,8 +78,8 @@ class TrustTests(unittest.TestCase):
         ctx.wrap_socket.return_value = tls
         p.accept_trust(config(),PIN,PIN)
         with patch('kobra_lan.mqtt.ssl.SSLContext',return_value=ctx), patch('kobra_lan.mqtt.socket.create_connection'):
-            with self.assertRaisesRegex(ProtocolError,'fingerprint changed'):
-                with MQTT(config()): pass
+            client = MQTT(config())
+            self.assertRaisesRegex(ProtocolError, 'fingerprint changed', client.__enter__)
         tls.sendall.assert_not_called()
 
 
@@ -101,18 +101,18 @@ class QualificationTests(unittest.TestCase):
         for changes in ({'model':'other'},{'version':'3.0'},{'state':None},{'deviceId':'Other01'},
                         {'modelId':20031},{'modeId':'20031'},{'state':'\x1b[31m'}):
             transport, _ = self.transport({**good,**changes})
-            with patch.object(p,'MQTT',return_value=transport), self.assertRaisesRegex(ProtocolError,'Status qualification'):
-                p.verify_status(config())
+            with patch.object(p, 'MQTT', return_value=transport):
+                self.assertRaisesRegex(ProtocolError, 'Status qualification', p.verify_status, config())
 
     def test_authentication_and_no_fresh_report(self):
         transport, client = self.transport({})
         transport.__enter__.side_effect = ProtocolError('MQTT authentication rejected private')
-        with patch.object(p,'MQTT',return_value=transport), self.assertRaisesRegex(ProtocolError,'Authentication/status'):
-            p.verify_status(config())
+        with patch.object(p, 'MQTT', return_value=transport):
+            self.assertRaisesRegex(ProtocolError, 'Authentication/status', p.verify_status, config())
         transport.__enter__.side_effect = None
         client.query.side_effect = ProtocolError('timeout')
-        with patch.object(p,'MQTT',return_value=transport), self.assertRaisesRegex(ProtocolError,'Authentication/status'):
-            p.verify_status(config())
+        with patch.object(p, 'MQTT', return_value=transport):
+            self.assertRaisesRegex(ProtocolError, 'Authentication/status', p.verify_status, config())
 
     def test_real_query_drops_stale_then_fails_without_fresh_report(self):
         from kobra_lan.mqtt import MQTT, string
@@ -126,8 +126,8 @@ class QualificationTests(unittest.TestCase):
                 client.stale = True
                 return 0x30,string('root/info/report')+json.dumps({'type':'info','msgid':'old','timestamp':payload['timestamp']-1000,'data':{}}).encode()
             raise ProtocolError('MQTT response timeout')
-        with patch.object(client,'receive',side_effect=receive), self.assertRaisesRegex(ProtocolError,'timeout'):
-            client.query('info')
+        with patch.object(client, 'receive', side_effect=receive):
+            self.assertRaisesRegex(ProtocolError, 'timeout', client.query, 'info')
 
 import os
 import stat
@@ -162,23 +162,23 @@ class StorageTests(unittest.TestCase):
 
     def test_shared_parent_and_symlinks_refused(self):
         self.dest.parent.mkdir(mode=0o755)
-        with self.assertRaises(OSError): p.PrivateStage(self.dest)
+        self.assertRaises(OSError, p.PrivateStage, self.dest)
         self.assertEqual(stat.S_IMODE(self.dest.parent.stat().st_mode),0o755)
         link = self.root/'alias'; link.symlink_to(self.dest.parent)
-        with self.assertRaises(OSError): p.PrivateStage(link/'config.json')
+        self.assertRaises(OSError, p.PrivateStage, link / 'config.json')
         self.dest.parent.chmod(0o700)
         with patch.object(p.os,'geteuid',return_value=os.geteuid()+1):
-            with self.assertRaises(OSError): p.PrivateStage(self.dest)
+            self.assertRaises(OSError, p.PrivateStage, self.dest)
 
     def test_exclusive_secret_creation(self):
         with p.PrivateStage(self.dest) as stage:
             cfg = stage.prepare(self.bundle,HOST)
-            with self.assertRaises(FileExistsError): stage.write_secret('client.key',b'replace')
+            self.assertRaises(FileExistsError, stage.write_secret, 'client.key', b'replace')
             self.assertEqual(Path(cfg.client_key).read_text(),self.bundle.private_key)
             target = self.root/'other'; target.write_text('untouched')
             os.symlink(target,'linked',dir_fd=stage.stage_fd)
             try:
-                with self.assertRaises(FileExistsError): stage.write_secret('linked',b'replace')
+                self.assertRaises(FileExistsError, stage.write_secret, 'linked', b'replace')
             finally:
                 os.unlink('linked',dir_fd=stage.stage_fd)
             self.assertEqual(target.read_text(),'untouched')
@@ -196,22 +196,21 @@ class PublicationTests(StorageTests):
         self.assertEqual({f.name for f in Path(loaded.client_key).parent.iterdir()},{'client.crt','client.key'})
 
     def test_concurrent_config_creation_preserved(self):
-        with self.assertRaises(FileExistsError):
-            with p.PrivateStage(self.dest) as stage:
-                cfg = stage.prepare(self.bundle,HOST)
-                self.dest.write_text('concurrent config')
-                stage.publish(cfg)
+        with p.PrivateStage(self.dest) as stage:
+            cfg = stage.prepare(self.bundle,HOST)
+            self.dest.write_text('concurrent config')
+            self.assertRaises(FileExistsError, stage.publish, cfg)
         self.assertEqual(self.dest.read_text(),'concurrent config')
         self.assertEqual(list(self.dest.parent.iterdir()),[self.dest])
 
     def test_write_fsync_link_failures_cleanup_before_commit(self):
         for operation in ('write_secret','fsync','link'):
             with self.subTest(operation=operation):
-                with self.assertRaises(OSError):
-                    with p.PrivateStage(self.dest) as stage:
-                        cfg = stage.prepare(self.bundle,HOST)
-                        target = patch.object(stage,operation,side_effect=OSError('private')) if operation=='write_secret' else patch.object(p.os,operation,side_effect=OSError('private'))
-                        with target: stage.publish(cfg)
+                with p.PrivateStage(self.dest) as stage:
+                    cfg = stage.prepare(self.bundle,HOST)
+                    target = patch.object(stage,operation,side_effect=OSError('private')) if operation=='write_secret' else patch.object(p.os,operation,side_effect=OSError('private'))
+                    with target:
+                        self.assertRaises(OSError, stage.publish, cfg)
                 self.assertFalse(self.dest.exists()); self.assertEqual(list(self.dest.parent.iterdir()),[])
 
     def test_partial_pem_failure_cleanup(self):
@@ -222,34 +221,35 @@ class PublicationTests(StorageTests):
             calls += 1
             if calls==2: raise OSError('private')
             return real_fsync(fd)
-        with patch.object(p.os,'fsync',side_effect=fail_second), self.assertRaises(OSError):
-            with p.PrivateStage(self.dest) as stage: stage.prepare(self.bundle,HOST)
+        with p.PrivateStage(self.dest) as stage:
+            with patch.object(p.os,'fsync',side_effect=fail_second):
+                self.assertRaises(OSError, stage.prepare, self.bundle, HOST)
         self.assertEqual(list(self.dest.parent.iterdir()),[])
 
     def test_failures_after_commit_preserve_config_and_pems(self):
         for operation in ('fsync','unlink'):
             with self.subTest(operation=operation):
                 dest = self.dest.parent/(operation+'.json')
-                with self.assertRaises(OSError):
-                    with p.PrivateStage(dest) as stage:
-                        cfg = stage.prepare(self.bundle,HOST)
-                        original = os.link
-                        def link_then_fail(*args,**kwargs):
-                            result = original(*args,**kwargs)
-                            # Fault begins only after publication.
-                            fault.start()
-                            return result
-                        fault = patch.object(p.os,operation,side_effect=OSError('private'))
-                        try:
-                            with patch.object(p.os,'link',side_effect=link_then_fail): stage.publish(cfg)
-                        finally:
-                            fault.stop()
+                with p.PrivateStage(dest) as stage:
+                    cfg = stage.prepare(self.bundle,HOST)
+                    original = os.link
+                    def link_then_fail(*args,**kwargs):
+                        result = original(*args,**kwargs)
+                        # Fault begins only after publication.
+                        fault.start()
+                        return result
+                    fault = patch.object(p.os,operation,side_effect=OSError('private'))
+                    try:
+                        with patch.object(p.os,'link',side_effect=link_then_fail):
+                            self.assertRaises(OSError, stage.publish, cfg)
+                    finally:
+                        fault.stop()
                 loaded = Config.load(dest)
                 self.assertEqual(Path(loaded.client_key).read_text(),self.bundle.private_key)
 
     def test_declined_trust_cleans_up_without_authentication(self):
         with patch.object(p,'provision',return_value=self.bundle), patch.object(p,'observe_fingerprint',return_value=PIN), patch.object(p,'accept_trust',side_effect=ProtocolError('Trust: declined')), patch.object(p,'verify_status') as verify:
-            with self.assertRaises(ProtocolError): p.pair(self.dest,HOST)
+            self.assertRaises(ProtocolError, p.pair, self.dest, HOST)
         verify.assert_not_called(); self.assertFalse(self.dest.exists())
         self.assertEqual(list(self.dest.parent.iterdir()),[])
 
@@ -261,18 +261,17 @@ class PreservationTests(StorageTests):
             if symlink: self.dest.symlink_to(self.root/'missing')
             else: self.dest.write_text('original')
             with patch.object(p,'provision') as provision:
-                with self.assertRaises(p.PairingLocalError): p.pair(self.dest,HOST,PIN)
+                self.assertRaises(p.PairingLocalError, p.pair, self.dest, HOST, PIN)
             provision.assert_not_called()
             if not symlink: self.assertEqual(self.dest.read_text(),'original')
             self.dest.unlink()
 
     def test_parallel_stages_only_one_publishes(self):
         with p.PrivateStage(self.dest) as first:
-            with self.assertRaises(FileExistsError):
-                with p.PrivateStage(self.dest) as second:
-                    cfg1 = first.prepare(self.bundle,HOST); cfg2 = second.prepare(self.bundle,HOST)
-                    first.publish(cfg1)
-                    second.publish(cfg2)
+            with p.PrivateStage(self.dest) as second:
+                cfg1 = first.prepare(self.bundle,HOST); cfg2 = second.prepare(self.bundle,HOST)
+                first.publish(cfg1)
+                self.assertRaises(FileExistsError, second.publish, cfg2)
             self.assertEqual(Config.load(self.dest).client_key,cfg1.client_key)
             self.assertFalse(Path(cfg2.client_key).exists())
         self.assertTrue(Path(cfg1.client_key).exists())
@@ -291,8 +290,9 @@ class PreservationTests(StorageTests):
     def test_colliding_stage_is_not_owned_or_deleted(self):
         self.dest.parent.mkdir(mode=0o700)
         existing = self.dest.parent/('.pair-'+'0'*32); existing.mkdir(mode=0o700)
-        with patch.object(p.uuid,'uuid4',return_value=Mock(hex='0'*32)), self.assertRaises(FileExistsError):
-            with p.PrivateStage(self.dest) as stage: stage.prepare(self.bundle,HOST)
+        with p.PrivateStage(self.dest) as stage:
+            with patch.object(p.uuid,'uuid4',return_value=Mock(hex='0'*32)):
+                self.assertRaises(FileExistsError, stage.prepare, self.bundle, HOST)
         self.assertTrue(existing.is_dir())
 
 from contextlib import redirect_stdout, redirect_stderr
@@ -421,9 +421,9 @@ class AmbiguousPublicationTests(StorageTests):
         def ambiguous(*args,**kwargs):
             link(*args,**kwargs)
             raise OSError('ambiguous publication')
-        with self.assertRaises(OSError):
-            with p.PrivateStage(self.dest) as stage:
-                cfg = stage.prepare(self.bundle,HOST)
-                with patch.object(p.os,'link',side_effect=ambiguous): stage.publish(cfg)
+        with p.PrivateStage(self.dest) as stage:
+            cfg = stage.prepare(self.bundle,HOST)
+            with patch.object(p.os,'link',side_effect=ambiguous):
+                self.assertRaises(OSError, stage.publish, cfg)
         loaded = Config.load(self.dest)
         self.assertTrue(Path(loaded.client_key).is_file())

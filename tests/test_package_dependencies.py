@@ -32,8 +32,8 @@ class MetadataTests(unittest.TestCase):
         check_wheel(self.wheel(),'0.3.0')
         for metadata in (self.metadata.replace('Requires-Dist: cryptography>=41\n',''),
                          self.metadata+'Requires-Dist: unexpected\n',self.metadata.replace('>=41','>=40')):
-            with self.assertRaises(AssertionError): check_wheel(self.wheel(metadata),'0.3.0')
-        with self.assertRaises(AssertionError): check_wheel(self.wheel(extra={'config.json':'secret'}),'0.3.0')
+            self.assertRaises(AssertionError, check_wheel, self.wheel(metadata), '0.3.0')
+        self.assertRaises(AssertionError, check_wheel, self.wheel(extra={'config.json': 'secret'}), '0.3.0')
 
     def sdist(self, requires='cryptography>=41',extra=None):
         path = self.root/'app.tar.gz'; prefix='kobra_lan_cli-0.3.0'
@@ -50,5 +50,5 @@ class MetadataTests(unittest.TestCase):
     def test_sdist_requires_exact_dependency_and_preserves_exclusions(self):
         check_sdist(self.sdist(),'0.3.0')
         for requires in ('','cryptography>=40','cryptography>=41\nunexpected'):
-            with self.assertRaises(AssertionError): check_sdist(self.sdist(requires),'0.3.0')
-        with self.assertRaises(AssertionError): check_sdist(self.sdist(extra={'private/client.key':'secret'}),'0.3.0')
+            self.assertRaises(AssertionError, check_sdist, self.sdist(requires), '0.3.0')
+        self.assertRaises(AssertionError, check_sdist, self.sdist(extra={'private/client.key': 'secret'}), '0.3.0')

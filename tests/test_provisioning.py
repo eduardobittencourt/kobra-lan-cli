@@ -54,32 +54,34 @@ class HTTPTests(unittest.TestCase):
                 'http://192.0.2.10:bad/ctrl', INFO['ctrlInfoUrl']+'\n']
         for url in urls:
             with self.subTest(url=url), patch.object(p, 'request_json', return_value={**INFO, 'ctrlInfoUrl': url}) as request:
-                with self.assertRaises(ProtocolError): p.exchange(HOST)
+                self.assertRaises(ProtocolError, p.exchange, HOST)
                 request.assert_called_once_with(HOST, 'GET', '/info')
 
     def test_invalid_hosts_before_network(self):
         for host in ('localhost', 'http://192.0.2.10', '::1', '192.0.2.010', '192.0.2.10:18910'):
-            with patch.object(p, 'request_json') as request, self.assertRaises(ProtocolError):
-                p.exchange(host)
+            with patch.object(p, 'request_json') as request:
+                self.assertRaises(ProtocolError, p.exchange, host)
             request.assert_not_called()
 
     def test_bad_responses(self):
         for status, raw in [(301,b'{}'), (500,b'{}'), (200,b'x'*(p.MAX_RESPONSE+1)),
                             (200,b'bad'), (200,b'[]'), (200,b'\xff')]:
             conn = self.connection([(status,raw)])
-            with patch.object(p.http.client,'HTTPConnection',return_value=conn), self.assertRaises(ProtocolError):
-                p.request_json(HOST,'GET','/info')
+            with patch.object(p.http.client, 'HTTPConnection', return_value=conn):
+                self.assertRaises(ProtocolError, p.request_json, HOST, 'GET', '/info')
             conn.request.assert_called_once()
             conn.close.assert_called_once()
         for result in ({'code':500,'data':INFO}, {'token':'short','ctrlInfoUrl':INFO['ctrlInfoUrl']}, {'code':200,'data':[]}, {}):
-            with patch.object(p,'request_json',return_value=result), self.assertRaises(ProtocolError): p.exchange(HOST)
+            with patch.object(p, 'request_json', return_value=result):
+                self.assertRaises(ProtocolError, p.exchange, HOST)
         for result in ({'code':201,'data':{}}, {'code':200,'data':[]}, {}):
-            with patch.object(p,'request_json',side_effect=[INFO,result]), self.assertRaises(ProtocolError): p.exchange(HOST)
+            with patch.object(p, 'request_json', side_effect=[INFO, result]):
+                self.assertRaises(ProtocolError, p.exchange, HOST)
 
     def test_timeout_never_replayed(self):
         conn = Mock(); conn.getresponse.side_effect = socket.timeout('sensitive')
-        with patch.object(p.http.client,'HTTPConnection',return_value=conn), self.assertRaisesRegex(OSError,'Provisioning: network'):
-            p.request_json(HOST,'POST','/ctrl?secret')
+        with patch.object(p.http.client, 'HTTPConnection', return_value=conn):
+            self.assertRaisesRegex(OSError, 'Provisioning: network', p.request_json, HOST, 'POST', '/ctrl?secret')
         conn.request.assert_called_once(); conn.close.assert_called_once()
 
 from datetime import datetime, timedelta, timezone
@@ -134,21 +136,22 @@ class CryptoTests(unittest.TestCase):
                    {'info':'AAAA','token':'short'}, encrypt(plain=b'bad'), encrypt(plain=b'[]'),
                    encrypt(plain=b'\xff')]
         for data in invalid:
-            with self.subTest(data=data), self.assertRaises(ProtocolError): p.decode_bundle(TOKEN,data)
-        with self.assertRaises(ProtocolError): p.decode_bundle('x'*16+'é'*16,encrypt(self.bundle))
+            with self.subTest(data=data):
+                self.assertRaises(ProtocolError, p.decode_bundle, TOKEN, data)
+        self.assertRaises(ProtocolError, p.decode_bundle, 'x' * 16 + 'é' * 16, encrypt(self.bundle))
 
     def test_missing_fields_and_unsupported_models(self):
         for field in self.bundle:
             for value in (None, '', [], 1):
                 data = {**self.bundle, field:value}
-                with self.subTest(field=field,value=value), self.assertRaises(ProtocolError):
-                    p.decode_bundle(TOKEN,encrypt(data))
+                with self.subTest(field=field, value=value):
+                    self.assertRaises(ProtocolError, p.decode_bundle, TOKEN, encrypt(data))
         for model in ('9999',True,20031,20030.0):
-            with self.assertRaises(ProtocolError): p.decode_bundle(TOKEN,encrypt({**self.bundle,'modelId':model}))
-        with self.assertRaises(ProtocolError): p.decode_bundle(TOKEN,encrypt({**self.bundle,'modeId':9999}))
-        with self.assertRaises(ProtocolError): p.decode_bundle(TOKEN,encrypt({**self.bundle,'deviceId':'bad/id'}))
+            self.assertRaises(ProtocolError, p.decode_bundle, TOKEN, encrypt({**self.bundle, 'modelId': model}))
+        self.assertRaises(ProtocolError, p.decode_bundle, TOKEN, encrypt({**self.bundle, 'modeId': 9999}))
+        self.assertRaises(ProtocolError, p.decode_bundle, TOKEN, encrypt({**self.bundle, 'deviceId': 'bad/id'}))
 
     def test_invalid_or_mismatched_pems(self):
         other = synthetic_bundle()
         for changes in ({'devicepk':other['devicepk']},{'devicecrt':'bad'},{'devicepk':'bad'}):
-            with self.assertRaises(ProtocolError): p.decode_bundle(TOKEN,encrypt({**self.bundle,**changes}))
+            self.assertRaises(ProtocolError, p.decode_bundle, TOKEN, encrypt({**self.bundle, **changes}))

@@ -75,6 +75,19 @@ Installed checks include pairing help, refusal of existing config before network
 access, and synthetic onboarding followed by ordinary status. No real printer is
 contacted, and installation hooks never provision a printer.
 
+Development and the CI unit job use the committed `uv.lock`:
+
+```sh
+uv sync --locked
+uv run --locked python -m unittest discover -s tests -v
+```
+
+Update the lockfile deliberately with `uv lock` when changing runtime dependencies.
+This development lock records exact versions and hashes. Distribution metadata
+continues to allow `cryptography>=41` for distro and third-party installers;
+their dependency versions need not match the development lock. The Debian build
+and acceptance paths explicitly verify the supported distro runtime closure.
+
 The offline unit suite requires the runtime dependency to be installed first
 (`python3-cryptography` for distro Python, or `pip install 'cryptography>=41'` in
 an isolated environment). `scripts/check_python.py` builds sdist and wheel, checks

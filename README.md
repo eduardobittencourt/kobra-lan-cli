@@ -142,9 +142,15 @@ To request execution later, add `--execute --plan-sha256 REVIEWED_PLAN_HASH` to 
 
 ## Tests
 
+With uv, use the committed development dependency lock:
+
 ```sh
-/usr/bin/python3 -m unittest discover -s tests -v
+uv sync --locked
+uv run --locked python -m unittest discover -s tests -v
 ```
+
+With distro Python and `python3-cryptography` already installed, use
+`/usr/bin/python3 -m unittest discover -s tests -v`.
 
 The original 28 offline application tests cover multipart preservation, MQTT framing, TLS pinning, response correlation, hashes, dry runs, existing files, busy state, slot/material mapping, reviewed plans, scoped hardware qualification, upload receipts, ACK versus confirmation, and timeouts without replay. Additional release tests cover version rejection, draft recovery, acceptance gates and asset verification. Automated tests never access real printers.
 

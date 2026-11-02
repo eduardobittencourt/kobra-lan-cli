@@ -18,16 +18,21 @@ from .provisioning import provision, validate_host
 from .mqtt import MQTT
 from .printer import payload_data
 
+CANDIDATE_FILE = "candidate.json"
+QUALIFIED_FIRMWARE = "2.0.2.2"
+
 
 def observe_fingerprint(config):
     """TLS only: client certificate exchange, no MQTT CONNECT or credentials."""
+    # Observation only, not an authenticated connection: see docs/pairing-security-review.md.
+    # Trust is decided explicitly, then MQTT independently rechecks the accepted pin.
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_NONE
     ctx.load_cert_chain(config.client_cert, config.client_key)
-    with socket.create_connection((config.host, config.mqtt_port), 10) as raw:
-        with ctx.wrap_socket(raw, server_hostname=config.host) as tls:
-            return hashlib.sha256(tls.getpeercert(binary_form=True)).hexdigest()
+    with (socket.create_connection((config.host, config.mqtt_port), 10) as raw,
+          ctx.wrap_socket(raw, server_hostname=config.host) as tls):
+        return hashlib.sha256(tls.getpeercert(binary_form=True)).hexdigest()
 
 
 def verify_status(config):
@@ -36,14 +41,14 @@ def verify_status(config):
             info = payload_data(client.query("info"))
     except ProtocolError:
         raise ProtocolError("Authentication/status: pinned connection or fresh info query failed") from None
-    if (info.get("model") != "Anycubic Kobra X" or info.get("version") != "2.0.2.2"
+    if (info.get("model") != "Anycubic Kobra X" or info.get("version") != QUALIFIED_FIRMWARE
             or any(str(info[k]) != str(config.type_id) for k in ("modelId", "modeId") if k in info)
             or ("deviceId" in info and info["deviceId"] != config.printer_id)):
         raise ProtocolError("Status qualification: only matching model 20030 / firmware 2.0.2.2 is qualified")
     state = info.get("state")
     if not isinstance(state, str) or not state or len(state) > 80 or not state.isascii() or not state.isprintable():
         raise ProtocolError("Status qualification: missing or invalid printer state")
-    return {"firmware": "2.0.2.2", "state": state}
+    return {"firmware": QUALIFIED_FIRMWARE, "state": state}
 
 
 
@@ -165,16 +170,16 @@ class PrivateStage:
                       str(root / 'client.crt'), str(root / 'client.key'), '0' * 64)
 
     def publish(self, config):
-        self.write_secret('candidate.json', json.dumps(asdict(config), ensure_ascii=True).encode())
+        self.write_secret(CANDIDATE_FILE, json.dumps(asdict(config), ensure_ascii=True).encode())
         os.fsync(self.stage_fd)
         try:
-            os.link('candidate.json', self.path.name, src_dir_fd=self.stage_fd,
+            os.link(CANDIDATE_FILE, self.path.name, src_dir_fd=self.stage_fd,
                     dst_dir_fd=self.parent_fd, follow_symlinks=False)
         except OSError:
             # A failed/ambiguous publication must not remove PEMs if our exact
             # candidate inode is already visible at the destination.
             try:
-                source = os.stat('candidate.json', dir_fd=self.stage_fd, follow_symlinks=False)
+                source = os.stat(CANDIDATE_FILE, dir_fd=self.stage_fd, follow_symlinks=False)
                 target = os.stat(self.path.name, dir_fd=self.parent_fd, follow_symlinks=False)
                 self.committed = (source.st_dev, source.st_ino) == (target.st_dev, target.st_ino)
             except OSError:
@@ -184,8 +189,8 @@ class PrivateStage:
         # even if fsync or removing the extra JSON link raises.
         self.committed = True
         os.fsync(self.parent_fd)
-        os.unlink('candidate.json', dir_fd=self.stage_fd)
-        self.files.remove('candidate.json')
+        os.unlink(CANDIDATE_FILE, dir_fd=self.stage_fd)
+        self.files.remove(CANDIDATE_FILE)
         os.fsync(self.stage_fd)
 
 

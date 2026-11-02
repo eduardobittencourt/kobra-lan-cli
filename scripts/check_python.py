@@ -14,6 +14,8 @@ import zipfile
 
 from release_version import ROOT, source_version
 
+RUNTIME_REQUIREMENT = "cryptography>=41"
+
 MODULES = {f"kobra_lan/{name}.py" for name in
            ("__init__", "cli", "config", "mqtt", "printer", "start", "upload", "provisioning", "pairing")}
 DOCS = {"README.md", "LICENSE", "NOTICE.md", "CHANGELOG.md", "docs/releases.md"}
@@ -34,9 +36,9 @@ def check_sdist(path, version):
         assert files <= allowed, files - allowed
         assert MODULES | DOCS | {"pyproject.toml"} <= files
         requirements = archive.extractfile(f"{parts[0]}/kobra_lan_cli.egg-info/requires.txt").read().decode()
-        assert requirements.strip() == "cryptography>=41", requirements
+        assert requirements.strip() == RUNTIME_REQUIREMENT, requirements
         metadata = BytesParser().parsebytes(archive.extractfile(f"{parts[0]}/PKG-INFO").read())
-        assert metadata.get_all("Requires-Dist") == ["cryptography>=41"]
+        assert metadata.get_all("Requires-Dist") == [RUNTIME_REQUIREMENT]
         archive.extractall(path.parent / "source", filter="data")
     return path.parent / "source" / parts[0]
 
@@ -53,7 +55,7 @@ def check_wheel(path, version):
         assert metadata["Name"] == "kobra-lan-cli" and metadata["Version"] == version
         assert metadata["Requires-Python"] == ">=3.11"
         assert metadata["License-Expression"] == "GPL-3.0-only"
-        assert metadata.get_all("Requires-Dist") == ["cryptography>=41"]
+        assert metadata.get_all("Requires-Dist") == [RUNTIME_REQUIREMENT]
         assert "kobra-lan = kobra_lan.cli:main" in archive.read(prefix + "entry_points.txt").decode()
 
 
@@ -76,7 +78,7 @@ def main():
     python = output / "venv/bin/python"
     # Provision runtime requirements during build preparation, before offline probes.
     dependency_args = ["--no-index", "--find-links", str(args.wheelhouse.resolve())] if args.wheelhouse else []
-    subprocess.run([str(python), "-m", "pip", "install", *dependency_args, "cryptography>=41"], check=True, env=env)
+    subprocess.run([str(python), "-m", "pip", "install", *dependency_args, RUNTIME_REQUIREMENT], check=True, env=env)
     subprocess.run([str(python), "-m", "pip", "install", "--no-deps", "--no-index", str(wheel)], check=True, env=env)
     outside = output / "outside"
     outside.mkdir()
