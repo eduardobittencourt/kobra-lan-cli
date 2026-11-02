@@ -62,7 +62,9 @@ version value is never used as a socket or HTTP destination.
 ## Dependency resolution: S8565
 
 `uv.lock` records the Python development/CI runtime dependency closure and hashes.
-The unit job and documented development setup use `uv sync --locked`. The setup
+The documented development setup uses `uv sync --locked`. The CI unit job
+adds `--no-build --no-install-project`, installing dependency wheels without
+executing package build scripts and testing the source checkout directly. The setup
 uv action is commit-pinned and the uv version is fixed. Package metadata remains
 `cryptography>=41` so the supported Debian/Ubuntu system packages satisfy it;
 Debian acceptance still verifies each distribution's installed dependency closure.

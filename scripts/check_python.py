@@ -15,11 +15,12 @@ import zipfile
 from release_version import ROOT, source_version
 
 RUNTIME_REQUIREMENT = "cryptography>=41"
+ENTRY_POINTS_FILE = "entry_points.txt"
 
 MODULES = {f"kobra_lan/{name}.py" for name in
            ("__init__", "cli", "config", "mqtt", "printer", "start", "upload", "provisioning", "pairing")}
 DOCS = {"README.md", "LICENSE", "NOTICE.md", "CHANGELOG.md", "docs/releases.md"}
-EGG_FILES = {"PKG-INFO", "SOURCES.txt", "dependency_links.txt", "entry_points.txt", "top_level.txt", "requires.txt"}
+EGG_FILES = {"PKG-INFO", "SOURCES.txt", "dependency_links.txt", ENTRY_POINTS_FILE, "top_level.txt", "requires.txt"}
 
 
 def check_sdist(path, version):
@@ -47,7 +48,7 @@ def check_wheel(path, version):
     prefix = f"kobra_lan_cli-{version}.dist-info/"
     with zipfile.ZipFile(path) as archive:
         files = set(archive.namelist())
-        metadata_files = {"METADATA", "WHEEL", "entry_points.txt", "top_level.txt", "RECORD",
+        metadata_files = {"METADATA", "WHEEL", ENTRY_POINTS_FILE, "top_level.txt", "RECORD",
                           "LICENSE", "NOTICE.md", "licenses/LICENSE", "licenses/NOTICE.md"}
         assert files <= MODULES | {prefix + name for name in metadata_files}, files
         assert MODULES <= files
@@ -56,7 +57,7 @@ def check_wheel(path, version):
         assert metadata["Requires-Python"] == ">=3.11"
         assert metadata["License-Expression"] == "GPL-3.0-only"
         assert metadata.get_all("Requires-Dist") == [RUNTIME_REQUIREMENT]
-        assert "kobra-lan = kobra_lan.cli:main" in archive.read(prefix + "entry_points.txt").decode()
+        assert "kobra-lan = kobra_lan.cli:main" in archive.read(prefix + ENTRY_POINTS_FILE).decode()
 
 
 def main():

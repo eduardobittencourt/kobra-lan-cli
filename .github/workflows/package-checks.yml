@@ -27,7 +27,7 @@ jobs:
         with:
           version: '0.13.5'
       - name: Prepare locked runtime dependencies
-        run: uv sync --locked
+        run: uv sync --locked --no-build --no-install-project
       - name: Offline tests (no printer access)
         run: .venv/bin/python -m unittest discover -s tests -v
       - name: Shell syntax
