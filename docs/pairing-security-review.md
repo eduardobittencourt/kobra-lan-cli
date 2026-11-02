@@ -22,9 +22,10 @@ sending username/password, including when the certificate changes between the
 two handshakes. Observation does not disable pinning for authenticated use.
 
 First-use observation cannot authenticate the printer against an active network
-attacker. The initial HTTP provisioning exchange is also unauthenticated. Use a
-trusted network or an independently obtained fingerprint and understand that the
-HTTP exchange itself still provides no confidentiality against network observers.
+attacker. The initial HTTP provisioning exchange is also unauthenticated.
+Provision only on a trusted network. An independently obtained fingerprint
+protects the later MQTT connection; it does not authenticate or encrypt the HTTP
+exchange, which exposes credentials to observers on that network.
 Accepting this device protocol requires that documented boundary.
 
 Evidence: `TransportTests.test_observation_is_tls_only`, `TrustTests`, and

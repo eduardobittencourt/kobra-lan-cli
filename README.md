@@ -36,34 +36,38 @@ Pairing targets a printer already in LAN mode at a known IPv4 address, reachable
 on TCP 18910 (HTTP) and 9883 (MQTT/TLS). The local exchange uses `/info` and a
 signed `/ctrl` request without HA, Slicer, or cloud requests. The HTTP exchange
 is unauthenticated: its token, signature and encrypted credential bundle do not
-prove the printer's identity against an active network attacker. Establish trust
-on a trusted network or supply a fingerprint obtained through an independent
-trusted path. Enabling LAN mode, account setup and resets are separate from this
+prove the printer's identity against an active network attacker. Provision only
+on a trusted network: a fingerprint obtained through an independent trusted path
+protects the later MQTT connection, but does not authenticate or protect the HTTP
+provisioning exchange or its credentials. Enabling LAN mode, account setup and resets are separate from this
 command; no claims are made about their internet requirements.
+
+The examples use the source-checkout launcher. After package installation, use
+`kobra-lan` in place of `./kobra-lan`.
 
 Interactive first use (prompts and fingerprint are shown on stderr):
 
 ```sh
-kobra-lan printer pair --host 192.0.2.10
-kobra-lan status
+./kobra-lan printer pair --host 192.0.2.10
+./kobra-lan status
 ```
 
 Unattended setup requires a fingerprint obtained through a trusted path. Replace
 `EXPECTED_SHA256` with its 64 hexadecimal digits; there is no `--yes` bypass:
 
 ```sh
-kobra-lan printer pair --host 192.0.2.10 --trust-sha256 EXPECTED_SHA256
+./kobra-lan printer pair --host 192.0.2.10 --trust-sha256 EXPECTED_SHA256
 ```
 
 For an existing installation, use a separate absent destination. Global options
 go before `printer`; a missing private directory is created automatically:
 
 ```sh
-kobra-lan --config ~/.config/kobra-lan-test/config.json printer pair \
+./kobra-lan --config ~/.config/kobra-lan-test/config.json printer pair \
   --host 192.0.2.10 --trust-sha256 EXPECTED_SHA256
-kobra-lan --config ~/.config/kobra-lan-test/config.json status
+./kobra-lan --config ~/.config/kobra-lan-test/config.json status
 # Original access remains available:
-kobra-lan status
+./kobra-lan status
 ```
 
 Running pairing again with an existing destination returns exit 3 before network

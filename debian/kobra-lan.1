@@ -25,7 +25,9 @@ Select durable state (default ~/.local/share/kobra-lan/uploads).
 .B kobra-lan printer pair --host 192.0.2.10
 provisions an already LAN-enabled Kobra X, model 20030 / firmware 2.0.2.2.
 It queries status without uploading or controlling the printer.
-HTTP provisioning is unauthenticated. On a trusted network, review the observed
+HTTP provisioning is unauthenticated and requires a trusted network even with
+--trust-sha256; the fingerprint protects only the later MQTT connection.
+On that network, review the observed
 TLS fingerprint and explicitly enter y or yes on a terminal; empty input refuses.
 For unattended setup, supply --trust-sha256 followed by an independently obtained
 64-hex-digit server certificate fingerprint. Mismatch fails without a prompt.
