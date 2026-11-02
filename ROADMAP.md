@@ -20,7 +20,7 @@ Our local `anycubic-next` launcher is a separate wrapper around the official sli
 
 Version 0.2.1 already implements direct MQTT/TLS and HTTP communication, status and file queries, local G-code inspection, reviewed uploads, and an experimental reviewed print start. It has 28 offline tests and one scoped hardware validation of upload and start. Completion and physical print quality have not been recorded.
 
-Current limits include model 20030 / firmware 2.0.2.2, Next-generated G-code, one filament, and the onboard four-slot configuration. Credentials must already exist: this repository has no public pairing flow. The existing local setup imported credentials from an established HA integration; that is a bootstrap workaround, not the target onboarding experience. Runtime operation is independent of HA, Next, and cloud services.
+Current limits include model 20030 / firmware 2.0.2.2, Next-generated G-code, one filament, and the onboard four-slot configuration. The new `printer pair --host <IPv4>` flow provisions direct access for an already LAN-enabled printer, with explicit first-use trust or an exact externally supplied fingerprint. It saves a compatible private config only after a read-only status query; existing configs are preserved. Discovery, named profiles, replacement/revocation, and initial printer/app LAN-mode setup remain outside this implementation. Runtime operation is independent of HA, Next, and cloud services.
 
 The project has Python metadata and a console entry point in `pyproject.toml`, but the current documented installation is a source checkout with a Linux launcher. This roadmap does not assert that PyPI, Homebrew, apt, or mise installation has been published or tested.
 
@@ -39,7 +39,7 @@ Prefer documented operations with validated semantics. Axis movement, homing, he
 
 ## Milestone 1 — Independent onboarding
 
-The first product gap is getting a new owner's printer connected without extracting configuration from another integration.
+Direct onboarding is implemented for an already LAN-enabled model 20030 / firmware 2.0.2.2. Synthetic coverage exercises provisioning, trust, persistence and the installed command. Hardware acceptance results are recorded separately; support for initial printer setup and other firmware remains unqualified.
 
 - Investigate the actual discovery and LAN provisioning mechanisms, then implement pairing in the CLI where possible. Support an explicit address when discovery cannot cross network boundaries.
 - Document the exact printer-panel and Anycubic-app steps, any physical confirmation or pairing code, and whether an account/internet connection is required during setup. Do not promise cloud-free provisioning until verified independently.

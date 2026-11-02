@@ -23,8 +23,12 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
+      - name: Prepare runtime dependencies
+        run: |
+          python3 -m venv .venv
+          .venv/bin/python -m pip install 'cryptography>=41'
       - name: Offline tests (no printer access)
-        run: python3 -m unittest discover -s tests -v
+        run: .venv/bin/python -m unittest discover -s tests -v
       - name: Shell syntax
         run: sh -n kobra-lan
 
@@ -61,7 +65,7 @@ jobs:
               apt-get update
               apt-get install -y --no-install-recommends build-essential debhelper dh-sequence-python3 \
                 pybuild-plugin-pyproject python3-all python3-setuptools python3-wheel \
-                python3-build python3-venv ca-certificates lintian
+                python3-build python3-venv python3-cryptography ca-certificates lintian
               python3 scripts/check_python.py build/python-acceptance
               python3 scripts/build_deb.py --output build/debian --tag "v$VERSION"
               python3 scripts/check_deb.py "build/debian/kobra-lan-cli_${VERSION}-1_all.deb"

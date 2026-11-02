@@ -15,9 +15,9 @@ import zipfile
 from release_version import ROOT, source_version
 
 MODULES = {f"kobra_lan/{name}.py" for name in
-           ("__init__", "cli", "config", "mqtt", "printer", "start", "upload")}
+           ("__init__", "cli", "config", "mqtt", "printer", "start", "upload", "provisioning", "pairing")}
 DOCS = {"README.md", "LICENSE", "NOTICE.md", "CHANGELOG.md", "docs/releases.md"}
-EGG_FILES = {"PKG-INFO", "SOURCES.txt", "dependency_links.txt", "entry_points.txt", "top_level.txt"}
+EGG_FILES = {"PKG-INFO", "SOURCES.txt", "dependency_links.txt", "entry_points.txt", "top_level.txt", "requires.txt"}
 
 
 def check_sdist(path, version):
@@ -33,6 +33,10 @@ def check_sdist(path, version):
         allowed |= {f"kobra_lan_cli.egg-info/{name}" for name in EGG_FILES}
         assert files <= allowed, files - allowed
         assert MODULES | DOCS | {"pyproject.toml"} <= files
+        requirements = archive.extractfile(f"{parts[0]}/kobra_lan_cli.egg-info/requires.txt").read().decode()
+        assert requirements.strip() == "cryptography>=41", requirements
+        metadata = BytesParser().parsebytes(archive.extractfile(f"{parts[0]}/PKG-INFO").read())
+        assert metadata.get_all("Requires-Dist") == ["cryptography>=41"]
         archive.extractall(path.parent / "source", filter="data")
     return path.parent / "source" / parts[0]
 
@@ -49,13 +53,14 @@ def check_wheel(path, version):
         assert metadata["Name"] == "kobra-lan-cli" and metadata["Version"] == version
         assert metadata["Requires-Python"] == ">=3.11"
         assert metadata["License-Expression"] == "GPL-3.0-only"
-        assert not metadata.get_all("Requires-Dist")
+        assert metadata.get_all("Requires-Dist") == ["cryptography>=41"]
         assert "kobra-lan = kobra_lan.cli:main" in archive.read(prefix + "entry_points.txt").decode()
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("output", type=Path)
+    parser.add_argument("--wheelhouse", type=Path, help="Prepared runtime dependency closure for offline installation")
     args = parser.parse_args()
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=False)
@@ -69,6 +74,9 @@ def main():
     check_wheel(wheel, version)
     venv.EnvBuilder(with_pip=True).create(output / "venv")
     python = output / "venv/bin/python"
+    # Provision runtime requirements during build preparation, before offline probes.
+    dependency_args = ["--no-index", "--find-links", str(args.wheelhouse.resolve())] if args.wheelhouse else []
+    subprocess.run([str(python), "-m", "pip", "install", *dependency_args, "cryptography>=41"], check=True, env=env)
     subprocess.run([str(python), "-m", "pip", "install", "--no-deps", "--no-index", str(wheel)], check=True, env=env)
     outside = output / "outside"
     outside.mkdir()
@@ -77,6 +85,9 @@ def main():
     assert subprocess.check_output([str(python), "-c", "import importlib.metadata as m; print(m.version('kobra-lan-cli'))"],
                                    cwd=outside, env=env, text=True).strip() == version
     subprocess.run([str(command), "--help"], cwd=outside, env=env, check=True, stdout=subprocess.DEVNULL)
+    subprocess.run([str(command), "printer", "pair", "--help"], cwd=outside, env=env, check=True, stdout=subprocess.DEVNULL)
+    subprocess.run([str(python), str(ROOT / "scripts/probe_pairing.py"), "--command", str(command)],
+                   cwd=outside, env=env, check=True)
     print(f"Python archives and independent installation verified: {version}")
 
 

@@ -29,7 +29,7 @@ python3 -m unittest discover -s tests -v
 
 The build baseline is Debian 13 with setuptools >=77 for SPDX license metadata.
 Ubuntu 24.04 consumes the same Debian-built package; installation requires only
-the declared system Python runtime, without setuptools or other build tools.
+the declared system Python runtime and `python3-cryptography (>=41)`, without setuptools or other build tools. Python distributions declare `cryptography>=41`; installers resolve it before the command runs. Debian 13 provides version 43 and Ubuntu 24.04 provides version 41. The package remains pure Python; its crypto dependency uses distro-supported native libraries.
 
 ## Debian build validation
 
@@ -45,11 +45,11 @@ Build in a disposable Debian 13 amd64 system (these dependencies are build-only)
 apt-get update
 apt-get install --no-install-recommends build-essential debhelper dh-sequence-python3 \
   pybuild-plugin-pyproject python3-all python3-setuptools python3-wheel \
-  python3-build python3-venv lintian
-python3 scripts/release_version.py --tag v0.2.1
-python3 scripts/build_deb.py --output build/debian --tag v0.2.1
-python3 scripts/check_deb.py build/debian/kobra-lan-cli_0.2.1-1_all.deb
-lintian build/debian/kobra-lan-cli_0.2.1-1_all.deb
+  python3-build python3-venv python3-cryptography lintian
+python3 scripts/release_version.py --tag v0.3.0
+python3 scripts/build_deb.py --output build/debian --tag v0.3.0
+python3 scripts/check_deb.py build/debian/kobra-lan-cli_0.3.0-1_all.deb
+lintian build/debian/kobra-lan-cli_0.3.0-1_all.deb
 (cd build/debian && sha256sum --check SHA256SUMS)
 python3 scripts/check_python.py build/python-acceptance
 ```
@@ -65,12 +65,25 @@ Byte-for-byte reproducibility across build environments is not yet promised.
 The supported acceptance targets are Debian 13 and Ubuntu 24.04 on amd64.
 `Architecture: all` describes the pure Python package; it does not claim physical
 testing on other CPUs or wider printer support. Both systems consume the same
-Debian-built artifact. Acceptance provisions Python, passwd and util-linux,
+Debian-built artifact. Acceptance provisions Python, python3-cryptography with its distro dependency closure, passwd and util-linux,
 then runs `scripts/accept_deb.py PACKAGE VERSION` as root in a disposable system
 with networking disabled and `/run/kobra-package-acceptance` containing
 `disposable`. It intentionally installs/upgrades/removes/purges the package and
 creates a synthetic non-root user's fixtures. Never run it on the live devbox.
 The CI workflow provides the complete disposable-container invocation.
+Installed checks include pairing help, refusal of existing config before network
+access, and synthetic onboarding followed by ordinary status. No real printer is
+contacted, and installation hooks never provision a printer.
+
+The offline unit suite requires the runtime dependency to be installed first
+(`python3-cryptography` for distro Python, or `pip install 'cryptography>=41'` in
+an isolated environment). `scripts/check_python.py` builds sdist and wheel, checks
+exact dependency metadata and content allowlists, prepares runtime dependencies
+with pip, then installs the application wheel with `--no-deps --no-index` before
+outside-checkout help and synthetic probes. For dependency preparation without
+networking, pass `--wheelhouse /path/to/prepared-closure` with compatible wheels
+for cryptography and all transitive dependencies. No runtime dependency fetches
+are performed by `kobra-lan` itself.
 
 ## Download, install and deliberately switch commands
 
@@ -79,7 +92,7 @@ an empty directory, verify, and install the local package:
 
 ```sh
 sha256sum --check SHA256SUMS
-sudo apt install ./kobra-lan-cli_0.2.1-1_all.deb
+sudo apt install ./kobra-lan-cli_0.3.0-1_all.deb
 /usr/bin/kobra-lan --version
 /usr/bin/kobra-lan --help
 command -v kobra-lan

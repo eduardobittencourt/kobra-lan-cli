@@ -21,6 +21,25 @@ Select private configuration (default ~/.config/kobra-lan/config.json).
 .TP
 .BI --state-dir " path"
 Select durable state (default ~/.local/share/kobra-lan/uploads).
+.SH PAIRING
+.B kobra-lan printer pair --host 192.0.2.10
+provisions an already LAN-enabled Kobra X, model 20030 / firmware 2.0.2.2.
+It queries status without uploading or controlling the printer.
+HTTP provisioning is unauthenticated. On a trusted network, review the observed
+TLS fingerprint and explicitly enter y or yes on a terminal; empty input refuses.
+For unattended setup, supply --trust-sha256 followed by an independently obtained
+64-hex-digit server certificate fingerprint. Mismatch fails without a prompt.
+The TLS handshake exchanges the client certificate; MQTT credentials are sent
+only after checking the accepted server pin on the subsequent connection.
+.PP
+Use global --config before printer to choose an alternate absent destination.
+Existing configs, including symlinks, are refused before network access.
+The parent must be user-owned, nonsymlink and mode 0700; missing directories are
+created privately. Generated PEMs use mode 0600 in a private .pair-ID directory.
+The config is published atomically after verification without overwriting.
+Retain referenced PEMs if a persistence error leaves a visible config.
+Removing an isolated config and only its unreferenced PEM directory does not
+revoke access on the printer. Never remove operational attempt markers.
 .SH EXIT STATUS
 0 indicates success; 2 indicates protocol/validation failure; 3 indicates
 configuration/network failure. Operations are never retried automatically.

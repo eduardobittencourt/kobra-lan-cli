@@ -8,6 +8,7 @@ from .mqtt import MQTT
 from .printer import snapshot, file_details, safe_file_details, list_files
 from .upload import describe, execute
 from .start import start
+from .pairing import pair, PairingLocalError
 
 
 def main(argv=None):
@@ -16,6 +17,11 @@ def main(argv=None):
     parser.add_argument("--config", type=Path, default=Path.home() / ".config/kobra-lan/config.json")
     parser.add_argument("--state-dir", type=Path, default=Path.home() / ".local/share/kobra-lan/uploads")
     sub = parser.add_subparsers(dest="command", required=True)
+    p = sub.add_parser("printer", help="Set up direct LAN access")
+    printer = p.add_subparsers(dest="printer_command", required=True)
+    p = printer.add_parser("pair", help="Pair an already LAN-enabled printer; never controls or uploads")
+    p.add_argument("--host", required=True, help="Bare printer IPv4 address")
+    p.add_argument("--trust-sha256", help="Expected server certificate SHA-256; required without a terminal")
     sub.add_parser("status", help="Read identity, firmware, temperature and current print")
     sub.add_parser("files", help="List printer storage; read-only")
     p = sub.add_parser("inspect", help="Inspect local G-code; no network")
@@ -38,7 +44,9 @@ def main(argv=None):
     p.add_argument("--plan-sha256", help="Reviewed dry-run plan hash required to execute")
     args = parser.parse_args(argv)
     try:
-        if args.command == "inspect" or (args.command == "upload" and not args.execute):
+        if args.command == "printer":
+            result = pair(args.config, args.host, args.trust_sha256)
+        elif args.command == "inspect" or (args.command == "upload" and not args.execute):
             _, result = describe(args.file, args.name)
             result["dry_run"] = True
         else:
@@ -64,6 +72,9 @@ def main(argv=None):
     except ProtocolError as error:
         print(json.dumps({"ok": False, "error": str(error)}, ensure_ascii=False))
         return 2
+    except PairingLocalError as error:
+        print(json.dumps({"ok": False, "error": str(error)}, ensure_ascii=True))
+        return 3
     except (OSError, ValueError, TypeError, KeyError):
         # Never print URLs with tokens, arbitrary JSON bodies or config contents.
         print(json.dumps({"ok": False, "error": "Local configuration or network operation failed; no automatic retry"}))
