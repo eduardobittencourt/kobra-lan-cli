@@ -1,0 +1,123 @@
+name: Package checks
+on:
+  workflow_call:
+    inputs:
+      expected-tag:
+        type: string
+        default: ''
+    outputs:
+      version:
+        value: ${{ jobs.build.outputs.version }}
+      commit:
+        value: ${{ jobs.build.outputs.commit }}
+      artifact:
+        value: candidate-${{ github.run_id }}-${{ github.run_attempt }}
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+      - name: Offline tests (no printer access)
+        run: python3 -m unittest discover -s tests -v
+      - name: Shell syntax
+        run: sh -n kobra-lan
+
+  build:
+    needs: unit
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.identity.outputs.version }}
+      commit: ${{ steps.identity.outputs.commit }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+      - name: Validate source and optional release tag
+        id: identity
+        env:
+          EXPECTED_TAG: ${{ inputs.expected-tag }}
+        run: |
+          if [ -n "$EXPECTED_TAG" ]; then
+            version=$(python3 scripts/release_version.py --tag "$EXPECTED_TAG")
+          else
+            version=$(python3 scripts/release_version.py)
+          fi
+          commit=$(git rev-parse HEAD)
+          test "$commit" = "$(git rev-parse "$GITHUB_SHA^{commit}")"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+      - name: Shared Debian build and archive gates
+        env:
+          VERSION: ${{ steps.identity.outputs.version }}
+        run: |
+          docker run --rm -v "$PWD:/work" -w /work \
+            -e VERSION -e SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)" debian:13 sh -ec '
+              apt-get update
+              apt-get install -y --no-install-recommends build-essential debhelper dh-sequence-python3 \
+                pybuild-plugin-pyproject python3-all python3-setuptools python3-wheel \
+                python3-build python3-venv ca-certificates lintian
+              python3 scripts/check_python.py build/python-acceptance
+              python3 scripts/build_deb.py --output build/debian --tag "v$VERSION"
+              python3 scripts/check_deb.py "build/debian/kobra-lan-cli_${VERSION}-1_all.deb"
+              lintian --allow-root "build/debian/kobra-lan-cli_${VERSION}-1_all.deb"
+              cd build/debian
+              sha256sum --check SHA256SUMS
+            '
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            build/debian/*.deb
+            build/debian/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 7
+
+  acceptance:
+    needs: build
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - distro: debian:13
+            id: debian13
+          - distro: ubuntu:24.04
+            id: ubuntu2404
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: candidate
+      - name: Provision disposable acceptance image
+        env:
+          DISTRO: ${{ matrix.distro }}
+        run: |
+          docker build --build-arg DISTRO="$DISTRO" -t kobra-acceptance -f scripts/acceptance.Dockerfile .
+      - name: Install, probe and preserve private state without networking
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+          TARGET_ID: ${{ matrix.id }}
+        run: |
+          (cd candidate && sha256sum --check SHA256SUMS)
+          mkdir reports
+          chmod 777 reports
+          docker run --rm --network none -v "$PWD/candidate:/artifacts:ro" \
+            -v "$PWD/reports:/reports" -e VERSION -e TARGET_ID kobra-acceptance sh -ec '
+              env -u PYTHONPATH python3 /accept_deb.py "/artifacts/kobra-lan-cli_${VERSION}-1_all.deb" "$VERSION" \
+                --report "/reports/${TARGET_ID}.json"
+            '
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: acceptance-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.id }}
+          path: reports/*.json
+          if-no-files-found: error
+          retention-days: 7

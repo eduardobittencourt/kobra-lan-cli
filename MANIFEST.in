@@ -1,0 +1,9 @@
+include README.md LICENSE NOTICE.md
+include CHANGELOG.md docs/releases.md
+exclude .gitignore
+prune tests
+prune scripts
+prune debian
+prune openspec
+prune .agents
+prune .github

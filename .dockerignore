@@ -1,0 +1,4 @@
+**
+!scripts/
+!scripts/accept_deb.py
+!scripts/acceptance.Dockerfile

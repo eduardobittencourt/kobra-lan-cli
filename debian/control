@@ -1,0 +1,19 @@
+Source: kobra-lan-cli
+Section: utils
+Priority: optional
+Maintainer: Eduardo Bittencourt <eduardo@bittencourt.dev>
+Build-Depends: debhelper-compat (= 13), dh-sequence-python3, pybuild-plugin-pyproject, python3-all, python3-setuptools (>= 77), python3-wheel
+Standards-Version: 4.7.0
+Rules-Requires-Root: no
+Homepage: https://github.com/eduardobittencourt/kobra-lan-cli
+Vcs-Git: https://github.com/eduardobittencourt/kobra-lan-cli.git
+Vcs-Browser: https://github.com/eduardobittencourt/kobra-lan-cli
+
+Package: kobra-lan-cli
+Architecture: all
+Depends: ${python3:Depends}, ${misc:Depends}, python3 (>= 3.11)
+Description: direct experimental Anycubic Kobra X LAN client
+ Inspect local G-code and perform explicitly reviewed uploads and print starts
+ with JSON output and durable duplicate protection. Runtime uses only the Python
+ standard library. Printer credentials must be provisioned separately.
+ Hardware support is experimental and limited to the documented configurations.

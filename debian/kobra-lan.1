@@ -1,0 +1,31 @@
+.TH KOBRA-LAN 1 "2026-11-02" "Kobra LAN CLI" "User Commands"
+.SH NAME
+kobra-lan \- experimental direct Anycubic Kobra X LAN client
+.SH SYNOPSIS
+.B kobra-lan
+.RI [ global-options ] " command " [ arguments ]
+.SH DESCRIPTION
+Inspect G-code locally and perform explicitly reviewed LAN operations with JSON
+output. Upload and print start require separate reviewed execution flags.
+Use the help for each command before attempting an operation.
+.SH OPTIONS
+.TP
+.B --help
+Show commands and options. Each command also accepts --help.
+.TP
+.B --version
+Show the application version.
+.TP
+.BI --config " path"
+Select private configuration (default ~/.config/kobra-lan/config.json).
+.TP
+.BI --state-dir " path"
+Select durable state (default ~/.local/share/kobra-lan/uploads).
+.SH EXIT STATUS
+0 indicates success; 2 indicates protocol/validation failure; 3 indicates
+configuration/network failure. Operations are never retried automatically.
+.SH FILES
+Configuration and state belong to the invoking user. Removing or purging the
+package preserves them. Do not delete attempt markers to retry uncertain actions.
+.SH SEE ALSO
+Installed README.md, NOTICE.md and releases.md in /usr/share/doc/kobra-lan-cli/.

@@ -1,9 +1,28 @@
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "kobra-lan-cli"
-version = "0.2.1"
+dynamic = ["version"]
 description = "Direct, auditable Anycubic Kobra X LAN upload client"
+readme = "README.md"
+license = "GPL-3.0-only"
+license-files = ["LICENSE", "NOTICE.md"]
+authors = [{name = "Eduardo Bittencourt"}]
 requires-python = ">=3.11"
 dependencies = []
 
 [project.scripts]
 kobra-lan = "kobra_lan.cli:main"
+
+[project.urls]
+Repository = "https://github.com/eduardobittencourt/kobra-lan-cli"
+Issues = "https://github.com/eduardobittencourt/kobra-lan-cli/issues"
+
+[tool.setuptools]
+packages = ["kobra_lan"]
+include-package-data = false
+
+[tool.setuptools.dynamic]
+version = {attr = "kobra_lan.__version__"}
