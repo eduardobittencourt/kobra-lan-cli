@@ -16,6 +16,7 @@ from release_version import ROOT, source_version
 
 RUNTIME_REQUIREMENT = "cryptography>=41"
 ENTRY_POINTS_FILE = "entry_points.txt"
+RUNTIME_LOCK = ROOT / "requirements-runtime.txt"
 
 MODULES = {f"kobra_lan/{name}.py" for name in
            ("__init__", "cli", "config", "mqtt", "printer", "start", "upload", "provisioning", "pairing")}
@@ -62,11 +63,25 @@ def check_wheel(path, version):
         assert "kobra-lan = kobra_lan.cli:main" in archive.read(prefix + ENTRY_POINTS_FILE).decode()
 
 
+def install_runtime(python, output, wheelhouse, env, requirements=RUNTIME_LOCK):
+    """Install the hash-verified locked wheel closure without executing sdists."""
+    if wheelhouse is None:
+        wheelhouse = output / "runtime-wheels"
+        wheelhouse.mkdir()
+        subprocess.run([str(python), "-m", "pip", "download", "--require-hashes",
+                        "--only-binary=:all:", "--requirement", str(requirements),
+                        "--dest", str(wheelhouse)], check=True, env=env)
+    subprocess.run([str(python), "-m", "pip", "install", "--no-index",
+                    "--find-links", str(wheelhouse.resolve()), "--require-hashes",
+                    "--only-binary=:all:", "--requirement", str(requirements)], check=True, env=env)
+
+
 def main():
     """Build from source archives and verify an independent installed command."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("output", type=Path)
-    parser.add_argument("--wheelhouse", type=Path, help="Prepared runtime dependency closure for offline installation")
+    parser.add_argument("--wheelhouse", type=Path,
+                        help="Locked runtime wheel closure; hashes are checked against requirements-runtime.txt")
     args = parser.parse_args()
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=False)
@@ -81,8 +96,7 @@ def main():
     venv.EnvBuilder(with_pip=True).create(output / "venv")
     python = output / "venv/bin/python"
     # Provision runtime requirements during build preparation, before offline probes.
-    dependency_args = ["--no-index", "--find-links", str(args.wheelhouse.resolve())] if args.wheelhouse else []
-    subprocess.run([str(python), "-m", "pip", "install", *dependency_args, RUNTIME_REQUIREMENT], check=True, env=env)
+    install_runtime(python, output, args.wheelhouse, env)
     subprocess.run([str(python), "-m", "pip", "install", "--no-deps", "--no-index", str(wheel)], check=True, env=env)
     outside = output / "outside"
     outside.mkdir()

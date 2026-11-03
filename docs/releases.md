@@ -82,7 +82,15 @@ uv sync --locked
 uv run --locked python -m unittest discover -s tests -v
 ```
 
-Update the lockfile deliberately with `uv lock` when changing runtime dependencies.
+Update the lockfile deliberately with `uv lock` when changing runtime dependencies,
+then regenerate the pip manifest used for package validation:
+
+```sh
+uv export --locked --no-dev --no-emit-project --no-header --no-annotate \
+  --format requirements-txt --output-file requirements-runtime.txt > /dev/null
+```
+
+CI checks that this export matches the committed `requirements-runtime.txt`.
 This development lock records exact versions and hashes. Distribution metadata
 continues to allow `cryptography>=41` for distro and third-party installers;
 their dependency versions need not match the development lock. The Debian build
@@ -91,12 +99,24 @@ and acceptance paths explicitly verify the supported distro runtime closure.
 The offline unit suite requires the runtime dependency to be installed first
 (`python3-cryptography` for distro Python, or `pip install 'cryptography>=41'` in
 an isolated environment). `scripts/check_python.py` builds sdist and wheel, checks
-exact dependency metadata and content allowlists, prepares runtime dependencies
-with pip, then installs the application wheel with `--no-deps --no-index` before
-outside-checkout help and synthetic probes. For dependency preparation without
-networking, pass `--wheelhouse /path/to/prepared-closure` with compatible wheels
-for cryptography and all transitive dependencies. No runtime dependency fetches
-are performed by `kobra-lan` itself.
+exact dependency metadata and content allowlists, and prepares the runtime closure
+from `requirements-runtime.txt`. Both download and installation require hashes
+and `--only-binary=:all:`; source dependency builds are refused. It then installs
+the application wheel with `--no-deps --no-index` before outside-checkout probes.
+For offline dependency preparation, supply the complete locked wheel closure:
+
+```sh
+python3 -m venv build/runtime-download
+build/runtime-download/bin/python -m pip download --require-hashes --only-binary=:all: \
+  --requirement requirements-runtime.txt --dest build/runtime-wheels
+python3 scripts/check_python.py build/python-acceptance --wheelhouse build/runtime-wheels
+```
+
+The build job uses this explicit wheelhouse flow. If `--wheelhouse` is omitted,
+the helper downloads the same locked, hash-verified wheels during preparation.
+Installation always uses `--no-index`, requires pinned hashes and rejects sdists,
+including with a caller-supplied wheelhouse. No runtime dependency fetches are
+performed by `kobra-lan` itself.
 
 ## Download, install and deliberately switch commands
 

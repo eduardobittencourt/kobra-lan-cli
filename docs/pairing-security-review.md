@@ -71,6 +71,15 @@ Debian acceptance still verifies each distribution's installed dependency closur
 The lockfile does not claim that third-party pip/distro installations select the
 same versions as the development environment.
 
+The separate Python archive-validation environment also uses the locked closure:
+CI verifies that `requirements-runtime.txt` matches the uv export, prepares a
+hash-verified wheels-only wheelhouse, and passes it explicitly to
+`scripts/check_python.py`. That installer uses `--no-index`, `--require-hashes`
+and `--only-binary=:all:`. Its default preparation path applies the same hash and
+binary restrictions rather than resolving an unlocked range from an index.
+`RuntimeInstallTests` exercises real offline pip rejection of changed wheel bytes,
+missing hashes and hash-matching sdists, and accepts a matching synthetic wheel.
+
 ## Publication interruptions
 
 The config hard link may become visible before an asynchronous interruption is
