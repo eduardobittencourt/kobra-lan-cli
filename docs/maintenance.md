@@ -79,7 +79,8 @@ Sonar project: `eduardobittencourt_kobra-lan-cli`, organization
 `eduardobittencourt`. Preserve the existing Quality Gate and review findings
 against [the security decisions](pairing-security-review.md). Do not exclude
 production code, lower the gate, or accept findings merely to pass CI. Import
-coverage from the offline unit run and derive the version from
+coverage from the offline unit run and the actual Python/Debian archive gates
+(two Cobertura XML reports), and derive the version from
 `scripts/release_version.py`. Record the automatic-analysis setting, then disable it immediately before the
 first CI scanner run: Sonar rejects CI analysis while automatic analysis is on.
 Confirm successful analysis and coverage import; restore automatic analysis if

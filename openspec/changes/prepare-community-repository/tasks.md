@@ -25,7 +25,7 @@
 
 - [ ] 4.1 Criar `.coderabbit.yaml` com revisão incremental, instruções por área e autoaprovação conforme design; validar schema e observar em PR se o serviço emite review `APPROVED` elegível, documentando alternativa humana se necessário.
 - [ ] 4.2 Criar configuração Sonar e scanner CI com versão da fonte única e relatório de cobertura; desativar a análise automática imediatamente antes do primeiro scan CI, confirmar análise real e importação de cobertura no projeto existente e restaurar a análise automática se o scan ou a importação falhar, registrando o procedimento no guia de manutenção.
-- [ ] 4.3 Conferir achados e Quality Gate atuais contra `docs/pairing-security-review.md`; registrar divergências e evidência de cobertura importada, sem reduzir o gate, excluir código para aprovar ou aceitar novos achados automaticamente.
+- [x] 4.3 Conferir achados e Quality Gate atuais contra `docs/pairing-security-review.md`; registrar divergências e evidência de cobertura importada, sem reduzir o gate, excluir código para aprovar ou aceitar novos achados automaticamente.
 - [ ] 4.4 Exercitar PR interno, fork e Dependabot; registrar checks emitidos, ausência de secrets nas origens não confiáveis e aprovação elegível. Conferir que eventos privilegiados não executam código nem artefatos não confiáveis e documentar quando Sonar não roda.
 
 ## 5. Aplicar e comprovar as regras de contribuição

@@ -38,11 +38,14 @@ jobs:
       - name: Offline tests with coverage (no printer access)
         run: |
           .venv/bin/coverage run -m unittest discover -s tests -v
-          .venv/bin/coverage xml
+          mkdir -p build/unit-coverage
+          .venv/bin/coverage xml -o build/unit-coverage/coverage.xml
+          uv export --locked --only-group dev --no-header --no-annotate --format requirements-txt \
+            --output-file build/unit-coverage/requirements-dev.txt > /dev/null
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: coverage-${{ github.run_id }}-${{ github.run_attempt }}
-          path: coverage.xml
+          name: unit-coverage-${{ github.run_id }}-${{ github.run_attempt }}
+          path: build/unit-coverage/
           if-no-files-found: error
           retention-days: 7
       - name: Shell syntax
@@ -73,6 +76,10 @@ jobs:
           test "$commit" = "$(git rev-parse "$GITHUB_SHA^{commit}")"
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "commit=$commit" >> "$GITHUB_OUTPUT"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: unit-coverage-${{ github.run_id }}-${{ github.run_attempt }}
+          path: build/unit-coverage
       - name: Shared Debian build and archive gates
         env:
           VERSION: ${{ steps.identity.outputs.version }}
@@ -86,13 +93,27 @@ jobs:
               python3 -m venv build/runtime-download
               build/runtime-download/bin/python -m pip download --require-hashes --only-binary=:all: \
                 --requirement requirements-runtime.txt --dest build/runtime-wheels
-              python3 scripts/check_python.py build/python-acceptance --wheelhouse build/runtime-wheels
-              python3 scripts/build_deb.py --output build/debian --tag "v$VERSION"
-              python3 scripts/check_deb.py "build/debian/kobra-lan-cli_${VERSION}-1_all.deb"
+              # Use the locked dev wheels only for instrumentation in this container.
+              build/runtime-download/bin/python -m pip install --require-hashes --only-binary=:all: \
+                --requirement build/unit-coverage/requirements-dev.txt --target /coverage-tools
+              PYTHONPATH=/coverage-tools python3 -m coverage run --append \
+                scripts/check_python.py build/python-acceptance --wheelhouse build/runtime-wheels
+              PYTHONPATH=/coverage-tools python3 -m coverage run --append \
+                scripts/build_deb.py --output build/debian --tag "v$VERSION"
+              PYTHONPATH=/coverage-tools python3 -m coverage run --append \
+                scripts/check_deb.py "build/debian/kobra-lan-cli_${VERSION}-1_all.deb"
+              mkdir -p build/build-coverage
+              PYTHONPATH=/coverage-tools python3 -m coverage xml -o build/build-coverage/build-coverage.xml
               lintian --allow-root "build/debian/kobra-lan-cli_${VERSION}-1_all.deb"
               cd build/debian
               sha256sum --check SHA256SUMS
             '
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: build-coverage-${{ github.run_id }}-${{ github.run_attempt }}
+          path: build/build-coverage/build-coverage.xml
+          if-no-files-found: error
+          retention-days: 7
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: candidate-${{ github.run_id }}-${{ github.run_attempt }}

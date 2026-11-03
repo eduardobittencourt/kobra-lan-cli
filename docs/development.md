@@ -17,3 +17,10 @@ The original 28 offline application tests cover multipart preservation, MQTT fra
 
 
 See [CONTRIBUTING.md](../CONTRIBUTING.md) for the full contribution workflow.
+
+CI also instruments the existing Python archive and Debian build/content gates.
+The build container installs the hash-locked dev wheels into an isolated tooling
+directory; those tools are not packaged or installed in application acceptance
+environments. Sonar imports unit `coverage.xml` and `build-coverage.xml` from the
+same run. Package scripts executed only in these gates are not covered by the
+local unit-only report. Both sets of checks must succeed before analysis.
