@@ -5,3 +5,34 @@ permissions:
 jobs:
   checks:
     uses: ./.github/workflows/package-checks.yml
+
+  sonar:
+    name: Sonar CI
+    needs: checks
+    # Forks and Dependabot do not receive repository secrets. Do not add a
+    # privileged follow-up that executes their code or consumes their artifacts.
+    if: >-
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'pull_request' &&
+       github.event.pull_request.head.repo.full_name == github.repository &&
+       github.event.pull_request.user.login != 'dependabot[bot]' &&
+       github.actor != 'dependabot[bot]')
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: coverage-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Read package version
+        id: identity
+        run: echo "version=$(python3 scripts/release_version.py)" >> "$GITHUB_OUTPUT"
+      - uses: SonarSource/sonarqube-scan-action@4d1dc0c91ee400dcf8a6dddf2f705ac36542e304 # v8.4.0
+        with:
+          args: >-
+            -Dsonar.projectVersion=${{ steps.identity.outputs.version }}
+            -Dsonar.qualitygate.wait=true
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}

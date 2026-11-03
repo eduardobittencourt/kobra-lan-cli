@@ -38,7 +38,7 @@ Dependabot verifica Python e Actions semanalmente, agrupa atualizações menores
 
 `.coderabbit.yaml` define revisão incremental, comentários objetivos e instruções por área: confiança/credenciais, protocolo, persistência, execução física, empacotamento e testes. Como escolha inicial, habilitar aprovação automática quando o serviço suportar e suas condições forem satisfeitas, mantendo a possibilidade de aprovação humana. Um check CodeRabbit concluído não substitui um review `APPROVED` elegível no GitHub. Validar schema e comportamento real antes de contar com aprovação do bot.
 
-`sonar-project.properties` identifica o projeto existente, fontes, testes e cobertura. Workflow obtém a versão da mesma fonte do pacote, importa XML e analisa PRs internos e `main` via scanner autenticado. Desativar a análise automática somente após verificar a análise por CI, evitando análises concorrentes. Preservar o Quality Gate e conferir o estado atual dos achados documentados em `docs/pairing-security-review.md`; não usar exclusões amplas, supressões ou novas aceitações para tornar o gate verde.
+`sonar-project.properties` identifica o projeto existente, fontes, testes e cobertura. Workflow obtém a versão da mesma fonte do pacote, importa XML e analisa PRs internos e `main` via scanner autenticado. A análise CI é rejeitada pelo Sonar enquanto a automática estiver ativa. Conforme decisão do usuário, preparar e validar a configuração primeiro, registrar o estado anterior e desativar a análise automática imediatamente antes do primeiro scan CI. Confirmar análise e importação de cobertura; restaurar a análise automática se qualquer uma falhar, evitando uma lacuna persistente de análise. Preservar o Quality Gate e conferir o estado atual dos achados documentados em `docs/pairing-security-review.md`; não usar exclusões amplas, supressões ou novas aceitações para tornar o gate verde.
 
 Alternativa descartada: manter apenas análise automática, pois o objetivo inclui importar cobertura gerada nos testes. Tokens ficam no armazenamento de secrets apropriado e nunca em arquivos públicos ou logs.
 
@@ -73,6 +73,6 @@ Ruleset para `v*`: impedir atualização e exclusão de tags existentes, preserv
 
 1. Registrar estado anterior relevante do GitHub/Sonar sem segredos; confirmar aplicação e permissões dos serviços.
 2. Preparar documentação e configurações versionadas; validar localmente e em PR antes de exigir novos checks.
-3. Confirmar scanner CI e cobertura; desligar análise automática duplicada. Exercitar PR interno, fork e Dependabot, inclusive ausência de secrets e elegibilidade de aprovação.
+3. Desligar análise automática imediatamente antes do primeiro scan CI, confirmar scanner e cobertura; restaurar a automática se análise/importação falhar. Exercitar PR interno, fork e Dependabot, inclusive ausência de secrets e elegibilidade de aprovação.
 4. Ativar segurança e rulesets com nomes/apps observados. Confirmar aprovação, discussões, checks e proteção de tags sem publicar release.
 5. Registrar resultados e limitações no guia de manutenção. Reversão restaura apenas configurações alteradas a partir do estado anterior e reverte commits necessários; preserva proteções preexistentes, licença, credenciais e estado operacional. Não fazer merge de PRs usados apenas para validação.

@@ -6,8 +6,11 @@ are not evidence that a hosted service or protection is active.
 
 Verified on 2026-11-03 UTC: vulnerability alerts, Dependabot security updates and
 private vulnerability reporting are enabled. Preexisting secret scanning and push
-protection remain enabled. Rulesets and new analysis/review checks are still
-pending live validation; the merge policy below is the intended policy.
+protection remain enabled. Squash is the only enabled merge method, and merged
+topic branches are deleted automatically. The `Protect release tags` ruleset is active for `v*`, restricting updates and
+deletions with no bypass and no restriction on new tag creation. Main-branch
+protection and new analysis/review checks still await live validation; the merge
+policy below is the intended policy.
 
 ## Merge policy
 
@@ -77,9 +80,10 @@ Sonar project: `eduardobittencourt_kobra-lan-cli`, organization
 against [the security decisions](pairing-security-review.md). Do not exclude
 production code, lower the gate, or accept findings merely to pass CI. Import
 coverage from the offline unit run and derive the version from
-`scripts/release_version.py`. Disable automatic analysis only after a successful
-CI scanner analysis and confirmed coverage import; record its previous setting
-first. Store scanner tokens in repository secrets, never in files or logs. Do
+`scripts/release_version.py`. Record the automatic-analysis setting, then disable it immediately before the
+first CI scanner run: Sonar rejects CI analysis while automatic analysis is on.
+Confirm successful analysis and coverage import; restore automatic analysis if
+either fails. Store scanner tokens in repository secrets, never in files or logs. Do
 not execute contributed code or artifacts in privileged events such as
 `pull_request_target` to obtain secrets for forks.
 
