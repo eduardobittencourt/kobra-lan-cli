@@ -9,7 +9,9 @@ reports. Hardware qualification claims require specific evidence.
 ## Reproducible development
 
 Use Python >=3.11 and uv (CI currently pins uv 0.13.5). No printer, daemon, cloud
-account or private configuration is needed for offline checks.
+account or private configuration is needed for offline checks. Three synthetic
+Debian-documentation tests additionally use `dpkg-deb` (provided by `dpkg` on
+Debian/Ubuntu); they are skipped when it is absent. CI runs those probes.
 
 ```sh
 git clone https://github.com/eduardobittencourt/kobra-lan-cli.git

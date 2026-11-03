@@ -9,8 +9,9 @@ private vulnerability reporting are enabled. Preexisting secret scanning and pus
 protection remain enabled. Squash is the only enabled merge method, and merged
 topic branches are deleted automatically. The `Protect release tags` ruleset is active for `v*`, restricting updates and
 deletions with no bypass and no restriction on new tag creation. Main-branch
-protection and new analysis/review checks still await live validation; the merge
-policy below is the intended policy.
+protection and cross-origin review/check availability still await validation;
+the merge policy below is the intended policy. Internal analysis evidence is
+recorded below.
 
 ## Merge policy
 
@@ -101,3 +102,23 @@ restore the previous merge/security flags and previous Sonar automatic-analysis
 value. Preserve preexisting scanning, push protection and unrelated rules. Revert
 versioned configuration with a reviewed PR. Do not delete/recreate existing tags,
 replay publication, change printer state, or restore secrets from public files.
+
+## Recorded internal validation
+
+For source revision `8dab9f95429c804587179b9fe2f785a35a864573`,
+[Tests run 41559300673](https://github.com/eduardobittencourt/kobra-lan-cli/actions/runs/41559300673)
+passed lint, 112 offline tests, Python/Debian archive gates, Debian 13 and Ubuntu
+24.04 acceptance, and Sonar CI. Both unit and actual package-gate coverage reports
+were imported; Sonar reported 100% coverage on new code, zero new issues, and a
+passed Quality Gate with the existing 80% new-code threshold.
+[CodeQL run 41559300575](https://github.com/eduardobittencourt/kobra-lan-cli/actions/runs/41559300575)
+passed Python and Actions analysis on the same revision. Automatic Sonar analysis
+is disabled after the verified CI migration. These are internal PR results;
+newer changes require their own relevant gates. This does not establish fork or
+Dependabot availability or an eligible approval; those validations remain open.
+
+Coverage artifacts use stable run IDs and overwrite on a full rerun, allowing a
+Sonar-only retry to use the reports from successful producer jobs in that same
+run and source revision. Package candidates and acceptance proofs remain scoped
+to the run attempt: release recovery still requires rerunning all jobs as
+specified in [releases](releases.md).

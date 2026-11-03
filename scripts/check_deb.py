@@ -3,8 +3,11 @@ import argparse
 from email.parser import BytesParser
 import io
 from pathlib import Path
+import posixpath
+import re
 import subprocess
 import tarfile
+from urllib.parse import unquote, urlsplit
 
 from check_python import MODULES
 from release_version import source_version
@@ -31,7 +34,7 @@ def check(deb, version):
         "CODE_OF_CONDUCT.md", "docs/README.md", "docs/pairing.md", "docs/usage.md",
         "docs/development.md", "docs/releases.md", "docs/pairing-security-review.md", "docs/maintenance.md",
     ]
-    doc_names |= {name + suffix for name in public_docs for suffix in ("", ".gz")}
+    doc_names.update(public_docs)
     allowed |= {"usr/share/doc/kobra-lan-cli/" + name for name in doc_names}
     allowed |= {"usr/share/man/man1/kobra-lan.1.gz"}
     files = set()
@@ -49,7 +52,14 @@ def check(deb, version):
         } <= files
         for name in public_docs:
             doc = "usr/share/doc/kobra-lan-cli/" + name
-            assert doc in files or doc + ".gz" in files, name
+            assert doc in files, name
+            markdown = archive.extractfile("./" + doc).read().decode("utf-8")
+            for target in re.findall(r"\]\(([^)]+)\)", markdown):
+                link = urlsplit(target)
+                if link.scheme or link.netloc or not link.path:
+                    continue
+                linked_file = posixpath.normpath(posixpath.join(posixpath.dirname(doc), unquote(link.path)))
+                assert linked_file in files, (name, target)
         launcher = archive.extractfile("./usr/bin/kobra-lan").read()
         assert launcher.splitlines()[0].removeprefix(b"#!").strip() == b"/usr/bin/python3"
         assert b"PYTHONPATH" not in launcher

@@ -4,6 +4,10 @@ export PYBUILD_NAME=kobra-lan-cli
 %:
 	dh $@ --buildsystem=pybuild
 
+# Keep Markdown link targets at their original relative paths.
+override_dh_compress:
+	dh_compress -X.md
+
 # Offline application tests run against the checkout in CI, and acceptance tests
 # exercise the installed artifact. The allowlisted staging tree contains no tests.
 override_dh_auto_test:

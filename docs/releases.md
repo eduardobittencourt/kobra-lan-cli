@@ -31,6 +31,11 @@ The build baseline is Debian 13 with setuptools >=77 for SPDX license metadata.
 Ubuntu 24.04 consumes the same Debian-built package; installation requires only
 the declared system Python runtime and `python3-cryptography (>=41)`, without setuptools or other build tools. Python distributions declare `cryptography>=41`; installers resolve it before the command runs. Debian 13 provides version 43 and Ubuntu 24.04 provides version 41. The package remains pure Python; its crypto dependency uses distro-supported native libraries.
 
+Debian packages keep Markdown guides uncompressed so relative links resolve.
+The upstream changelog is installed as `changelog.gz`; Debian's `copyright`
+records GPL-3.0-only and points to `/usr/share/common-licenses/GPL-3` for the full
+license. Source and Python distributions retain the repository LICENSE file.
+
 ## Debian build validation
 
 The binary package is built with debhelper and pybuild's pyproject plugin, without
