@@ -6,6 +6,7 @@ References consulted during implementation:
 
 - `kobrax_client.py`, `bridge_endpoints.py`, and `bridge_ams.py` from KX-Bridge, by viewit and contributors, GPLv3; commit `f0ce700fbcc9b3aed54f1a142b4e0318bc11638e`. These informed the MQTT topics/payloads, multipart fields, and HTTP interoperability headers.
 - Installed code from `stribor/anycubic_kobrax` 0.1.6. This informed the per-device credential/certificate format and state fields. No integration files were incorporated into this project.
+- LAN provisioning protocol: [`lan_credentials.py`](https://github.com/stribor/anycubic_kobrax/blob/34955343bf5fe71c0490f87682776d4b8053c43f/custom_components/anycubic_kobrax/lan_credentials.py) and [`lan_probe.py`](https://github.com/stribor/anycubic_kobrax/blob/34955343bf5fe71c0490f87682776d4b8053c43f/custom_components/anycubic_kobrax/lan_probe.py), revision `34955343bf5fe71c0490f87682776d4b8053c43f`. These informed the HTTP signature and AES-CBC credential format; no upstream application modules, device secrets, or raw captures are included.
 - MQTT 3.1.1: framing for CONNECT, SUBSCRIBE, PUBLISH QoS 0/1, and DISCONNECT.
 
 This project chooses GPL-3.0-only. It does not distribute Anycubic credentials, tokens, or certificates. It is not affiliated with Anycubic and makes no compatibility guarantees for untested firmware.

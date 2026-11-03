@@ -23,8 +23,17 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: '0.13.5'
+      - name: Prepare locked runtime dependencies
+        run: uv sync --locked --no-build --no-install-project
+      - name: Verify exported runtime lock
+        run: |
+          uv export --locked --no-dev --no-emit-project --no-header --no-annotate --format requirements-txt \
+            | diff -u requirements-runtime.txt -
       - name: Offline tests (no printer access)
-        run: python3 -m unittest discover -s tests -v
+        run: .venv/bin/python -m unittest discover -s tests -v
       - name: Shell syntax
         run: sh -n kobra-lan
 
@@ -61,8 +70,11 @@ jobs:
               apt-get update
               apt-get install -y --no-install-recommends build-essential debhelper dh-sequence-python3 \
                 pybuild-plugin-pyproject python3-all python3-setuptools python3-wheel \
-                python3-build python3-venv ca-certificates lintian
-              python3 scripts/check_python.py build/python-acceptance
+                python3-build python3-venv python3-cryptography ca-certificates lintian
+              python3 -m venv build/runtime-download
+              build/runtime-download/bin/python -m pip download --require-hashes --only-binary=:all: \
+                --requirement requirements-runtime.txt --dest build/runtime-wheels
+              python3 scripts/check_python.py build/python-acceptance --wheelhouse build/runtime-wheels
               python3 scripts/build_deb.py --output build/debian --tag "v$VERSION"
               python3 scripts/check_deb.py "build/debian/kobra-lan-cli_${VERSION}-1_all.deb"
               lintian --allow-root "build/debian/kobra-lan-cli_${VERSION}-1_all.deb"

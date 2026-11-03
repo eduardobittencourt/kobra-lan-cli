@@ -14,13 +14,18 @@ import zipfile
 
 from release_version import ROOT, source_version
 
+RUNTIME_REQUIREMENT = "cryptography>=41"
+ENTRY_POINTS_FILE = "entry_points.txt"
+RUNTIME_LOCK = ROOT / "requirements-runtime.txt"
+
 MODULES = {f"kobra_lan/{name}.py" for name in
-           ("__init__", "cli", "config", "mqtt", "printer", "start", "upload")}
+           ("__init__", "cli", "config", "mqtt", "printer", "start", "upload", "provisioning", "pairing")}
 DOCS = {"README.md", "LICENSE", "NOTICE.md", "CHANGELOG.md", "docs/releases.md"}
-EGG_FILES = {"PKG-INFO", "SOURCES.txt", "dependency_links.txt", "entry_points.txt", "top_level.txt"}
+EGG_FILES = {"PKG-INFO", "SOURCES.txt", "dependency_links.txt", ENTRY_POINTS_FILE, "top_level.txt", "requires.txt"}
 
 
 def check_sdist(path, version):
+    """Check every source-archive member and exact dependency metadata before extraction."""
     with tarfile.open(path) as archive:
         files = set()
         for member in archive.getmembers():
@@ -33,15 +38,20 @@ def check_sdist(path, version):
         allowed |= {f"kobra_lan_cli.egg-info/{name}" for name in EGG_FILES}
         assert files <= allowed, files - allowed
         assert MODULES | DOCS | {"pyproject.toml"} <= files
+        requirements = archive.extractfile(f"{parts[0]}/kobra_lan_cli.egg-info/requires.txt").read().decode()
+        assert requirements.strip() == RUNTIME_REQUIREMENT, requirements
+        metadata = BytesParser().parsebytes(archive.extractfile(f"{parts[0]}/PKG-INFO").read())
+        assert metadata.get_all("Requires-Dist") == [RUNTIME_REQUIREMENT]
         archive.extractall(path.parent / "source", filter="data")
     return path.parent / "source" / parts[0]
 
 
 def check_wheel(path, version):
+    """Check wheel contents, application identity and the exact runtime requirement."""
     prefix = f"kobra_lan_cli-{version}.dist-info/"
     with zipfile.ZipFile(path) as archive:
         files = set(archive.namelist())
-        metadata_files = {"METADATA", "WHEEL", "entry_points.txt", "top_level.txt", "RECORD",
+        metadata_files = {"METADATA", "WHEEL", ENTRY_POINTS_FILE, "top_level.txt", "RECORD",
                           "LICENSE", "NOTICE.md", "licenses/LICENSE", "licenses/NOTICE.md"}
         assert files <= MODULES | {prefix + name for name in metadata_files}, files
         assert MODULES <= files
@@ -49,13 +59,29 @@ def check_wheel(path, version):
         assert metadata["Name"] == "kobra-lan-cli" and metadata["Version"] == version
         assert metadata["Requires-Python"] == ">=3.11"
         assert metadata["License-Expression"] == "GPL-3.0-only"
-        assert not metadata.get_all("Requires-Dist")
-        assert "kobra-lan = kobra_lan.cli:main" in archive.read(prefix + "entry_points.txt").decode()
+        assert metadata.get_all("Requires-Dist") == [RUNTIME_REQUIREMENT]
+        assert "kobra-lan = kobra_lan.cli:main" in archive.read(prefix + ENTRY_POINTS_FILE).decode()
+
+
+def install_runtime(python, output, wheelhouse, env, requirements=RUNTIME_LOCK):
+    """Install the hash-verified locked wheel closure without executing sdists."""
+    if wheelhouse is None:
+        wheelhouse = output / "runtime-wheels"
+        wheelhouse.mkdir()
+        subprocess.run([str(python), "-m", "pip", "download", "--require-hashes",
+                        "--only-binary=:all:", "--requirement", str(requirements),
+                        "--dest", str(wheelhouse)], check=True, env=env)
+    subprocess.run([str(python), "-m", "pip", "install", "--no-index",
+                    "--find-links", str(wheelhouse.resolve()), "--require-hashes",
+                    "--only-binary=:all:", "--requirement", str(requirements)], check=True, env=env)
 
 
 def main():
+    """Build from source archives and verify an independent installed command."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("output", type=Path)
+    parser.add_argument("--wheelhouse", type=Path,
+                        help="Locked runtime wheel closure; hashes are checked against requirements-runtime.txt")
     args = parser.parse_args()
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=False)
@@ -69,6 +95,8 @@ def main():
     check_wheel(wheel, version)
     venv.EnvBuilder(with_pip=True).create(output / "venv")
     python = output / "venv/bin/python"
+    # Provision runtime requirements during build preparation, before offline probes.
+    install_runtime(python, output, args.wheelhouse, env)
     subprocess.run([str(python), "-m", "pip", "install", "--no-deps", "--no-index", str(wheel)], check=True, env=env)
     outside = output / "outside"
     outside.mkdir()
@@ -77,6 +105,9 @@ def main():
     assert subprocess.check_output([str(python), "-c", "import importlib.metadata as m; print(m.version('kobra-lan-cli'))"],
                                    cwd=outside, env=env, text=True).strip() == version
     subprocess.run([str(command), "--help"], cwd=outside, env=env, check=True, stdout=subprocess.DEVNULL)
+    subprocess.run([str(command), "printer", "pair", "--help"], cwd=outside, env=env, check=True, stdout=subprocess.DEVNULL)
+    subprocess.run([str(python), str(ROOT / "scripts/probe_pairing.py"), "--command", str(command)],
+                   cwd=outside, env=env, check=True)
     print(f"Python archives and independent installation verified: {version}")
 
 

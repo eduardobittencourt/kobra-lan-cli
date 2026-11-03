@@ -11,7 +11,7 @@ license = "GPL-3.0-only"
 license-files = ["LICENSE", "NOTICE.md"]
 authors = [{name = "Eduardo Bittencourt"}]
 requires-python = ">=3.11"
-dependencies = []
+dependencies = ["cryptography>=41"]
 
 [project.scripts]
 kobra-lan = "kobra_lan.cli:main"

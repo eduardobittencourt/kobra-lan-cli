@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+## 0.3.0
+
+- Add `printer pair --host` for direct provisioning of an already LAN-enabled
+  Kobra X model 20030 / firmware 2.0.2.2, with explicit terminal consent or an
+  exact `--trust-sha256` fingerprint and a read-only status check before save.
+- Publish private compatible configuration atomically without overwriting an
+  existing destination. Preserve existing access and upload/start markers.
+- Require `cryptography>=41` in Python and `python3-cryptography (>=41)` in Debian
+  packaging; carry dependencies through offline tests and installed acceptance.
+- Keep existing commands, JSON, exit codes and configuration/state schemas.
+  HTTP provisioning remains unauthenticated; other firmware, discovery,
+  replacement, revocation and initial LAN-mode setup remain unqualified.
+- This is source version preparation, not publication of a package or release.
+
 - Prepare independent Python and Debian distributions and a gated release workflow.
 - Preserve existing CLI, JSON, configuration and durable state contracts.
 

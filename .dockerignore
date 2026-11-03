@@ -1,4 +1,5 @@
 **
 !scripts/
 !scripts/accept_deb.py
+!scripts/probe_pairing.py
 !scripts/acceptance.Dockerfile
