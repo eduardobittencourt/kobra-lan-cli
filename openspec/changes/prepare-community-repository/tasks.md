@@ -10,7 +10,7 @@
 - [x] 2.1 Enxugar README e criar `docs/README.md` e guias necessários, preservando avisos e exemplos atuais; verificar links, compatibilidade qualificada, maturidade experimental e distinção entre canais disponíveis e planejados.
 - [x] 2.2 Adicionar `CONTRIBUTING.md` e `AGENTS.md` público com mapa, ambiente reproduzível, verificações e regras para segredos/estado/ações físicas; verificar comandos contra as ferramentas reais do projeto e ausência de instruções da devbox.
 - [x] 2.3 Adicionar `SECURITY.md`, código de conduta com contato confirmado, `CODEOWNERS`, formulário de bug, pedido de funcionalidade, relato de compatibilidade e template de PR; validar estrutura YAML, responsáveis e direcionamento de vulnerabilidades ao canal privado.
-- [ ] 2.4 Conferir licença, atribuições, metadados e consumidores dos caminhos alterados, inclusive `MANIFEST.in` e empacotamento Debian; verificar consistência GPL-3.0-only e executar gates de arquivos distribuídos se forem afetados.
+- [x] 2.4 Conferir licença, atribuições, metadados e consumidores dos caminhos alterados, inclusive `MANIFEST.in` e empacotamento Debian; verificar consistência GPL-3.0-only e executar gates de arquivos distribuídos se forem afetados.
 
 ## 3. Estender verificações e manutenção de dependências
 
@@ -47,7 +47,7 @@ As análises reais de CodeQL e a importação dos relatórios Sonar no commit
 [guia público de manutenção](../../../docs/maintenance.md#recorded-internal-validation).
 O scanner e o Quality Gate passaram; não houve redução do gate ou novas aceitações.
 
-A tarefa 2.4 foi reaberta para validar a correção da compressão Markdown e seus
-links no pacote real. A validação final 6.1 deve cobrir o código resultante dessas
-correções. As tarefas dependentes de forks/Dependabot/aprovação continuam abertas;
+A tarefa 2.4 foi reconfirmada no commit `fef7206` pelo run Tests 41561551442:
+compressão Markdown corrigida, links verificados no pacote real e aceitação nas
+duas distribuições. A validação final 6.1 deve cobrir o estado final do código. As tarefas dependentes de forks/Dependabot/aprovação continuam abertas;
 o usuário informou que não consegue testar forks.

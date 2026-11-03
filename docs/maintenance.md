@@ -122,3 +122,10 @@ Sonar-only retry to use the reports from successful producer jobs in that same
 run and source revision. Package candidates and acceptance proofs remain scoped
 to the run attempt: release recovery still requires rerunning all jobs as
 specified in [releases](releases.md).
+
+The Markdown compression/link correction passed the real archive gates and both
+acceptance targets at revision `fef7206f78accc3d1ab6d9b1a89614c68c521a54` in
+[Tests run 41561551442](https://github.com/eduardobittencourt/kobra-lan-cli/actions/runs/41561551442).
+Sonar again imported both reports and passed its existing gate.
+[CodeQL run 41561551449](https://github.com/eduardobittencourt/kobra-lan-cli/actions/runs/41561551449)
+passed Python and Actions analysis at that revision.

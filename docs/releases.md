@@ -33,7 +33,7 @@ the declared system Python runtime and `python3-cryptography (>=41)`, without se
 
 Debian packages keep Markdown guides uncompressed so relative links resolve.
 The upstream changelog is installed as `changelog.gz`; Debian's `copyright`
-records GPL-3.0-only and points to `/usr/share/common-licenses/GPL-3` for the full
+uses `License: GPL-3`, specifies version 3 only, and points to `/usr/share/common-licenses/GPL-3` for the full
 license. Source and Python distributions retain the repository LICENSE file.
 
 ## Debian build validation

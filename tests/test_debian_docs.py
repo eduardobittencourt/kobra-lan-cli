@@ -53,6 +53,11 @@ class DebianDocumentationTests(unittest.TestCase):
             "Depends: python3 (>= 3.11), python3-cryptography (>= 41)\n")
 
     def check_archive(self):
+        # Fixture permissions must not depend on the caller's umask, including
+        # files added by individual corruption probes after setUp.
+        launcher = self.stage / "usr/bin/kobra-lan"
+        for path in [self.stage, *self.stage.rglob("*")]:
+            path.chmod(0o755 if path.is_dir() or path == launcher else 0o644)
         archive = self.root / "package.deb"
         subprocess.run(["dpkg-deb", "--build", "--root-owner-group", str(self.stage), str(archive)],
                        check=True, stdout=subprocess.DEVNULL)
