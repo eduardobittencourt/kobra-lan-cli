@@ -1,17 +1,18 @@
 # Repository maintenance
 
 Maintainer: [Eduardo Bittencourt](https://github.com/eduardobittencourt).
-This guide describes the intended contribution policy. Configuration files alone
+This guide describes the contribution policy. Configuration files alone
 are not evidence that a hosted service or protection is active.
 
 Verified on 2026-11-03 UTC: vulnerability alerts, Dependabot security updates and
 private vulnerability reporting are enabled. Preexisting secret scanning and push
 protection remain enabled. Squash is the only enabled merge method, and merged
 topic branches are deleted automatically. The `Protect release tags` ruleset is active for `v*`, restricting updates and
-deletions with no bypass and no restriction on new tag creation. Main-branch
-protection and cross-origin review/check availability still await validation;
-the merge policy below is the intended policy. Internal analysis evidence is
-recorded below.
+deletions with no bypass and no restriction on new tag creation. The [Protect main contributions ruleset](https://github.com/eduardobittencourt/kobra-lan-cli/rules/26419282)
+is active for `main`: one approval, stale-approval dismissal, resolved discussions,
+four required checks, no force push/deletion and no bypass. Cross-origin paths
+were reviewed statically with maintainer authorization; no live fork or Dependabot
+PR test is claimed. Internal analysis evidence is recorded below.
 
 ## Merge policy
 
@@ -29,8 +30,17 @@ an eligible GitHub APPROVED review; otherwise obtain approval from another
 eligible human reviewer. Never reduce the approval count to unblock a sole
 maintainer.
 
-Observe check names and application IDs on internal, fork and Dependabot PRs
-before adding required checks. Python tests, lint and package acceptance must
+The initial required checks use names and app IDs observed on the internal PR,
+with static review of fork/Dependabot paths authorized by the maintainer.
+Confirm live check availability on the first contributions from those origins.
+The four required contexts, bound to GitHub Actions app ID `15368`, are:
+
+- `checks / unit` (including lint and offline tests)
+- `checks / build`
+- `checks / acceptance (debian:13, debian13)`
+- `checks / acceptance (ubuntu:24.04, ubuntu2404)`
+
+Python tests, lint and package acceptance must
 work without repository secrets. Sonar is a review requirement where analysis
 runs, but must remain outside global required checks until a supported safe path
 is demonstrated for every origin. Record its absence on fork/Dependabot PRs;
@@ -121,7 +131,11 @@ passed Quality Gate with the existing 80% new-code threshold.
 passed Python and Actions analysis on the same revision. Automatic Sonar analysis
 is disabled after the verified CI migration. These are internal PR results;
 newer changes require their own relevant gates. This does not establish fork or
-Dependabot availability or an eligible approval; those validations remain open.
+Dependabot availability. CodeRabbit later emitted an
+[APPROVED review for fc1c5bd](https://github.com/eduardobittencourt/kobra-lan-cli/pull/3#pullrequestreview-5746616607).
+After main protection was activated, the newer head `964c3d7` required a new
+approval (`REVIEW_REQUIRED`); final eligibility under the active rule remains
+to be verified.
 
 Coverage artifacts use stable run IDs and overwrite on a full rerun, allowing a
 Sonar-only retry to use the reports from successful producer jobs in that same
@@ -156,5 +170,19 @@ main-only analysis.
 
 See [GitHub's fork event permissions](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#pull_request)
 and the [official Sonar scanner action](https://github.com/SonarSource/sonarqube-scan-action)
-for the platform behavior. Actual cross-origin test evidence remains a separate
-pending validation; these guards do not claim that a fork test was performed.
+for the platform behavior. Cross-origin validation for this change uses static review with explicit
+maintainer authorization; these guards do not claim that a fork test was performed.
+The shared checks have no origin filters, repository secrets or inherited secrets.
+First-time fork workflows may require maintainer authorization to run. Sonar
+absence is expected; obtain an eligible human review when CodeRabbit cannot
+approve. Never bypass or lower approval requirements.
+
+## First Dependabot PR follow-up
+
+The maintainer must inspect the first Dependabot PR after this configuration
+reaches the default branch. Confirm Python updates preserve `uv.lock`, regenerate
+`requirements-runtime.txt` when needed, and keep development tools out of runtime.
+For Actions, confirm full commit pins and version comments remain consistent.
+Check all four required contexts, expected Sonar absence and an eligible approval.
+No live Dependabot PR has yet validated these outputs; this follow-up is recorded
+separately from the authorized static validation used to activate main protection.

@@ -18,7 +18,7 @@
 - [x] 3.2 Configurar lint inicial com correções mecânicas mínimas e documentar comando em `CONTRIBUTING.md`; verificar lint e suíte offline sem alterar contratos da CLI.
 - [x] 3.3 Executar `unittest` com coverage no CI existente e gerar XML; conferir importabilidade dos caminhos, ausência de acesso à impressora e preservação dos jobs de build/aceitação e do workflow reutilizado pela release.
 - [x] 3.4 Adicionar CodeQL para Python/Actions e conferir permissões mínimas e Actions fixadas por commit; validar workflows com actionlint e confirmar análise real sem conceder secrets a código de forks.
-- [ ] 3.5 Configurar Dependabot semanal para Python/Actions com grupos de atualizações menores e majors separadas; validar configuração e documentar a atualização de lock/exportações, verificando os arquivos produzidos no primeiro PR disponível.
+- [x] 3.5 Configurar Dependabot semanal para Python/Actions com grupos de atualizações menores e majors separadas; validar configuração estaticamente, documentar atualização de lock/exportações e registrar acompanhamento pelo mantenedor do primeiro PR disponível.
 - [x] 3.6 Habilitar alertas, atualizações de segurança e reporte privado no GitHub; confirmar via API a configuração efetiva e preservar secret scanning/push protection preexistentes.
 
 ## 4. Versionar e validar os serviços de revisão
@@ -26,11 +26,11 @@
 - [x] 4.1 Criar `.coderabbit.yaml` com revisão incremental, instruções por área e autoaprovação conforme design; validar schema e observar em PR se o serviço emite review `APPROVED` elegível, documentando alternativa humana se necessário.
 - [x] 4.2 Criar configuração Sonar e scanner CI com versão da fonte única e relatório de cobertura; desativar a análise automática imediatamente antes do primeiro scan CI, confirmar análise real e importação de cobertura no projeto existente e restaurar a análise automática se o scan ou a importação falhar, registrando o procedimento no guia de manutenção.
 - [x] 4.3 Conferir achados e Quality Gate atuais contra `docs/pairing-security-review.md`; registrar divergências e evidência de cobertura importada, sem reduzir o gate, excluir código para aprovar ou aceitar novos achados automaticamente.
-- [ ] 4.4 Exercitar PR interno, fork e Dependabot; registrar checks emitidos, ausência de secrets nas origens não confiáveis e aprovação elegível. Conferir que eventos privilegiados não executam código nem artefatos não confiáveis e documentar quando Sonar não roda.
+- [x] 4.4 Exercitar PR interno e revisar estaticamente forks/Dependabot conforme autorização do usuário; registrar checks internos, isolamento de secrets, condições de aprovação e limitações da prova. Conferir ausência de execução privilegiada de contribuições externas e documentar quando Sonar não roda.
 
 ## 5. Aplicar e comprovar as regras de contribuição
 
-- [ ] 5.1 Definir a lista de checks obrigatórios a partir dos nomes/apps efetivamente observados em todas as origens; verificar que nenhum check pulado em forks/Dependabot entra no ruleset global e registrar a condição para futura promoção do Sonar.
+- [x] 5.1 Definir checks obrigatórios pelos nomes/apps observados no PR interno e revisão estática das demais origens autorizada pelo usuário; excluir checks pulados em forks/Dependabot e registrar a condição para futura promoção do Sonar.
 - [ ] 5.2 Aplicar ruleset de `main` exigindo PR, uma aprovação válida, invalidação de aprovações após mudanças, discussões resolvidas e checks universais; conferir via API e estado de merge de PRs que o autor não se autoaprova e não existe bypass rotineiro.
 - [x] 5.3 Proteger tags `v*` contra atualização/exclusão preservando criação autorizada; verificar regras por API e compatibilidade com o workflow de release, sem publicar versão nem alterar tags existentes.
 - [x] 5.4 Consolidar squash e exclusão de branches após merge; verificar configurações efetivas e atualizar o guia de manutenção com critérios de merge, limitações por origem e recuperação.
@@ -49,8 +49,8 @@ O scanner e o Quality Gate passaram; não houve redução do gate ou novas aceit
 
 A tarefa 2.4 foi reconfirmada no commit `fef7206` pelo run Tests 41561551442:
 compressão Markdown corrigida, links verificados no pacote real e aceitação nas
-duas distribuições. A validação final 6.1 deve cobrir o estado final do código. As tarefas dependentes de forks/Dependabot/aprovação continuam abertas;
-o usuário informou que não consegue testar forks.
+duas distribuições. A validação final 6.1 deve cobrir o estado final do código. Naquele momento, as tarefas dependentes de forks/Dependabot/aprovação continuavam
+abertas; o usuário informou que não consegue testar forks.
 
 A verificação técnica final 6.1 passou para o estado de implementação
 `d31a57f946074a7f41d66cfd136f75e2e26c4a6c`: [Tests 41564654552](https://github.com/eduardobittencourt/kobra-lan-cli/actions/runs/41564654552)
@@ -58,10 +58,23 @@ e [CodeQL 41564654626](https://github.com/eduardobittencourt/kobra-lan-cli/actio
 Inclui 115 testes, lint, build/arquivos, aceitação Debian/Ubuntu e Sonar com os dois
 relatórios e o gate original. A correção gramatical e este registro alteram apenas
 planejamento excluído dos pacotes; os arquivos de implementação permanecem iguais.
-Aprovação elegível e validação entre origens continuam pendentes nas outras tarefas.
+Naquele momento, aprovação elegível e validação entre origens permaneciam pendentes.
 
 A revisão CodeRabbit terminou sem novos apontamentos e emitiu
 [APPROVED 5746616607](https://github.com/eduardobittencourt/kobra-lan-cli/pull/3#pullrequestreview-5746616607)
 para `fc1c5bddeabed31c2ad5394677a1dbecd03f5fcb`. As discussões estão resolvidas.
 A tarefa 4.1 registra a aprovação real pelo serviço; o efeito no ruleset de `main`
 ainda será conferido na tarefa 5.2, sem autoaprovação do autor ou bypass.
+
+
+O usuário autorizou a validação estática de forks/Dependabot, o acompanhamento do
+primeiro PR Dependabot e a aplicação do ruleset proposto. Tarefas 3.5, 4.4 e 5.1
+concluídas sob esse critério, sem declarar testes reais dessas origens.
+
+O ruleset `Protect main contributions` (26419282) foi aplicado e reconfirmado pela
+API, com uma aprovação, invalidação após mudanças, discussões resolvidas, quatro
+checks GitHub Actions (app 15368), bloqueio de exclusão/force push e nenhum bypass.
+O PR #3 passou de `APPROVED` para `REVIEW_REQUIRED`/`BLOCKED` sob a proteção ativa:
+a aprovação cobre `fc1c5bd`, anterior ao head `964c3d7`. As tarefas 5.2 e 6.2 aguardam
+comprovação final de aprovação elegível sob a regra ativa; nenhuma autoaprovação
+ou redução da exigência foi feita.

@@ -75,6 +75,24 @@ Ruleset para `v*`: impedir atualização e exclusão de tags existentes, preserv
 
 1. Registrar estado anterior relevante do GitHub/Sonar sem segredos; confirmar aplicação e permissões dos serviços.
 2. Preparar documentação e configurações versionadas; validar localmente e em PR antes de exigir novos checks.
-3. Desligar análise automática imediatamente antes do primeiro scan CI, confirmar scanner e cobertura; restaurar a automática se análise/importação falhar. Exercitar PR interno, fork e Dependabot, inclusive ausência de secrets e elegibilidade de aprovação.
+3. Desligar análise automática imediatamente antes do primeiro scan CI, confirmar scanner e cobertura; restaurar a automática se análise/importação falhar. Exercitar PR interno e revisar estaticamente forks/Dependabot, inclusive ausência de secrets e condições de aprovação; acompanhar o primeiro PR Dependabot disponível.
 4. Ativar segurança e rulesets com nomes/apps observados. Confirmar aprovação, discussões, checks e proteção de tags sem publicar release.
 5. Registrar resultados e limitações no guia de manutenção. Reversão restaura apenas configurações alteradas a partir do estado anterior e reverte commits necessários; preserva proteções preexistentes, licença, credenciais e estado operacional. Não fazer merge de PRs usados apenas para validação.
+
+
+### 6. Critério de validação entre origens autorizado
+
+O usuário autorizou substituir testes reais indisponíveis de forks/Dependabot
+por revisão estática e aplicar o ruleset preparado. A evidência real do PR
+interno fornece nomes/apps dos quatro checks de testes/build/aceitação. A revisão
+estática confirma que o workflow reutilizado não tem filtros por origem, secrets
+ou permissões de escrita; não recebe `secrets: inherit`. Sonar permanece excluído
+para forks/Dependabot e nenhum evento privilegiado consome contribuições externas.
+Isso não comprova execução real dessas origens: aprovação inicial de workflows de
+forks e disponibilidade de revisores continuam sujeitas ao GitHub/serviço.
+
+O mantenedor deve conferir o primeiro PR Dependabot após a configuração chegar à
+branch padrão: `uv.lock`, exportação runtime, pins/comentários de Actions, quatro
+checks e aprovação elegível. A validação real futura não é pré-requisito desta
+change sob o critério autorizado; Sonar/CodeRabbit continuam fora dos checks
+globais e a contagem de aprovações não é reduzida.

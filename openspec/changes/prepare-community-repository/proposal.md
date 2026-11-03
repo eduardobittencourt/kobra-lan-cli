@@ -12,7 +12,7 @@ O Kobra LAN CLI precisa de uma entrada clara para colaboradores e de políticas 
 - Configurar Dependabot para Python e GitHub Actions, lint, cobertura dos testes offline e CodeQL, mantendo os checks de empacotamento existentes.
 - Versionar CodeRabbit e SonarQube Cloud, com revisão orientada aos riscos do cliente LAN e análise Sonar via CI com cobertura e versão do pacote.
 - Consolidar segurança e manutenção no GitHub: reporte privado, alertas e atualizações de segurança, permissões mínimas e proteção de branches/tags.
-- Exigir PR, uma aprovação válida, resolução das discussões e checks verificados para merge em `main`. Validar contribuições de forks e Dependabot antes de tornar checks obrigatórios.
+- Exigir PR, uma aprovação válida, resolução das discussões e checks verificados para merge em `main`. Validar PR interno e revisar estaticamente os caminhos de forks e Dependabot antes de tornar checks obrigatórios; acompanhar o primeiro PR Dependabot disponível.
 
 ## Capabilities
 
