@@ -5,3 +5,41 @@ permissions:
 jobs:
   checks:
     uses: ./.github/workflows/package-checks.yml
+
+  sonar:
+    name: Sonar CI
+    needs: checks
+    # Policy: internal writer branches are trusted for pre-merge Sonar analysis.
+    # Only OWNER/MEMBER/COLLABORATOR authors qualify; forks and Dependabot do not.
+    # Reports come from this same workflow run. Never import external PR reports
+    # through pull_request_target, workflow_run, or another privileged follow-up.
+    if: >-
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'pull_request' &&
+       github.event.pull_request.head.repo.full_name == github.repository &&
+       contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'),
+                github.event.pull_request.author_association) &&
+       github.event.pull_request.user.login != 'dependabot[bot]' &&
+       github.actor != 'dependabot[bot]')
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: unit-coverage-${{ github.run_id }}
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: build-coverage-${{ github.run_id }}
+      - name: Read package version
+        id: identity
+        run: echo "version=$(python3 scripts/release_version.py)" >> "$GITHUB_OUTPUT"
+      - uses: SonarSource/sonarqube-scan-action@4d1dc0c91ee400dcf8a6dddf2f705ac36542e304 # v8.4.0
+        with:
+          args: >-
+            -Dsonar.projectVersion=${{ steps.identity.outputs.version }}
+            -Dsonar.qualitygate.wait=true
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}

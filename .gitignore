@@ -9,3 +9,8 @@ build/
 dist/
 *.egg-info/
 
+.coverage
+coverage.xml
+build-coverage.xml
+.ruff_cache/
+.scannerwork/

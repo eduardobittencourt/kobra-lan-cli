@@ -373,7 +373,7 @@ class CLITests(StorageTests):
             self.assertEqual(code,3); self.assertIn('separate absent --config',result['error'])
         provision.assert_not_called()
 
-from test_provisioning import encrypt, INFO, TOKEN
+from test_provisioning import encrypt, INFO
 
 
 class DiagnosticTests(CLITests):

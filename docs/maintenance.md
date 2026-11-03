@@ -1,0 +1,193 @@
+# Repository maintenance
+
+Maintainer: [Eduardo Bittencourt](https://github.com/eduardobittencourt).
+This guide describes the contribution policy. Configuration files alone
+are not evidence that a hosted service or protection is active.
+
+Verified on 2026-11-03 UTC: vulnerability alerts, Dependabot security updates and
+private vulnerability reporting are enabled. Preexisting secret scanning and push
+protection remain enabled. Squash is the only enabled merge method, and merged
+topic branches are deleted automatically. The `Protect release tags` ruleset is active for `v*`, restricting updates and
+deletions with no bypass and no restriction on new tag creation. The [Protect main contributions ruleset](https://github.com/eduardobittencourt/kobra-lan-cli/rules/26419282)
+is active for `main`: one approval, stale-approval dismissal, resolved discussions,
+four required checks, no force push/deletion and no bypass. Cross-origin paths
+were reviewed statically with maintainer authorization; no live fork or Dependabot
+PR test is claimed. Internal analysis evidence is recorded below.
+
+## Merge policy
+
+Changes to `main` go through a pull request with one eligible approval, resolved
+conversations and successful universal checks. New commits dismiss earlier
+approvals. The author cannot approve their own PR. Code owners guide review;
+a separate code-owner approval is not required. There is no routine maintainer
+or bot bypass. Use squash merges and delete merged topic branches.
+
+CodeRabbit requests an incremental review on each push; automatic pausing after
+several reviewed commits is disabled.
+
+A CodeRabbit completed check or COMMENTED review is not an approval. Count only
+an eligible GitHub APPROVED review; otherwise obtain approval from another
+eligible human reviewer. Never reduce the approval count to unblock a sole
+maintainer.
+
+The initial required checks use names and app IDs observed on the internal PR,
+with static review of fork/Dependabot paths authorized by the maintainer.
+Confirm live check availability on the first contributions from those origins.
+The four required contexts, bound to GitHub Actions app ID `15368`, are:
+
+- `checks / unit` (including lint and offline tests)
+- `checks / build`
+- `checks / acceptance (debian:13, debian13)`
+- `checks / acceptance (ubuntu:24.04, ubuntu2404)`
+
+Python tests, lint and package acceptance must
+work without repository secrets. Sonar is a review requirement where analysis
+runs, but must remain outside global required checks until a supported safe path
+is demonstrated for every origin. Record its absence on fork/Dependabot PRs;
+main analysis provides follow-up and does not retroactively protect their merge.
+Sonar CI runs before merge only for trusted internal PRs: the head repository
+must equal this repository, the author association must be `OWNER`, `MEMBER` or
+`COLLABORATOR`, and neither the author nor the triggering actor may be Dependabot.
+Forks, Dependabot and other author associations are excluded from this job.
+Apply the same availability rule to CodeRabbit checks.
+
+Protect `v*` tags against update and deletion while allowing authorized creation.
+Do not publish a release to test protection. Follow [release gates](releases.md).
+
+## Inspect effective settings
+
+Run with an authenticated GitHub CLI as a repository administrator:
+
+```sh
+gh api repos/eduardobittencourt/kobra-lan-cli
+gh api repos/eduardobittencourt/kobra-lan-cli/rulesets
+gh api repos/eduardobittencourt/kobra-lan-cli/branches/main/protection
+gh api repos/eduardobittencourt/kobra-lan-cli/vulnerability-alerts
+gh api repos/eduardobittencourt/kobra-lan-cli/automated-security-fixes
+gh api repos/eduardobittencourt/kobra-lan-cli/private-vulnerability-reporting
+gh pr checks PR_NUMBER
+gh api repos/eduardobittencourt/kobra-lan-cli/pulls/PR_NUMBER/reviews
+```
+
+The vulnerability-alerts endpoint returns 204 when enabled and 404 when disabled
+(or inaccessible). Rulesets and classic branch protection are separate; a 404
+on the latter does not prove rulesets are absent. Preserve existing secret
+scanning and push protection when changing other security settings.
+
+## Analysis and dependency maintenance
+
+Keep GitHub Actions pinned to full commit IDs with version comments. Review
+Dependabot Python (`uv` ecosystem, including `uv.lock`) and Actions updates weekly; group compatible minor/patch
+updates and review majors separately. Verify `uv.lock` and regenerate the runtime
+export when needed, even if Dependabot does not update the derived file:
+
+```sh
+uv lock
+uv export --locked --no-dev --no-emit-project --no-header --no-annotate \
+  --format requirements-txt > requirements-runtime.txt
+uv sync --locked
+```
+
+Run the checks in CONTRIBUTING.md and the archive/installation gates in
+[releases.md](releases.md) when packaging inputs change. Development tools must
+not appear in exported runtime requirements.
+
+Sonar project: `eduardobittencourt_kobra-lan-cli`, organization
+`eduardobittencourt`. Preserve the existing Quality Gate and review findings
+against [the security decisions](pairing-security-review.md). Do not exclude
+production code, lower the gate, or accept findings merely to pass CI. Import
+coverage from the offline unit run and the actual Python/Debian archive gates
+(two Cobertura XML reports), and derive the version from
+`scripts/release_version.py`. Record the automatic-analysis setting, then disable it immediately before the
+first CI scanner run: Sonar rejects CI analysis while automatic analysis is on.
+Confirm successful analysis and coverage import; restore automatic analysis if
+either fails. Store scanner tokens in repository secrets, never in files or logs. Do
+not execute contributed code or artifacts in privileged events such as
+`pull_request_target` to obtain secrets for forks.
+
+## Change records and recovery
+
+Before changing hosted settings, keep a private, sanitized record of the exact
+fields/rules being changed and their previous values. Record verification time,
+source commit, check names/apps, approval eligibility, analysis mode, imported
+coverage and concrete service limitations. Do not publish credentials or private
+installation context in this repository.
+
+Restore only settings modified by the change: update/delete only its ruleset IDs,
+restore the previous merge/security flags and previous Sonar automatic-analysis
+value. Preserve preexisting scanning, push protection and unrelated rules. Revert
+versioned configuration with a reviewed PR. Do not delete/recreate existing tags,
+replay publication, change printer state, or restore secrets from public files.
+
+## Recorded internal validation
+
+For source revision `8dab9f95429c804587179b9fe2f785a35a864573`,
+[Tests run 41559300673](https://github.com/eduardobittencourt/kobra-lan-cli/actions/runs/41559300673)
+passed lint, 112 offline tests, Python/Debian archive gates, Debian 13 and Ubuntu
+24.04 acceptance, and Sonar CI. Both unit and actual package-gate coverage reports
+were imported; Sonar reported 100% coverage on new code, zero new issues, and a
+passed Quality Gate with the existing 80% new-code threshold.
+[CodeQL run 41559300575](https://github.com/eduardobittencourt/kobra-lan-cli/actions/runs/41559300575)
+passed Python and Actions analysis on the same revision. Automatic Sonar analysis
+is disabled after the verified CI migration. These are internal PR results;
+newer changes require their own relevant gates. This does not establish fork or
+Dependabot availability. CodeRabbit later emitted an
+[APPROVED review for fc1c5bd](https://github.com/eduardobittencourt/kobra-lan-cli/pull/3#pullrequestreview-5746616607).
+After main protection was activated, the newer head `964c3d7` required a new
+approval (`REVIEW_REQUIRED`). CodeRabbit subsequently emitted
+[APPROVED review 5746797916](https://github.com/eduardobittencourt/kobra-lan-cli/pull/3#pullrequestreview-5746797916)
+for `a2bdc70f0b0ade4a9b1fac19d0f8960c2d4d3d32`. GitHub reported `APPROVED`
+and `CLEAN` under the active main ruleset, with no unresolved discussions and
+all four required checks, CodeQL and Sonar passing. This confirms that the bot
+approval satisfied the enforced rule without author approval or bypass. Later
+commits still require their own checks and approval.
+
+Coverage artifacts use stable run IDs and overwrite on a full rerun, allowing a
+Sonar-only retry to use the reports from successful producer jobs in that same
+run and source revision. Package candidates and acceptance proofs remain scoped
+to the run attempt: release recovery still requires rerunning all jobs as
+specified in [releases](releases.md).
+
+The Markdown compression/link correction passed the real archive gates and both
+acceptance targets at revision `fef7206f78accc3d1ab6d9b1a89614c68c521a54` in
+[Tests run 41561551442](https://github.com/eduardobittencourt/kobra-lan-cli/actions/runs/41561551442).
+Sonar again imported both reports and passed its existing gate.
+[CodeQL run 41561551449](https://github.com/eduardobittencourt/kobra-lan-cli/actions/runs/41561551449)
+passed Python and Actions analysis at that revision.
+
+## Sonar trust boundary
+
+The maintainer explicitly chose pre-merge Sonar analysis for trusted internal
+writers. Such a PR's code and same-run reports belong to the trusted workflow
+boundary; the rule against untrusted PR artifacts applies to external origins,
+not every artifact produced during a PR event. This policy assumes internal
+writers are trusted to edit workflows that can access repository secrets. It
+is not a sandbox against a malicious writer or a compromised writer account.
+
+Only the scanner step receives `SONAR_TOKEN`; the workflow grants `contents: read`
+and no GitHub write permission. Coverage downloads omit repository/run selectors,
+so they consume the current workflow run's unit/build reports. No external PR
+code or report is promoted into a privileged `pull_request_target` or
+`workflow_run` consumer. A trusted author using a fork still fails the head-repo
+condition. Document and review any change to this boundary before enabling a new
+origin; do not silently replace the intended internal pre-merge check with
+main-only analysis.
+
+See [GitHub's fork event permissions](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#pull_request)
+and the [official Sonar scanner action](https://github.com/SonarSource/sonarqube-scan-action)
+for the platform behavior. Cross-origin validation for this change uses static review with explicit
+maintainer authorization; these guards do not claim that a fork test was performed.
+The shared checks have no origin filters, repository secrets or inherited secrets.
+First-time fork workflows may require maintainer authorization to run. Sonar
+absence is expected; obtain an eligible human review when CodeRabbit cannot
+approve. Never bypass or lower approval requirements.
+
+## First Dependabot PR follow-up
+
+The maintainer must inspect the first Dependabot PR after this configuration
+reaches the default branch. Confirm Python updates preserve `uv.lock`, regenerate
+`requirements-runtime.txt` when needed, and keep development tools out of runtime.
+For Actions, confirm full commit pins and version comments remain consistent.
+Check all four required contexts, expected Sonar absence and an eligible approval.
+No live Dependabot PR has yet validated these outputs; this follow-up is recorded
+separately from the authorized static validation used to activate main protection.

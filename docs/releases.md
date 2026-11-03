@@ -31,6 +31,11 @@ The build baseline is Debian 13 with setuptools >=77 for SPDX license metadata.
 Ubuntu 24.04 consumes the same Debian-built package; installation requires only
 the declared system Python runtime and `python3-cryptography (>=41)`, without setuptools or other build tools. Python distributions declare `cryptography>=41`; installers resolve it before the command runs. Debian 13 provides version 43 and Ubuntu 24.04 provides version 41. The package remains pure Python; its crypto dependency uses distro-supported native libraries.
 
+Debian packages keep Markdown guides uncompressed so relative links resolve.
+The upstream changelog is installed as `changelog.gz`; Debian's `copyright`
+uses `License: GPL-3`, specifies version 3 only, and points to `/usr/share/common-licenses/GPL-3` for the full
+license. Source and Python distributions retain the repository LICENSE file.
+
 ## Debian build validation
 
 The binary package is built with debhelper and pybuild's pyproject plugin, without
@@ -69,7 +74,7 @@ Debian-built artifact. Acceptance provisions Python, python3-cryptography with i
 then runs `scripts/accept_deb.py PACKAGE VERSION` as root in a disposable system
 with networking disabled and `/run/kobra-package-acceptance` containing
 `disposable`. It intentionally installs/upgrades/removes/purges the package and
-creates a synthetic non-root user's fixtures. Never run it on the live devbox.
+creates a synthetic non-root user's fixtures. Never run it on the host system.
 The CI workflow provides the complete disposable-container invocation.
 Installed checks include pairing help, refusal of existing config before network
 access, and synthetic onboarding followed by ordinary status. No real printer is
@@ -153,10 +158,8 @@ reset private configuration or state to switch executables.
 Rollback requires reviewing the previous version's state-format compatibility.
 Restore the saved checkout launcher, or install a previously verified package
 with `sudo apt install --allow-downgrades ./kobra-lan-cli_OLD-1_all.deb` after that
-review. Never delete durable markers to make an older version run. A future
-authorized devbox migration must also update
-`/root/.codex/docs/devbox-tooling/kobra-lan.md` and check command consumers.
-This setup change leaves that live installation untouched.
+review. Never delete durable markers to make an older version run. An authorized migration must also update the installation documentation and check
+command consumers. Package validation does not authorize a live migration.
 
 ## Tag-driven release and recovery
 

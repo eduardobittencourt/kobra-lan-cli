@@ -99,4 +99,4 @@ reads conservatively retain possibly referenced PEMs. No publication is replayed
 cleanup with no committed flag, and an unreadable ownership check. The saved
 config remains loadable with complete private PEMs after a committed operation;
 unpublished material is removed when absence can be established. Abrupt process
-termination can still leave private staging, as documented in the README.
+termination can still leave private staging, as documented in the pairing guide.

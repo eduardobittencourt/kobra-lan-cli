@@ -23,6 +23,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
+          persist-credentials: false
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           version: '0.13.5'
@@ -32,8 +33,22 @@ jobs:
         run: |
           uv export --locked --no-dev --no-emit-project --no-header --no-annotate --format requirements-txt \
             | diff -u requirements-runtime.txt -
-      - name: Offline tests (no printer access)
-        run: .venv/bin/python -m unittest discover -s tests -v
+      - name: Lint
+        run: .venv/bin/ruff check kobra_lan scripts tests
+      - name: Offline tests with coverage (no printer access)
+        run: |
+          .venv/bin/coverage run -m unittest discover -s tests -v
+          mkdir -p build/unit-coverage
+          .venv/bin/coverage xml -o build/unit-coverage/coverage.xml
+          uv export --locked --only-group dev --no-header --no-annotate --format requirements-txt \
+            --output-file build/unit-coverage/requirements-dev.txt > /dev/null
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: unit-coverage-${{ github.run_id }}
+          overwrite: true
+          path: build/unit-coverage/
+          if-no-files-found: error
+          retention-days: 7
       - name: Shell syntax
         run: sh -n kobra-lan
 
@@ -47,6 +62,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
+          persist-credentials: false
       - name: Validate source and optional release tag
         id: identity
         env:
@@ -61,6 +77,10 @@ jobs:
           test "$commit" = "$(git rev-parse "$GITHUB_SHA^{commit}")"
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "commit=$commit" >> "$GITHUB_OUTPUT"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: unit-coverage-${{ github.run_id }}
+          path: build/unit-coverage
       - name: Shared Debian build and archive gates
         env:
           VERSION: ${{ steps.identity.outputs.version }}
@@ -74,13 +94,28 @@ jobs:
               python3 -m venv build/runtime-download
               build/runtime-download/bin/python -m pip download --require-hashes --only-binary=:all: \
                 --requirement requirements-runtime.txt --dest build/runtime-wheels
-              python3 scripts/check_python.py build/python-acceptance --wheelhouse build/runtime-wheels
-              python3 scripts/build_deb.py --output build/debian --tag "v$VERSION"
-              python3 scripts/check_deb.py "build/debian/kobra-lan-cli_${VERSION}-1_all.deb"
+              # Use the locked dev wheels only for instrumentation in this container.
+              build/runtime-download/bin/python -m pip install --require-hashes --only-binary=:all: \
+                --requirement build/unit-coverage/requirements-dev.txt --target /coverage-tools
+              PYTHONPATH=/coverage-tools python3 -m coverage run --append \
+                scripts/check_python.py build/python-acceptance --wheelhouse build/runtime-wheels
+              PYTHONPATH=/coverage-tools python3 -m coverage run --append \
+                scripts/build_deb.py --output build/debian --tag "v$VERSION"
+              PYTHONPATH=/coverage-tools python3 -m coverage run --append \
+                scripts/check_deb.py "build/debian/kobra-lan-cli_${VERSION}-1_all.deb"
+              mkdir -p build/build-coverage
+              PYTHONPATH=/coverage-tools python3 -m coverage xml -o build/build-coverage/build-coverage.xml
               lintian --allow-root "build/debian/kobra-lan-cli_${VERSION}-1_all.deb"
               cd build/debian
               sha256sum --check SHA256SUMS
             '
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: build-coverage-${{ github.run_id }}
+          overwrite: true
+          path: build/build-coverage/build-coverage.xml
+          if-no-files-found: error
+          retention-days: 7
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: candidate-${{ github.run_id }}-${{ github.run_attempt }}
@@ -105,6 +140,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
+          persist-credentials: false
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: candidate-${{ github.run_id }}-${{ github.run_attempt }}

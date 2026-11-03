@@ -1,0 +1,33 @@
+name: Bug report
+description: Report a reproducible, nonsecurity defect.
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: "Report vulnerabilities privately via SECURITY.md. Never attach credentials, PEMs, private state or token-bearing URLs."
+  - type: input
+    id: version
+    attributes:
+      label: CLI version, installation method, OS and Python version
+    validations:
+      required: true
+  - type: input
+    id: hardware
+    attributes:
+      label: Printer model and firmware (or offline reproduction)
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps, expected result and actual result
+      description: Use synthetic inputs. Describe any authorized physical operation explicitly.
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Sanitized command, JSON output and exit code
+      description: Remove identities, secrets, token URLs and private paths before posting.
+    validations:
+      required: true

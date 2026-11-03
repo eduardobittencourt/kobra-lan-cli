@@ -1,5 +1,5 @@
-include README.md LICENSE NOTICE.md
-include CHANGELOG.md docs/releases.md
+include README.md LICENSE NOTICE.md CHANGELOG.md ROADMAP.md CONTRIBUTING.md AGENTS.md SECURITY.md CODE_OF_CONDUCT.md
+include docs/README.md docs/pairing.md docs/usage.md docs/development.md docs/releases.md docs/pairing-security-review.md docs/maintenance.md
 exclude .gitignore
 prune tests
 prune scripts

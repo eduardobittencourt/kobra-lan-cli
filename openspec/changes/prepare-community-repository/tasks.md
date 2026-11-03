@@ -1,0 +1,94 @@
+# Tasks
+
+## 1. Preparar a configuração e sua recuperação
+
+- [x] 1.1 Reconfirmar configurações GitHub, aplicações CodeRabbit/Sonar e modo de análise Sonar; registrar estado anterior relevante sem segredos em `~/research/kobra-lan-cli/prepare-community-repository`, com evidência suficiente para restaurar apenas o que esta change alterar.
+- [x] 1.2 Criar guia público de manutenção com política pretendida, responsáveis, comandos de inspeção e recuperação; verificar que não contém contexto privado da devbox ou credenciais.
+
+## 2. Organizar a documentação e a comunidade
+
+- [x] 2.1 Enxugar README e criar `docs/README.md` e guias necessários, preservando avisos e exemplos atuais; verificar links, compatibilidade qualificada, maturidade experimental e distinção entre canais disponíveis e planejados.
+- [x] 2.2 Adicionar `CONTRIBUTING.md` e `AGENTS.md` público com mapa, ambiente reproduzível, verificações e regras para segredos/estado/ações físicas; verificar comandos contra as ferramentas reais do projeto e ausência de instruções da devbox.
+- [x] 2.3 Adicionar `SECURITY.md`, código de conduta com contato confirmado, `CODEOWNERS`, formulário de bug, pedido de funcionalidade, relato de compatibilidade e template de PR; validar estrutura YAML, responsáveis e direcionamento de vulnerabilidades ao canal privado.
+- [x] 2.4 Conferir licença, atribuições, metadados e consumidores dos caminhos alterados, inclusive `MANIFEST.in` e empacotamento Debian; verificar consistência GPL-3.0-only e executar gates de arquivos distribuídos se forem afetados.
+
+## 3. Estender verificações e manutenção de dependências
+
+- [x] 3.1 Declarar Ruff e coverage como dependências de desenvolvimento, atualizar `uv.lock` e conferir exportação de runtime; verificar `uv sync --locked` e que ferramentas de desenvolvimento não entram nas dependências runtime distribuídas.
+- [x] 3.2 Configurar lint inicial com correções mecânicas mínimas e documentar comando em `CONTRIBUTING.md`; verificar lint e suíte offline sem alterar contratos da CLI.
+- [x] 3.3 Executar `unittest` com coverage no CI existente e gerar XML; conferir importabilidade dos caminhos, ausência de acesso à impressora e preservação dos jobs de build/aceitação e do workflow reutilizado pela release.
+- [x] 3.4 Adicionar CodeQL para Python/Actions e conferir permissões mínimas e Actions fixadas por commit; validar workflows com actionlint e confirmar análise real sem conceder secrets a código de forks.
+- [x] 3.5 Configurar Dependabot semanal para Python/Actions com grupos de atualizações menores e majors separadas; validar configuração estaticamente, documentar atualização de lock/exportações e registrar acompanhamento pelo mantenedor do primeiro PR disponível.
+- [x] 3.6 Habilitar alertas, atualizações de segurança e reporte privado no GitHub; confirmar via API a configuração efetiva e preservar secret scanning/push protection preexistentes.
+
+## 4. Versionar e validar os serviços de revisão
+
+- [x] 4.1 Criar `.coderabbit.yaml` com revisão incremental, instruções por área e autoaprovação conforme design; validar schema e observar em PR se o serviço emite review `APPROVED` elegível, documentando alternativa humana se necessário.
+- [x] 4.2 Criar configuração Sonar e scanner CI com versão da fonte única e relatório de cobertura; desativar a análise automática imediatamente antes do primeiro scan CI, confirmar análise real e importação de cobertura no projeto existente e restaurar a análise automática se o scan ou a importação falhar, registrando o procedimento no guia de manutenção.
+- [x] 4.3 Conferir achados e Quality Gate atuais contra `docs/pairing-security-review.md`; registrar divergências e evidência de cobertura importada, sem reduzir o gate, excluir código para aprovar ou aceitar novos achados automaticamente.
+- [x] 4.4 Exercitar PR interno e revisar estaticamente forks/Dependabot conforme autorização do usuário; registrar checks internos, isolamento de secrets, condições de aprovação e limitações da prova. Conferir ausência de execução privilegiada de contribuições externas e documentar quando Sonar não roda.
+
+## 5. Aplicar e comprovar as regras de contribuição
+
+- [x] 5.1 Definir checks obrigatórios pelos nomes/apps observados no PR interno e revisão estática das demais origens autorizada pelo usuário; excluir checks pulados em forks/Dependabot e registrar a condição para futura promoção do Sonar.
+- [x] 5.2 Aplicar ruleset de `main` exigindo PR, uma aprovação válida, invalidação de aprovações após mudanças, discussões resolvidas e checks universais; conferir via API e estado de merge de PRs que o autor não se autoaprova e não existe bypass rotineiro.
+- [x] 5.3 Proteger tags `v*` contra atualização/exclusão preservando criação autorizada; verificar regras por API e compatibilidade com o workflow de release, sem publicar versão nem alterar tags existentes.
+- [x] 5.4 Consolidar squash e exclusão de branches após merge; verificar configurações efetivas e atualizar o guia de manutenção com critérios de merge, limitações por origem e recuperação.
+
+## 6. Verificar a integração final
+
+- [x] 6.1 Confirmar em um mesmo estado de código o resultado de lint, testes com cobertura, CodeQL, Sonar aplicável, build e aceitação Debian/Ubuntu; registrar SHAs e resultados sem operar impressora ou publicar release.
+- [x] 6.2 Revisar a experiência completa de contribuição contra os arquivos públicos e regras efetivas; verificar que uma aprovação é obrigatória e que forks/Dependabot têm caminho viável de merge, registrando limitações concretas de serviços antes de considerar a change concluída.
+
+## Evidências e pendências de validação
+
+As análises reais de CodeQL e a importação dos relatórios Sonar no commit
+`8dab9f95429c804587179b9fe2f785a35a864573` estão vinculadas no
+[guia público de manutenção](../../../docs/maintenance.md#recorded-internal-validation).
+O scanner e o Quality Gate passaram; não houve redução do gate ou novas aceitações.
+
+A tarefa 2.4 foi reconfirmada no commit `fef7206` pelo run Tests 41561551442:
+compressão Markdown corrigida, links verificados no pacote real e aceitação nas
+duas distribuições. A validação final 6.1 deve cobrir o estado final do código. Naquele momento, as tarefas dependentes de forks/Dependabot/aprovação continuavam
+abertas; o usuário informou que não consegue testar forks.
+
+A verificação técnica final 6.1 passou para o estado de implementação
+`d31a57f946074a7f41d66cfd136f75e2e26c4a6c`: [Tests 41564654552](https://github.com/eduardobittencourt/kobra-lan-cli/actions/runs/41564654552)
+e [CodeQL 41564654626](https://github.com/eduardobittencourt/kobra-lan-cli/actions/runs/41564654626).
+Inclui 115 testes, lint, build/arquivos, aceitação Debian/Ubuntu e Sonar com os dois
+relatórios e o gate original. A correção gramatical e este registro alteram apenas
+planejamento excluído dos pacotes; os arquivos de implementação permanecem iguais.
+Naquele momento, aprovação elegível e validação entre origens permaneciam pendentes.
+
+A revisão CodeRabbit terminou sem novos apontamentos e emitiu
+[APPROVED 5746616607](https://github.com/eduardobittencourt/kobra-lan-cli/pull/3#pullrequestreview-5746616607)
+para `fc1c5bddeabed31c2ad5394677a1dbecd03f5fcb`. As discussões estão resolvidas.
+A tarefa 4.1 registra a aprovação real pelo serviço; o efeito no ruleset de `main`
+ainda será conferido na tarefa 5.2, sem autoaprovação do autor ou bypass.
+
+
+O usuário autorizou a validação estática de forks/Dependabot, o acompanhamento do
+primeiro PR Dependabot e a aplicação do ruleset proposto. Tarefas 3.5, 4.4 e 5.1
+concluídas sob esse critério, sem declarar testes reais dessas origens.
+
+O ruleset `Protect main contributions` (26419282) foi aplicado e reconfirmado pela
+API, com uma aprovação, invalidação após mudanças, discussões resolvidas, quatro
+checks GitHub Actions (app 15368), bloqueio de exclusão/force push e nenhum bypass.
+O PR #3 passou de `APPROVED` para `REVIEW_REQUIRED`/`BLOCKED` sob a proteção ativa:
+a aprovação cobre `fc1c5bd`, anterior ao head `964c3d7`. Naquele momento, as tarefas 5.2 e 6.2 aguardavam
+comprovação final de aprovação elegível sob a regra ativa; nenhuma autoaprovação
+ou redução da exigência foi feita.
+
+
+Validação final em 2026-11-03 UTC: CodeRabbit emitiu
+[APPROVED 5746797916](https://github.com/eduardobittencourt/kobra-lan-cli/pull/3#pullrequestreview-5746797916)
+para o head `a2bdc70f0b0ade4a9b1fac19d0f8960c2d4d3d32`. Sob o ruleset ativo,
+o GitHub confirmou `reviewDecision: APPROVED` e `mergeStateStatus: CLEAN`;
+nenhuma discussão aberta, os quatro checks obrigatórios, CodeQL e Sonar passaram.
+A aprovação veio do bot, distinto do autor; nenhum bypass foi usado. Isso conclui
+5.2 e 6.2, com revisão dos guias públicos e limitações por origem registradas.
+As 22 tarefas estão concluídas sob o critério estático autorizado para
+forks/Dependabot. O primeiro PR Dependabot segue como acompanhamento do mantenedor
+no guia público; não houve teste real dessas origens, merge, release ou operação
+física. Novos commits de registro exigem novamente checks e aprovação conforme a
+mesma regra, sem invalidar a comprovação obtida para `a2bdc70`.
