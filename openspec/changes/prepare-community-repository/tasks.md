@@ -31,14 +31,14 @@
 ## 5. Aplicar e comprovar as regras de contribuição
 
 - [x] 5.1 Definir checks obrigatórios pelos nomes/apps observados no PR interno e revisão estática das demais origens autorizada pelo usuário; excluir checks pulados em forks/Dependabot e registrar a condição para futura promoção do Sonar.
-- [ ] 5.2 Aplicar ruleset de `main` exigindo PR, uma aprovação válida, invalidação de aprovações após mudanças, discussões resolvidas e checks universais; conferir via API e estado de merge de PRs que o autor não se autoaprova e não existe bypass rotineiro.
+- [x] 5.2 Aplicar ruleset de `main` exigindo PR, uma aprovação válida, invalidação de aprovações após mudanças, discussões resolvidas e checks universais; conferir via API e estado de merge de PRs que o autor não se autoaprova e não existe bypass rotineiro.
 - [x] 5.3 Proteger tags `v*` contra atualização/exclusão preservando criação autorizada; verificar regras por API e compatibilidade com o workflow de release, sem publicar versão nem alterar tags existentes.
 - [x] 5.4 Consolidar squash e exclusão de branches após merge; verificar configurações efetivas e atualizar o guia de manutenção com critérios de merge, limitações por origem e recuperação.
 
 ## 6. Verificar a integração final
 
 - [x] 6.1 Confirmar em um mesmo estado de código o resultado de lint, testes com cobertura, CodeQL, Sonar aplicável, build e aceitação Debian/Ubuntu; registrar SHAs e resultados sem operar impressora ou publicar release.
-- [ ] 6.2 Revisar a experiência completa de contribuição contra os arquivos públicos e regras efetivas; verificar que uma aprovação é obrigatória e que forks/Dependabot têm caminho viável de merge, registrando limitações concretas de serviços antes de considerar a change concluída.
+- [x] 6.2 Revisar a experiência completa de contribuição contra os arquivos públicos e regras efetivas; verificar que uma aprovação é obrigatória e que forks/Dependabot têm caminho viável de merge, registrando limitações concretas de serviços antes de considerar a change concluída.
 
 ## Evidências e pendências de validação
 
@@ -75,6 +75,20 @@ O ruleset `Protect main contributions` (26419282) foi aplicado e reconfirmado pe
 API, com uma aprovação, invalidação após mudanças, discussões resolvidas, quatro
 checks GitHub Actions (app 15368), bloqueio de exclusão/force push e nenhum bypass.
 O PR #3 passou de `APPROVED` para `REVIEW_REQUIRED`/`BLOCKED` sob a proteção ativa:
-a aprovação cobre `fc1c5bd`, anterior ao head `964c3d7`. As tarefas 5.2 e 6.2 aguardam
+a aprovação cobre `fc1c5bd`, anterior ao head `964c3d7`. Naquele momento, as tarefas 5.2 e 6.2 aguardavam
 comprovação final de aprovação elegível sob a regra ativa; nenhuma autoaprovação
 ou redução da exigência foi feita.
+
+
+Validação final em 2026-11-03 UTC: CodeRabbit emitiu
+[APPROVED 5746797916](https://github.com/eduardobittencourt/kobra-lan-cli/pull/3#pullrequestreview-5746797916)
+para o head `a2bdc70f0b0ade4a9b1fac19d0f8960c2d4d3d32`. Sob o ruleset ativo,
+o GitHub confirmou `reviewDecision: APPROVED` e `mergeStateStatus: CLEAN`;
+nenhuma discussão aberta, os quatro checks obrigatórios, CodeQL e Sonar passaram.
+A aprovação veio do bot, distinto do autor; nenhum bypass foi usado. Isso conclui
+5.2 e 6.2, com revisão dos guias públicos e limitações por origem registradas.
+As 22 tarefas estão concluídas sob o critério estático autorizado para
+forks/Dependabot. O primeiro PR Dependabot segue como acompanhamento do mantenedor
+no guia público; não houve teste real dessas origens, merge, release ou operação
+física. Novos commits de registro exigem novamente checks e aprovação conforme a
+mesma regra, sem invalidar a comprovação obtida para `a2bdc70`.

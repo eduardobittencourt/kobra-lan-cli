@@ -134,8 +134,13 @@ newer changes require their own relevant gates. This does not establish fork or
 Dependabot availability. CodeRabbit later emitted an
 [APPROVED review for fc1c5bd](https://github.com/eduardobittencourt/kobra-lan-cli/pull/3#pullrequestreview-5746616607).
 After main protection was activated, the newer head `964c3d7` required a new
-approval (`REVIEW_REQUIRED`); final eligibility under the active rule remains
-to be verified.
+approval (`REVIEW_REQUIRED`). CodeRabbit subsequently emitted
+[APPROVED review 5746797916](https://github.com/eduardobittencourt/kobra-lan-cli/pull/3#pullrequestreview-5746797916)
+for `a2bdc70f0b0ade4a9b1fac19d0f8960c2d4d3d32`. GitHub reported `APPROVED`
+and `CLEAN` under the active main ruleset, with no unresolved discussions and
+all four required checks, CodeQL and Sonar passing. This confirms that the bot
+approval satisfied the enforced rule without author approval or bypass. Later
+commits still require their own checks and approval.
 
 Coverage artifacts use stable run IDs and overwrite on a full rerun, allowing a
 Sonar-only retry to use the reports from successful producer jobs in that same
