@@ -37,7 +37,7 @@
 
 ## 6. Verificar a integração final
 
-- [ ] 6.1 Confirmar em um mesmo estado de código o resultado de lint, testes com cobertura, CodeQL, Sonar aplicável, build e aceitação Debian/Ubuntu; registrar SHAs e resultados sem operar impressora ou publicar release.
+- [x] 6.1 Confirmar em um mesmo estado de código o resultado de lint, testes com cobertura, CodeQL, Sonar aplicável, build e aceitação Debian/Ubuntu; registrar SHAs e resultados sem operar impressora ou publicar release.
 - [ ] 6.2 Revisar a experiência completa de contribuição contra os arquivos públicos e regras efetivas; verificar que uma aprovação é obrigatória e que forks/Dependabot têm caminho viável de merge, registrando limitações concretas de serviços antes de considerar a change concluída.
 
 ## Evidências e pendências de validação
@@ -51,3 +51,11 @@ A tarefa 2.4 foi reconfirmada no commit `fef7206` pelo run Tests 41561551442:
 compressão Markdown corrigida, links verificados no pacote real e aceitação nas
 duas distribuições. A validação final 6.1 deve cobrir o estado final do código. As tarefas dependentes de forks/Dependabot/aprovação continuam abertas;
 o usuário informou que não consegue testar forks.
+
+A verificação técnica final 6.1 passou para o estado de implementação
+`d31a57f946074a7f41d66cfd136f75e2e26c4a6c`: [Tests 41564654552](https://github.com/eduardobittencourt/kobra-lan-cli/actions/runs/41564654552)
+e [CodeQL 41564654626](https://github.com/eduardobittencourt/kobra-lan-cli/actions/runs/41564654626).
+Inclui 115 testes, lint, build/arquivos, aceitação Debian/Ubuntu e Sonar com os dois
+relatórios e o gate original. A correção gramatical e este registro alteram apenas
+planejamento excluído dos pacotes; os arquivos de implementação permanecem iguais.
+Aprovação elegível e validação entre origens continuam pendentes nas outras tarefas.
