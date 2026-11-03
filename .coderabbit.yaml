@@ -9,6 +9,7 @@ reviews:
   auto_review:
     enabled: true
     auto_incremental_review: true
+    auto_pause_after_reviewed_commits: 0
   poem: false
   path_instructions:
     - path: kobra_lan/{pairing,provisioning,config,mqtt}.py

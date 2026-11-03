@@ -21,6 +21,9 @@ approvals. The author cannot approve their own PR. Code owners guide review;
 a separate code-owner approval is not required. There is no routine maintainer
 or bot bypass. Use squash merges and delete merged topic branches.
 
+CodeRabbit requests an incremental review on each push; automatic pausing after
+several reviewed commits is disabled.
+
 A CodeRabbit completed check or COMMENTED review is not an approval. Count only
 an eligible GitHub APPROVED review; otherwise obtain approval from another
 eligible human reviewer. Never reduce the approval count to unblock a sole
