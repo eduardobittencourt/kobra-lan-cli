@@ -24,6 +24,7 @@ def check(deb, version):
     allowed = {prefix + name for name in MODULES} | {"usr/bin/kobra-lan"}
     allowed |= {info + name for name in ("METADATA", "WHEEL", "entry_points.txt", "top_level.txt", "RECORD", "INSTALLER",
                                         "LICENSE", "NOTICE.md", "licenses/LICENSE", "licenses/NOTICE.md")}
+    # dh_installchangelogs installs upstream CHANGELOG.md as changelog.gz.
     doc_names = {"copyright", "changelog.Debian.gz", "changelog.gz"}
     public_docs = [
         "README.md", "NOTICE.md", "ROADMAP.md", "CONTRIBUTING.md", "AGENTS.md", "SECURITY.md",
@@ -43,7 +44,9 @@ def check(deb, version):
             assert member.uid == member.gid == 0, name
             assert not member.mode & 0o022, name
             files.add(name)
-        assert {prefix + name for name in MODULES} | {"usr/bin/kobra-lan", info + "METADATA"} <= files
+        assert {prefix + name for name in MODULES} | {
+            "usr/bin/kobra-lan", info + "METADATA", "usr/share/doc/kobra-lan-cli/changelog.gz",
+        } <= files
         for name in public_docs:
             doc = "usr/share/doc/kobra-lan-cli/" + name
             assert doc in files or doc + ".gz" in files, name

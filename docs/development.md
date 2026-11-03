@@ -10,7 +10,7 @@ uv run --locked coverage xml
 uv run --locked coverage report
 ```
 
-With distro Python and `python3-cryptography` already installed, use
+With `/usr/bin/python3` 3.11 or newer and `python3-cryptography` already installed, use
 `/usr/bin/python3 -m unittest discover -s tests -v`.
 
 The original 28 offline application tests cover multipart preservation, MQTT framing, TLS pinning, response correlation, hashes, dry runs, existing files, busy state, slot/material mapping, reviewed plans, scoped hardware qualification, upload receipts, ACK versus confirmation, and timeouts without replay. Additional release tests cover version rejection, draft recovery, acceptance gates and asset verification. Automated tests never access real printers.
