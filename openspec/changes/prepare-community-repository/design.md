@@ -44,7 +44,9 @@ Alternativa descartada: manter apenas análise automática, pois o objetivo incl
 
 ### 4. PRs sem secrets têm um caminho explícito
 
-Testes, lint e empacotamento executam em `pull_request` para forks e Dependabot sem secrets. Não usar `pull_request_target` para checkout/execução do código contribuído, nem consumir artefatos de PR em job privilegiado.
+Testes, lint e empacotamento executam em `pull_request` para forks e Dependabot sem secrets. Não usar `pull_request_target` para checkout/execução do código contribuído, nem consumir artefatos de PRs de origem não confiável em job privilegiado.
+
+Decisão explícita do usuário: manter Sonar pré-merge para colaboradores internos confiáveis. Um PR interno elegível tem head no próprio repositório, associação do autor `OWNER`, `MEMBER` ou `COLLABORATOR`, e nem autor nem ator Dependabot. Código e relatórios da mesma execução desses autores estão dentro da fronteira confiável de edição de workflows/secrets; não há promessa de isolamento contra colaborador malicioso ou conta comprometida. Forks são excluídos mesmo quando o autor é colaborador. Não usar eventos privilegiados nem importação entre repositórios/runs para contornar essa fronteira. Restringir toda análise a `main` foi descartado porque removeria a análise interna pré-merge pretendida.
 
 No primeiro estágio, Sonar é obrigatório no processo de revisão dos PRs internos em que a análise roda, mas seu check externo fica fora do ruleset global se não for emitido para todas as origens. Forks e Dependabot precisam de uma aprovação válida e dos checks universais; ausência de análise Sonar deve ficar explícita, sem declarar um resultado verde fictício. A análise de `main` fornece acompanhamento após merge, com a limitação de não bloquear preventivamente esses PRs.
 

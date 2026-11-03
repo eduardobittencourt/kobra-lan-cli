@@ -9,12 +9,16 @@ jobs:
   sonar:
     name: Sonar CI
     needs: checks
-    # Forks and Dependabot do not receive repository secrets. Do not add a
-    # privileged follow-up that executes their code or consumes their artifacts.
+    # Policy: internal writer branches are trusted for pre-merge Sonar analysis.
+    # Only OWNER/MEMBER/COLLABORATOR authors qualify; forks and Dependabot do not.
+    # Reports come from this same workflow run. Never import external PR reports
+    # through pull_request_target, workflow_run, or another privileged follow-up.
     if: >-
       (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
       (github.event_name == 'pull_request' &&
        github.event.pull_request.head.repo.full_name == github.repository &&
+       contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'),
+                github.event.pull_request.author_association) &&
        github.event.pull_request.user.login != 'dependabot[bot]' &&
        github.actor != 'dependabot[bot]')
     runs-on: ubuntu-24.04

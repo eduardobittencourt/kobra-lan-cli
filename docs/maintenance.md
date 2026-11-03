@@ -32,7 +32,10 @@ work without repository secrets. Sonar is a review requirement where analysis
 runs, but must remain outside global required checks until a supported safe path
 is demonstrated for every origin. Record its absence on fork/Dependabot PRs;
 main analysis provides follow-up and does not retroactively protect their merge.
-Sonar CI skips fork PRs and Dependabot because they cannot use repository secrets.
+Sonar CI runs before merge only for trusted internal PRs: the head repository
+must equal this repository, the author association must be `OWNER`, `MEMBER` or
+`COLLABORATOR`, and neither the author nor the triggering actor may be Dependabot.
+Forks, Dependabot and other author associations are excluded from this job.
 Apply the same availability rule to CodeRabbit checks.
 
 Protect `v*` tags against update and deletion while allowing authorized creation.
@@ -129,3 +132,26 @@ acceptance targets at revision `fef7206f78accc3d1ab6d9b1a89614c68c521a54` in
 Sonar again imported both reports and passed its existing gate.
 [CodeQL run 41561551449](https://github.com/eduardobittencourt/kobra-lan-cli/actions/runs/41561551449)
 passed Python and Actions analysis at that revision.
+
+## Sonar trust boundary
+
+The maintainer explicitly chose pre-merge Sonar analysis for trusted internal
+writers. Such a PR's code and same-run reports belong to the trusted workflow
+boundary; the rule against untrusted PR artifacts applies to external origins,
+not every artifact produced during a PR event. This policy assumes internal
+writers are trusted to edit workflows that can access repository secrets. It
+is not a sandbox against a malicious writer or a compromised writer account.
+
+Only the scanner step receives `SONAR_TOKEN`; the workflow grants `contents: read`
+and no GitHub write permission. Coverage downloads omit repository/run selectors,
+so they consume the current workflow run's unit/build reports. No external PR
+code or report is promoted into a privileged `pull_request_target` or
+`workflow_run` consumer. A trusted author using a fork still fails the head-repo
+condition. Document and review any change to this boundary before enabling a new
+origin; do not silently replace the intended internal pre-merge check with
+main-only analysis.
+
+See [GitHub's fork event permissions](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#pull_request)
+and the [official Sonar scanner action](https://github.com/SonarSource/sonarqube-scan-action)
+for the platform behavior. Actual cross-origin test evidence remains a separate
+pending validation; these guards do not claim that a fork test was performed.
