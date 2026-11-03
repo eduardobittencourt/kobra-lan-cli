@@ -42,7 +42,7 @@ jobs:
           .venv/bin/coverage xml -o build/unit-coverage/coverage.xml
           uv export --locked --only-group dev --no-header --no-annotate --format requirements-txt \
             --output-file build/unit-coverage/requirements-dev.txt > /dev/null
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: unit-coverage-${{ github.run_id }}
           overwrite: true
@@ -109,14 +109,14 @@ jobs:
               cd build/debian
               sha256sum --check SHA256SUMS
             '
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: build-coverage-${{ github.run_id }}
           overwrite: true
           path: build/build-coverage/build-coverage.xml
           if-no-files-found: error
           retention-days: 7
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: candidate-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
@@ -163,7 +163,7 @@ jobs:
               env -u PYTHONPATH python3 /accept_deb.py "/artifacts/kobra-lan-cli_${VERSION}-1_all.deb" "$VERSION" \
                 --report "/reports/${TARGET_ID}.json"
             '
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: acceptance-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.id }}
           path: reports/*.json
