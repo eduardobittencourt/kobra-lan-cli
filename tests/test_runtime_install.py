@@ -97,5 +97,6 @@ class RuntimeInstallTests(unittest.TestCase):
         self.lock(source)
         with self.assertRaises(subprocess.CalledProcessError) as failure:
             self.install()
-        self.assertIn('No matching distribution found', failure.exception.stdout)
+        self.assertIn('No matching distribution found for synthetic-runtime==1.0',
+                      failure.exception.stdout)
         self.assertFalse(marker.exists())

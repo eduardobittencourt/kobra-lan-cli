@@ -6,6 +6,12 @@ constraints, not recommendations for designing a new protocol. The public setup
 instructions describe their remaining risks. No analyzer rules or quality gates
 are disabled for this feature.
 
+The PR #1 Sonar review records S4830, S5527 and S5542 as accepted firmware
+compatibility constraints, with the evidence below attached to each issue.
+Acceptance preserves the documented bootstrap risks; it does not mean those
+protocol operations became authenticated or that the findings were fixed.
+S1313 is recorded as a false positive because the value is a firmware version.
+
 ## Initial TLS observation: S4830 and S5527
 
 `observe_fingerprint` deliberately observes the server's DER certificate before

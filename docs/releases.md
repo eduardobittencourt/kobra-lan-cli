@@ -96,9 +96,11 @@ continues to allow `cryptography>=41` for distro and third-party installers;
 their dependency versions need not match the development lock. The Debian build
 and acceptance paths explicitly verify the supported distro runtime closure.
 
-The offline unit suite requires the runtime dependency to be installed first
-(`python3-cryptography` for distro Python, or `pip install 'cryptography>=41'` in
-an isolated environment). `scripts/check_python.py` builds sdist and wheel, checks
+The offline unit suite requires the runtime dependency and pip-enabled virtual
+environments (`python3-cryptography` and `python3-venv` for distro Python, or
+`pip install 'cryptography>=41'` in an environment with venv/ensurepip support).
+The runtime-install tests create fresh virtual environments and invoke pip offline.
+`scripts/check_python.py` builds sdist and wheel, checks
 exact dependency metadata and content allowlists, and prepares the runtime closure
 from `requirements-runtime.txt`. Both download and installation require hashes
 and `--only-binary=:all:`; source dependency builds are refused. It then installs
