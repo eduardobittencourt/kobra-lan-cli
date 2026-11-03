@@ -23,7 +23,7 @@
 
 ## 4. Versionar e validar os serviços de revisão
 
-- [ ] 4.1 Criar `.coderabbit.yaml` com revisão incremental, instruções por área e autoaprovação conforme design; validar schema e observar em PR se o serviço emite review `APPROVED` elegível, documentando alternativa humana se necessário.
+- [x] 4.1 Criar `.coderabbit.yaml` com revisão incremental, instruções por área e autoaprovação conforme design; validar schema e observar em PR se o serviço emite review `APPROVED` elegível, documentando alternativa humana se necessário.
 - [x] 4.2 Criar configuração Sonar e scanner CI com versão da fonte única e relatório de cobertura; desativar a análise automática imediatamente antes do primeiro scan CI, confirmar análise real e importação de cobertura no projeto existente e restaurar a análise automática se o scan ou a importação falhar, registrando o procedimento no guia de manutenção.
 - [x] 4.3 Conferir achados e Quality Gate atuais contra `docs/pairing-security-review.md`; registrar divergências e evidência de cobertura importada, sem reduzir o gate, excluir código para aprovar ou aceitar novos achados automaticamente.
 - [ ] 4.4 Exercitar PR interno, fork e Dependabot; registrar checks emitidos, ausência de secrets nas origens não confiáveis e aprovação elegível. Conferir que eventos privilegiados não executam código nem artefatos não confiáveis e documentar quando Sonar não roda.
@@ -59,3 +59,9 @@ Inclui 115 testes, lint, build/arquivos, aceitação Debian/Ubuntu e Sonar com o
 relatórios e o gate original. A correção gramatical e este registro alteram apenas
 planejamento excluído dos pacotes; os arquivos de implementação permanecem iguais.
 Aprovação elegível e validação entre origens continuam pendentes nas outras tarefas.
+
+A revisão CodeRabbit terminou sem novos apontamentos e emitiu
+[APPROVED 5746616607](https://github.com/eduardobittencourt/kobra-lan-cli/pull/3#pullrequestreview-5746616607)
+para `fc1c5bddeabed31c2ad5394677a1dbecd03f5fcb`. As discussões estão resolvidas.
+A tarefa 4.1 registra a aprovação real pelo serviço; o efeito no ruleset de `main`
+ainda será conferido na tarefa 5.2, sem autoaprovação do autor ou bypass.
