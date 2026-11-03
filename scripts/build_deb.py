@@ -13,8 +13,12 @@ import subprocess
 
 from release_version import ROOT, source_version
 
-SOURCE_FILES = ["pyproject.toml", "MANIFEST.in", "README.md", "LICENSE", "NOTICE.md",
-                "CHANGELOG.md", "docs/releases.md"]
+SOURCE_FILES = [
+    "pyproject.toml", "MANIFEST.in", "README.md", "LICENSE", "NOTICE.md", "CHANGELOG.md",
+    "ROADMAP.md", "CONTRIBUTING.md", "AGENTS.md", "SECURITY.md", "CODE_OF_CONDUCT.md",
+    "docs/README.md", "docs/pairing.md", "docs/usage.md", "docs/development.md",
+    "docs/releases.md", "docs/pairing-security-review.md", "docs/maintenance.md",
+]
 MODULES = ["__init__", "cli", "config", "mqtt", "printer", "start", "upload", "provisioning", "pairing"]
 DEBIAN_FILES = ["control", "rules", "source/format", "docs", "copyright", "kobra-lan.1", "manpages"]
 

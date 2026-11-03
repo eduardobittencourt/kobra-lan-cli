@@ -1,0 +1,53 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+language: en-US
+tone_instructions: Be concise and specific. Prioritize actionable correctness and safety findings, explain their concrete impact, and avoid speculative refactors or repeated comments.
+reviews:
+  profile: assertive
+  auto_approvals:
+    enabled: true
+    allow_author_approval: false
+  auto_review:
+    enabled: true
+    auto_incremental_review: true
+  poem: false
+  path_instructions:
+    - path: kobra_lan/{pairing,provisioning,config,mqtt}.py
+      instructions: >-
+        Preserve explicit first-use trust and TLS pin verification before MQTT
+        credentials. HTTP provisioning is unauthenticated and firmware-defined
+        crypto remains a compatibility constraint; review docs/pairing-security-review.md.
+        Never log credentials or tokens, replace existing access, follow unsafe
+        control URLs, or publish incomplete/private state. Review atomicity,
+        permissions, symlinks and interruption cleanup with synthetic evidence.
+    - path: kobra_lan/{upload,start,printer,cli}.py
+      instructions: >-
+        Preserve JSON/exit-code contracts, dry runs and reviewed file/plan hashes,
+        bounded device/firmware qualification, durable exclusive reservations and
+        no automatic replay. An ACK is not physical confirmation. Never suggest
+        clearing markers to retry. Hardware operations require explicit authorization.
+    - path: scripts/**
+      instructions: >-
+        Preserve version identity, exact package allowlists, runtime dependency
+        hashes, binary-only offline installation, digest-bound disposable acceptance,
+        private-state preservation and publication recovery without release replay.
+        Package validation must not operate a real printer or install on the host.
+    - path: .github/**
+      instructions: >-
+        Check full-commit action pins and least permissions. Fork/Dependabot code
+        must run without secrets. Privileged events must never execute contributed
+        code or artifacts. Required checks must exist for all contribution origins;
+        a successful bot check is not an eligible APPROVED review.
+    - path: tests/**
+      instructions: >-
+        Tests must use synthetic keys, identities and transports without printer
+        access. Prefer tests of safety boundaries and failure/interruption behavior
+        over assertions that mirror implementation. Do not suppress analyzer findings
+        or exclude production code merely to make a gate pass.
+    - path: '**/*.md'
+      instructions: >-
+        Keep hardware qualification and experimental status precise. Preserve
+        initial HTTP trust warnings, pinning, reviewed hashes, state markers and
+        no-replay guarantees. Distinguish implemented distribution tooling from
+        published or planned channels. Do not expose private installation context.
+chat:
+  auto_reply: true

@@ -13,7 +13,7 @@ from release_version import source_version
 def check(deb, version):
     """Verify Debian identity, dependencies and every packaged file against allowlists."""
     fields = subprocess.check_output(["dpkg-deb", "-f", str(deb), "Package", "Version", "Architecture", "Depends"], text=True)
-    assert f"Package: kobra-lan-cli\n" in fields, fields
+    assert "Package: kobra-lan-cli\n" in fields, fields
     assert f"Version: {version}-1\n" in fields, fields
     assert "Architecture: all\n" in fields, fields
     assert "python3 (>= 3.11)" in fields, fields
@@ -24,8 +24,14 @@ def check(deb, version):
     allowed = {prefix + name for name in MODULES} | {"usr/bin/kobra-lan"}
     allowed |= {info + name for name in ("METADATA", "WHEEL", "entry_points.txt", "top_level.txt", "RECORD", "INSTALLER",
                                         "LICENSE", "NOTICE.md", "licenses/LICENSE", "licenses/NOTICE.md")}
-    allowed |= {"usr/share/doc/kobra-lan-cli/" + name for name in
-                ("copyright", "changelog.Debian.gz", "changelog.gz", "README.md", "README.md.gz", "NOTICE.md", "NOTICE.md.gz", "releases.md", "releases.md.gz")}
+    doc_names = {"copyright", "changelog.Debian.gz", "changelog.gz"}
+    public_docs = [
+        "README.md", "NOTICE.md", "ROADMAP.md", "CONTRIBUTING.md", "AGENTS.md", "SECURITY.md",
+        "CODE_OF_CONDUCT.md", "docs/README.md", "docs/pairing.md", "docs/usage.md",
+        "docs/development.md", "docs/releases.md", "docs/pairing-security-review.md", "docs/maintenance.md",
+    ]
+    doc_names |= {name + suffix for name in public_docs for suffix in ("", ".gz")}
+    allowed |= {"usr/share/doc/kobra-lan-cli/" + name for name in doc_names}
     allowed |= {"usr/share/man/man1/kobra-lan.1.gz"}
     files = set()
     with tarfile.open(fileobj=io.BytesIO(raw)) as archive:
@@ -38,6 +44,9 @@ def check(deb, version):
             assert not member.mode & 0o022, name
             files.add(name)
         assert {prefix + name for name in MODULES} | {"usr/bin/kobra-lan", info + "METADATA"} <= files
+        for name in public_docs:
+            doc = "usr/share/doc/kobra-lan-cli/" + name
+            assert doc in files or doc + ".gz" in files, name
         launcher = archive.extractfile("./usr/bin/kobra-lan").read()
         assert launcher.splitlines()[0].removeprefix(b"#!").strip() == b"/usr/bin/python3"
         assert b"PYTHONPATH" not in launcher

@@ -1,0 +1,33 @@
+name: Compatibility report
+description: Record a bounded hardware/firmware observation without claiming broader support.
+title: "[Compatibility]: "
+body:
+  - type: markdown
+    attributes:
+      value: "Do not operate hardware just to fill this form. Only report authorized observations. Use SECURITY.md for vulnerabilities; remove all credentials and private state."
+  - type: input
+    id: versions
+    attributes:
+      label: CLI version/commit, OS, installation method and Python version
+    validations:
+      required: true
+  - type: input
+    id: device
+    attributes:
+      label: Exact printer model/type ID and firmware
+    validations:
+      required: true
+  - type: textarea
+    id: operations
+    attributes:
+      label: Operations observed and exact settings
+      description: Distinguish pairing, status, upload, start, physical completion and quality. Include slicer/profile/slot/options when applicable.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Sanitized evidence, failures and limitations
+      description: Include exit codes and whether activity was observed or uncertain. Never attach live receipts, keys or config.
+    validations:
+      required: true

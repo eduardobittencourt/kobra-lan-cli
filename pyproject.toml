@@ -26,3 +26,25 @@ include-package-data = false
 
 [tool.setuptools.dynamic]
 version = {attr = "kobra_lan.__version__"}
+
+[dependency-groups]
+dev = [
+    "coverage>=7.17.0",
+    "ruff>=0.17.3",
+]
+
+[tool.ruff]
+target-version = "py311"
+extend-exclude = ["tools"]
+
+[tool.ruff.lint]
+# Start with syntax errors and Pyflakes; formatting changes are out of scope.
+select = ["E9", "F"]
+
+[tool.coverage.run]
+branch = true
+relative_files = true
+source = ["kobra_lan", "scripts"]
+
+[tool.coverage.xml]
+output = "coverage.xml"

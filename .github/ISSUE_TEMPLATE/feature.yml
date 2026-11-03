@@ -1,0 +1,24 @@
+name: Feature request
+description: Describe a use case and its safety constraints.
+title: "[Feature]: "
+body:
+  - type: markdown
+    attributes:
+      value: "Check ROADMAP.md first. Use SECURITY.md for vulnerabilities; never post credentials."
+  - type: textarea
+    id: problem
+    attributes:
+      label: Use case and current limitation
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior, alternatives and safety implications
+      description: Describe authorization, dry runs and state compatibility where relevant.
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Relevant CLI version, model, firmware and platform
