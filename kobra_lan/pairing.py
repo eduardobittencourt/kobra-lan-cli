@@ -36,6 +36,7 @@ def observe_fingerprint(config):
 
 
 def verify_status(config):
+    """Require pinned MQTT authentication and a fresh qualified read-only report."""
     try:
         with MQTT(config) as client:
             info = payload_data(client.query("info"))
@@ -53,16 +54,19 @@ def verify_status(config):
 
 
 def validate_pin(expected):
+    """Reject malformed explicit pins before any network or trust prompt."""
     if expected is not None and (not isinstance(expected, str) or not re.fullmatch(r"[0-9a-fA-F]{64}", expected)):
         raise ProtocolError("Trust: --trust-sha256 must contain exactly 64 hexadecimal digits")
 
 
 def terminal_text(value):
     # JSON escaping covers C0/C1, bidi controls and other non-ASCII terminal input.
+    """Bound and escape printer metadata before writing it to a terminal."""
     return json.dumps(str(value)[:160], ensure_ascii=True)
 
 
 def accept_trust(config, observed, expected=None, stdin=None, stderr=None):
+    """Require exact external pin matching or explicit consent from a terminal."""
     validate_pin(expected)
     if expected is not None:
         if not hmac.compare_digest(expected.lower(), observed):
@@ -88,6 +92,7 @@ def accept_trust(config, observed, expected=None, stdin=None, stderr=None):
 class PrivateStage:
     """Directory descriptors keep managed operations independent of symlink races."""
     def __init__(self, destination):
+        """Open the absent destination through nonsymlink private directory descriptors."""
         self.path = Path(os.path.abspath(destination))
         self.parent_fd = self.stage_fd = None
         self.stage_name = None
@@ -130,7 +135,10 @@ class PrivateStage:
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
+        """Retain possibly published PEMs before cleaning unpublished secrets."""
         try:
+            if not self.committed:
+                self.committed = self._candidate_is_published()
             if self.stage_name is not None and not self.committed:
                 for name in self.files:
                     os.unlink(name, dir_fd=self.stage_fd)
@@ -139,6 +147,7 @@ class PrivateStage:
             self.close()
 
     def close(self):
+        """Close only directory descriptors owned by this staging invocation."""
         for attr in ('stage_fd', 'parent_fd'):
             fd = getattr(self, attr, None)
             if fd is not None:
@@ -146,6 +155,7 @@ class PrivateStage:
                 setattr(self, attr, None)
 
     def write_secret(self, name, content):
+        """Exclusively create and fsync one private file relative to the staging directory."""
         fd = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
                      0o600, dir_fd=self.stage_fd)
         self.files.add(name)
@@ -156,6 +166,7 @@ class PrivateStage:
             os.fsync(stream.fileno())
 
     def prepare(self, bundle, host):
+        """Stage validated client PEMs and construct an unpublished compatible config."""
         name = '.pair-' + uuid.uuid4().hex
         os.mkdir(name, 0o700, dir_fd=self.parent_fd)
         self.stage_name = name
@@ -169,25 +180,35 @@ class PrivateStage:
         return Config(host, bundle.model_id, bundle.device_id, bundle.username, bundle.password,
                       str(root / 'client.crt'), str(root / 'client.key'), '0' * 64)
 
+    def _candidate_is_published(self):
+        """Compare candidate/destination inodes, retaining secrets if uncertain."""
+        if self.stage_fd is None or CANDIDATE_FILE not in self.files:
+            return False
+        try:
+            source = os.stat(CANDIDATE_FILE, dir_fd=self.stage_fd, follow_symlinks=False)
+            target = os.stat(self.path.name, dir_fd=self.parent_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            return False
+        except OSError:
+            # Uncertain ownership must never delete potentially referenced PEMs.
+            return True
+        return (source.st_dev, source.st_ino) == (target.st_dev, target.st_ino)
+
     def publish(self, config):
+        """Durably publish a complete config without replacing a destination."""
         self.write_secret(CANDIDATE_FILE, json.dumps(asdict(config), ensure_ascii=True).encode())
         os.fsync(self.stage_fd)
         try:
             os.link(CANDIDATE_FILE, self.path.name, src_dir_fd=self.stage_fd,
                     dst_dir_fd=self.parent_fd, follow_symlinks=False)
-        except OSError:
-            # A failed/ambiguous publication must not remove PEMs if our exact
-            # candidate inode is already visible at the destination.
-            try:
-                source = os.stat(CANDIDATE_FILE, dir_fd=self.stage_fd, follow_symlinks=False)
-                target = os.stat(self.path.name, dir_fd=self.parent_fd, follow_symlinks=False)
-                self.committed = (source.st_dev, source.st_ino) == (target.st_dev, target.st_ino)
-            except OSError:
-                pass
+            self.committed = True
+        except BaseException:
+            # Reconcile asynchronous interruptions as well as filesystem errors,
+            # then propagate the original interruption without replaying the link.
+            self.committed = self._candidate_is_published()
             raise
         # From this instruction onward cleanup must preserve referenced PEMs,
         # even if fsync or removing the extra JSON link raises.
-        self.committed = True
         os.fsync(self.parent_fd)
         os.unlink(CANDIDATE_FILE, dir_fd=self.stage_fd)
         self.files.remove(CANDIDATE_FILE)
@@ -200,6 +221,7 @@ class PairingLocalError(OSError):
 
 
 def pair(destination, host, expected=None):
+    """Provision, establish trust and verify status before publishing private access."""
     validate_host(host)
     validate_pin(expected)
     failure_stage = "Persistence"

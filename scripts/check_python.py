@@ -24,6 +24,7 @@ EGG_FILES = {"PKG-INFO", "SOURCES.txt", "dependency_links.txt", ENTRY_POINTS_FIL
 
 
 def check_sdist(path, version):
+    """Check every source-archive member and exact dependency metadata before extraction."""
     with tarfile.open(path) as archive:
         files = set()
         for member in archive.getmembers():
@@ -45,6 +46,7 @@ def check_sdist(path, version):
 
 
 def check_wheel(path, version):
+    """Check wheel contents, application identity and the exact runtime requirement."""
     prefix = f"kobra_lan_cli-{version}.dist-info/"
     with zipfile.ZipFile(path) as archive:
         files = set(archive.namelist())
@@ -61,6 +63,7 @@ def check_wheel(path, version):
 
 
 def main():
+    """Build from source archives and verify an independent installed command."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("output", type=Path)
     parser.add_argument("--wheelhouse", type=Path, help="Prepared runtime dependency closure for offline installation")

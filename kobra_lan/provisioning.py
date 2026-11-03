@@ -26,6 +26,7 @@ MAX_RESPONSE = 1024 * 1024
 
 
 def validate_host(host):
+    """Require a canonical bare IPv4 address before opening any connection."""
     try:
         if str(ipaddress.IPv4Address(host)) != host:
             raise ValueError
@@ -34,6 +35,7 @@ def validate_host(host):
 
 
 def request_json(host, method, target):
+    """Perform one bounded HTTP request without proxy lookup, redirects or replay."""
     conn = http.client.HTTPConnection(host, 18910, timeout=10)
     try:
         conn.request(method, target)
@@ -55,6 +57,7 @@ def request_json(host, method, target):
 
 
 def required(data, name):
+    """Read a required nonblank string without exposing response values in errors."""
     value = data.get(name)
     if not isinstance(value, str) or not value.strip():
         raise ProtocolError("Response validation: missing required field")
@@ -62,6 +65,7 @@ def required(data, name):
 
 
 def identity(host):
+    """Validate printer identity and constrain the control endpoint to the selected host."""
     validate_host(host)
     result = request_json(host, "GET", "/info")
     if "code" in result:
@@ -86,6 +90,7 @@ def identity(host):
 
 
 def signed_parameters(token):
+    """Build the firmware-defined timestamp, nonce, UUID and MD5 signature."""
     ts = str(int(time.time() * 1000))
     nonce = "".join(secrets.choice(string.ascii_letters + string.digits) for _ in range(6))
     inner = hashlib.md5(token[:16].encode(), usedforsecurity=False).hexdigest()
@@ -94,6 +99,7 @@ def signed_parameters(token):
 
 
 def exchange(host):
+    """Fetch identity and send exactly one signed credential request."""
     token = identity(host)
     response = request_json(host, "POST", "/ctrl?" + urlencode(signed_parameters(token)))
     if type(response.get("code")) is not int or response["code"] != 200 or not isinstance(response.get("data"), dict):
@@ -112,6 +118,7 @@ class Bundle:
 
 
 def model_id(data):
+    """Normalize the two firmware field spellings while rejecting unqualified models."""
     values = [data[k] for k in ("modelId", "modeId") if k in data]
     if not values or any(type(v) not in (str, int) or str(v) != "20030" for v in values):
         raise ProtocolError("Response validation: only model 20030 is qualified")
@@ -119,6 +126,7 @@ def model_id(data):
 
 
 def decrypt_object(token, data):
+    """Decode the firmware CBC bundle with strict padding and JSON validation."""
     try:
         encoded = required(data, "info")
         iv = required(data, "token").encode("utf-8")
@@ -143,6 +151,7 @@ def decrypt_object(token, data):
 
 
 def decode_bundle(token, data):
+    """Validate decrypted identity, credentials and matching certificate/key material."""
     try:
         result = decrypt_object(token, data)
         device_id = required(result, "deviceId")
@@ -154,6 +163,7 @@ def decode_bundle(token, data):
         cert = x509.load_pem_x509_certificate(certificate.encode())
         pk = serialization.load_pem_private_key(private_key.encode(), password=None)
         def public_bytes(obj):
+            """Serialize a canonical public key for certificate/private-key comparison."""
             return obj.public_key().public_bytes(serialization.Encoding.DER,
                                                 serialization.PublicFormat.SubjectPublicKeyInfo)
         if public_bytes(cert) != public_bytes(pk):
@@ -166,5 +176,6 @@ def decode_bundle(token, data):
 
 
 def provision(host):
+    """Obtain a validated in-memory credential bundle without persisting secrets."""
     token, data = exchange(host)
     return decode_bundle(token, data)

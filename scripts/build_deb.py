@@ -20,6 +20,7 @@ DEBIAN_FILES = ["control", "rules", "source/format", "docs", "copyright", "kobra
 
 
 def main():
+    """Build an allowlisted Debian source export and checksum its binary package."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--tag", required=True)

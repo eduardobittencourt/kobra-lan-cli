@@ -70,3 +70,18 @@ uv action is commit-pinned and the uv version is fixed. Package metadata remains
 Debian acceptance still verifies each distribution's installed dependency closure.
 The lockfile does not claim that third-party pip/distro installations select the
 same versions as the development environment.
+
+## Publication interruptions
+
+The config hard link may become visible before an asynchronous interruption is
+reported to Python. Publication reconciles the candidate/destination inodes for
+all propagated exceptions, including KeyboardInterrupt and SystemExit. Context
+cleanup independently reconciles ownership before deleting any staged secrets;
+it does not rely solely on the in-memory committed flag. Uncertain filesystem
+reads conservatively retain possibly referenced PEMs. No publication is replayed.
+
+`AmbiguousPublicationTests` covers interruptions before and after linking,
+cleanup with no committed flag, and an unreadable ownership check. The saved
+config remains loadable with complete private PEMs after a committed operation;
+unpublished material is removed when absence can be established. Abrupt process
+termination can still leave private staging, as documented in the README.

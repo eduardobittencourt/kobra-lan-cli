@@ -13,12 +13,14 @@ from check_python import check_sdist, check_wheel, MODULES, DOCS
 
 class MetadataTests(unittest.TestCase):
     def setUp(self):
+        """Create an isolated filesystem fixture and arrange its cleanup."""
         temporary = tempfile.TemporaryDirectory(); self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
         self.metadata = ('Name: kobra-lan-cli\nVersion: 0.3.0\nRequires-Python: >=3.11\n'
                          'License-Expression: GPL-3.0-only\nRequires-Dist: cryptography>=41\n')
 
     def wheel(self, metadata=None, extra=None):
+        """Build a synthetic wheel for metadata and package-content rejection tests."""
         path = self.root/'app.whl'; prefix='kobra_lan_cli-0.3.0.dist-info/'
         files = {m:'' for m in MODULES}
         files[prefix+'METADATA'] = self.metadata if metadata is None else metadata
@@ -29,6 +31,7 @@ class MetadataTests(unittest.TestCase):
         return path
 
     def test_wheel_requires_exact_dependency(self):
+        """Reject missing or extra wheel dependencies and nonallowlisted secret files."""
         check_wheel(self.wheel(),'0.3.0')
         for metadata in (self.metadata.replace('Requires-Dist: cryptography>=41\n',''),
                          self.metadata+'Requires-Dist: unexpected\n',self.metadata.replace('>=41','>=40')):
@@ -36,6 +39,7 @@ class MetadataTests(unittest.TestCase):
         self.assertRaises(AssertionError, check_wheel, self.wheel(extra={'config.json': 'secret'}), '0.3.0')
 
     def sdist(self, requires='cryptography>=41',extra=None):
+        """Build a synthetic source archive for dependency and secret-exclusion checks."""
         path = self.root/'app.tar.gz'; prefix='kobra_lan_cli-0.3.0'
         files = {name:'' for name in MODULES | DOCS | {'pyproject.toml'}}
         files['PKG-INFO'] = self.metadata
@@ -48,6 +52,7 @@ class MetadataTests(unittest.TestCase):
         return path
 
     def test_sdist_requires_exact_dependency_and_preserves_exclusions(self):
+        """Keep source dependency metadata exact without relaxing private-file exclusions."""
         check_sdist(self.sdist(),'0.3.0')
         for requires in ('','cryptography>=40','cryptography>=41\nunexpected'):
             self.assertRaises(AssertionError, check_sdist, self.sdist(requires), '0.3.0')

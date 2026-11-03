@@ -14,11 +14,13 @@ PIN = hashlib.sha256(b'synthetic certificate').hexdigest()
 
 
 def config():
+    """Construct a synthetic client config containing no real printer access."""
     return Config(HOST,20030,'Synthetic01','private-user','private-password','cert.pem','key.pem',PIN)
 
 
 class TransportTests(unittest.TestCase):
     def test_observation_is_tls_only(self):
+        """Assert that observing a certificate sends no MQTT credentials or packets."""
         raw = Mock(); raw.__enter__ = Mock(return_value=raw); raw.__exit__ = Mock()
         tls = Mock(); tls.__enter__ = Mock(return_value=tls); tls.__exit__ = Mock()
         tls.getpeercert.return_value = b'synthetic certificate'
@@ -30,6 +32,7 @@ class TransportTests(unittest.TestCase):
         tls.sendall.assert_not_called(); raw.sendall.assert_not_called()
 
     def test_authenticated_verification_only_queries_info(self):
+        """Assert that verification cannot invoke upload or printer controls."""
         client = Mock(); client.query.return_value = {'code':200,'data':{'state':'free','model':'Anycubic Kobra X','version':'2.0.2.2'}}
         transport = Mock(); transport.__enter__ = Mock(return_value=client); transport.__exit__ = Mock(return_value=False)
         with patch.object(p,'MQTT',return_value=transport) as mqtt:
@@ -40,6 +43,7 @@ class TransportTests(unittest.TestCase):
 
 class TrustTests(unittest.TestCase):
     def test_explicit_acceptance(self):
+        """Accept only explicit affirmative terminal answers after showing the trust boundary."""
         for answer in ('y\n','yes\n','YES\n'):
             stdin = io.StringIO(answer); stdin.isatty = lambda: True
             stderr = io.StringIO()
@@ -48,6 +52,7 @@ class TrustTests(unittest.TestCase):
             self.assertIn('does not authenticate',stderr.getvalue())
 
     def test_declined_empty_eof_noninteractive(self):
+        """Reject refusal, missing consent and truncated overlong affirmative input."""
         for answer in ('n\n','\n','','sure\n', 'yes' + ' ' * 32 + 'no\n'):
             stdin = io.StringIO(answer); stdin.isatty = lambda: True
             self.assertRaises(ProtocolError, p.accept_trust, config(), PIN, stdin=stdin, stderr=io.StringIO())
@@ -56,6 +61,7 @@ class TrustTests(unittest.TestCase):
         self.assertRaises(ProtocolError, p.accept_trust, config(), PIN, stdin=stdin, stderr=io.StringIO())
 
     def test_exact_pin_without_prompt_or_fallback(self):
+        """Require exact valid pins without invoking interactive consent."""
         stdin = Mock(); stderr = io.StringIO()
         p.accept_trust(config(),PIN,PIN.upper(),stdin=stdin,stderr=stderr)
         self.assertEqual(stderr.getvalue(),''); stdin.readline.assert_not_called()
@@ -64,6 +70,7 @@ class TrustTests(unittest.TestCase):
         stdin.readline.assert_not_called()
 
     def test_terminal_safe_bounded_metadata(self):
+        """Prevent printer-supplied terminal control sequences or excessive prompt output."""
         cfg = config(); cfg.printer_id = '\x1b[31m\n\u202e'+'x'*1000
         stdin = io.StringIO('y\n'); stdin.isatty = lambda: True
         stderr = io.StringIO(); p.accept_trust(cfg,PIN,stdin=stdin,stderr=stderr)
@@ -73,6 +80,7 @@ class TrustTests(unittest.TestCase):
 
     def test_changed_cert_rejected_before_credentials(self):
         # Reuse the real authenticated transport: a second observation is not trust.
+        """Exercise real MQTT pin checking before any credentials can be sent."""
         from kobra_lan.mqtt import MQTT
         ctx = Mock(); tls = Mock(); tls.getpeercert.return_value = b'changed certificate'
         ctx.wrap_socket.return_value = tls
@@ -85,11 +93,13 @@ class TrustTests(unittest.TestCase):
 
 class QualificationTests(unittest.TestCase):
     def transport(self, data):
+        """Build a synthetic MQTT context returning the specified structured info report."""
         client = Mock(); client.query.return_value = {'code':200,'data':data}
         transport = Mock(); transport.__enter__ = Mock(return_value=client); transport.__exit__ = Mock(return_value=False)
         return transport, client
 
     def test_free_and_busy_only_query(self):
+        """Permit pairing in either free or busy state without changing printer state."""
         for state in ('free','busy','printing'):
             transport, client = self.transport({'model':'Anycubic Kobra X','version':'2.0.2.2','state':state})
             with patch.object(p,'MQTT',return_value=transport):
@@ -97,6 +107,7 @@ class QualificationTests(unittest.TestCase):
             self.assertEqual(client.method_calls,[unittest.mock.call.query('info')])
 
     def test_conflicting_identity_firmware_missing_status(self):
+        """Refuse unqualified identity, firmware or malformed state before saving."""
         good = {'model':'Anycubic Kobra X','version':'2.0.2.2','state':'free'}
         for changes in ({'model':'other'},{'version':'3.0'},{'state':None},{'deviceId':'Other01'},
                         {'modelId':20031},{'modeId':'20031'},{'state':'\x1b[31m'}):
@@ -105,6 +116,7 @@ class QualificationTests(unittest.TestCase):
                 self.assertRaisesRegex(ProtocolError, 'Status qualification', p.verify_status, config())
 
     def test_authentication_and_no_fresh_report(self):
+        """Reject failed authentication and status timeouts without leaking raw errors."""
         transport, client = self.transport({})
         transport.__enter__.side_effect = ProtocolError('MQTT authentication rejected private')
         with patch.object(p, 'MQTT', return_value=transport):
@@ -115,9 +127,11 @@ class QualificationTests(unittest.TestCase):
             self.assertRaisesRegex(ProtocolError, 'Authentication/status', p.verify_status, config())
 
     def test_real_query_drops_stale_then_fails_without_fresh_report(self):
+        """Ensure the real MQTT query cannot substitute stale data for a fresh report."""
         from kobra_lan.mqtt import MQTT, string
         client = MQTT(config()); client.sock = Mock()
         def receive(deadline):
+            """Feed a correlated ACK and stale report before simulating a response timeout."""
             raw = client.sock.sendall.call_args.args[0]; payload = json.loads(raw[raw.index(b'{'):])
             if not getattr(client,'acked',False):
                 client.acked = True
@@ -137,17 +151,20 @@ from kobra_lan.provisioning import Bundle
 
 
 def bundle():
+    """Generate matching test-only credentials and PEM material in memory."""
     data = synthetic_bundle()
     return Bundle(data['deviceId'],20030,data['username'],data['password'],data['devicecrt'],data['devicepk'])
 
 
 class StorageTests(unittest.TestCase):
     def setUp(self):
+        """Create an isolated filesystem fixture and arrange its cleanup."""
         self.temp = tempfile.TemporaryDirectory(); self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name); self.dest = self.root/'private/config.json'
         self.bundle = bundle()
 
     def test_private_stage_config_contract_and_cleanup(self):
+        """Check private modes, loader compatibility and cleanup before publication."""
         with p.PrivateStage(self.dest) as stage:
             cfg = stage.prepare(self.bundle,HOST)
             self.assertEqual(stat.S_IMODE(self.dest.parent.stat().st_mode),0o700)
@@ -161,6 +178,7 @@ class StorageTests(unittest.TestCase):
         self.assertEqual(list(self.dest.parent.iterdir()),[])
 
     def test_shared_parent_and_symlinks_refused(self):
+        """Reject shared, foreign-owned or symlinked configuration directories."""
         self.dest.parent.mkdir(mode=0o755)
         self.assertRaises(OSError, p.PrivateStage, self.dest)
         self.assertEqual(stat.S_IMODE(self.dest.parent.stat().st_mode),0o755)
@@ -171,6 +189,7 @@ class StorageTests(unittest.TestCase):
             self.assertRaises(OSError, p.PrivateStage, self.dest)
 
     def test_exclusive_secret_creation(self):
+        """Refuse replacement of staged files and preserve symlink targets."""
         with p.PrivateStage(self.dest) as stage:
             cfg = stage.prepare(self.bundle,HOST)
             self.assertRaises(FileExistsError, stage.write_secret, 'client.key', b'replace')
@@ -186,6 +205,7 @@ class StorageTests(unittest.TestCase):
 
 class PublicationTests(StorageTests):
     def test_atomic_complete_publish_and_permissions(self):
+        """Ensure published configs reference complete private PEM files."""
         with p.PrivateStage(self.dest) as stage:
             cfg = stage.prepare(self.bundle,HOST); cfg.tls_sha256 = PIN
             stage.publish(cfg)
@@ -196,6 +216,7 @@ class PublicationTests(StorageTests):
         self.assertEqual({f.name for f in Path(loaded.client_key).parent.iterdir()},{'client.crt','client.key'})
 
     def test_concurrent_config_creation_preserved(self):
+        """Preserve a destination created after the initial absence check."""
         with p.PrivateStage(self.dest) as stage:
             cfg = stage.prepare(self.bundle,HOST)
             self.dest.write_text('concurrent config')
@@ -204,6 +225,7 @@ class PublicationTests(StorageTests):
         self.assertEqual(list(self.dest.parent.iterdir()),[self.dest])
 
     def test_write_fsync_link_failures_cleanup_before_commit(self):
+        """Remove unpublished secrets after injected persistence failures."""
         for operation in ('write_secret','fsync','link'):
             with self.subTest(operation=operation):
                 with p.PrivateStage(self.dest) as stage:
@@ -214,9 +236,11 @@ class PublicationTests(StorageTests):
                 self.assertFalse(self.dest.exists()); self.assertEqual(list(self.dest.parent.iterdir()),[])
 
     def test_partial_pem_failure_cleanup(self):
+        """Remove both staged PEM files when writing the second file fails."""
         real_fsync = os.fsync
         calls = 0
         def fail_second(fd):
+            """Inject a failure after the first PEM has already been durably written."""
             nonlocal calls
             calls += 1
             if calls==2: raise OSError('private')
@@ -227,6 +251,7 @@ class PublicationTests(StorageTests):
         self.assertEqual(list(self.dest.parent.iterdir()),[])
 
     def test_failures_after_commit_preserve_config_and_pems(self):
+        """Retain a visible config and its PEMs when final fsync or cleanup fails."""
         for operation in ('fsync','unlink'):
             with self.subTest(operation=operation):
                 dest = self.dest.parent/(operation+'.json')
@@ -234,6 +259,7 @@ class PublicationTests(StorageTests):
                     cfg = stage.prepare(self.bundle,HOST)
                     original = os.link
                     def link_then_fail(*args,**kwargs):
+                        """Publish the link before enabling faults in final durability or cleanup operations."""
                         result = original(*args,**kwargs)
                         # Fault begins only after publication.
                         fault.start()
@@ -248,6 +274,7 @@ class PublicationTests(StorageTests):
                 self.assertEqual(Path(loaded.client_key).read_text(),self.bundle.private_key)
 
     def test_declined_trust_cleans_up_without_authentication(self):
+        """Remove staged secrets without authenticating after trust is refused."""
         with patch.object(p,'provision',return_value=self.bundle), patch.object(p,'observe_fingerprint',return_value=PIN), patch.object(p,'accept_trust',side_effect=ProtocolError('Trust: declined')), patch.object(p,'verify_status') as verify:
             self.assertRaises(ProtocolError, p.pair, self.dest, HOST)
         verify.assert_not_called(); self.assertFalse(self.dest.exists())
@@ -256,6 +283,7 @@ class PublicationTests(StorageTests):
 
 class PreservationTests(StorageTests):
     def test_existing_file_and_dangling_link_before_network(self):
+        """Refuse every existing destination before provisioning, including dangling links."""
         self.dest.parent.mkdir(mode=0o700)
         for symlink in (False,True):
             if symlink: self.dest.symlink_to(self.root/'missing')
@@ -267,6 +295,7 @@ class PreservationTests(StorageTests):
             self.dest.unlink()
 
     def test_parallel_stages_only_one_publishes(self):
+        """Allow exactly one competing stage to publish without deleting the winner."""
         with p.PrivateStage(self.dest) as first:
             with p.PrivateStage(self.dest) as second:
                 cfg1 = first.prepare(self.bundle,HOST); cfg2 = second.prepare(self.bundle,HOST)
@@ -277,6 +306,7 @@ class PreservationTests(StorageTests):
         self.assertTrue(Path(cfg1.client_key).exists())
 
     def test_alternate_destination_preserves_original_and_markers(self):
+        """Keep original config, PEM bytes and operation reservations unchanged."""
         original = self.root/'original.json'; original.write_text('original config')
         pem = self.root/'original.key'; pem.write_text('original PEM')
         markers = [self.root/'upload.attempt',self.root/'start.attempt']
@@ -288,6 +318,7 @@ class PreservationTests(StorageTests):
         self.assertEqual(before,{f:(f.read_bytes(),f.stat().st_mode,f.stat().st_uid) for f in paths})
 
     def test_colliding_stage_is_not_owned_or_deleted(self):
+        """Never delete a randomly colliding directory owned by another invocation."""
         self.dest.parent.mkdir(mode=0o700)
         existing = self.dest.parent/('.pair-'+'0'*32); existing.mkdir(mode=0o700)
         with p.PrivateStage(self.dest) as stage:
@@ -301,11 +332,13 @@ from kobra_lan.cli import main
 
 class CLITests(StorageTests):
     def invoke(self, args):
+        """Capture JSON stdout, stderr and exit status from one CLI invocation."""
         stdout, stderr = io.StringIO(), io.StringIO()
         with redirect_stdout(stdout), redirect_stderr(stderr): code = main(args)
         return code, json.loads(stdout.getvalue()), stderr.getvalue()
 
     def test_help_and_required_options(self):
+        """Check pairing discovery and required arguments without loading a config."""
         for args in (['--help'],['printer','--help'],['printer','pair','--help']):
             stdout = io.StringIO()
             with redirect_stdout(stdout), self.assertRaises(SystemExit) as exit:
@@ -317,6 +350,7 @@ class CLITests(StorageTests):
         self.assertEqual(exit.exception.code,2)
 
     def test_synthetic_pair_then_ordinary_status(self):
+        """Load a newly paired config with the ordinary status command."""
         with patch.object(p,'provision',return_value=self.bundle), patch.object(p,'observe_fingerprint',return_value=PIN), patch.object(p,'verify_status',return_value={'firmware':'2.0.2.2','state':'free'}):
             code, result, stderr = self.invoke(['--config',str(self.dest),'printer','pair','--host',HOST,'--trust-sha256',PIN])
         self.assertEqual(code,0); self.assertTrue(result['ok']); self.assertEqual(stderr,'')
@@ -329,6 +363,7 @@ class CLITests(StorageTests):
         self.assertEqual(mqtt.call_args.args[0].mqtt_password,self.bundle.password)
 
     def test_invalid_host_pin_and_existing_path_before_network(self):
+        """Check CLI validation exits before any provisioning request."""
         with patch.object(p,'provision') as provision:
             for host,pin in [('localhost',PIN),(HOST,'bad')]:
                 code, result, _ = self.invoke(['--config',str(self.dest),'printer','pair','--host',host,'--trust-sha256',pin])
@@ -343,10 +378,12 @@ from test_provisioning import encrypt, INFO, TOKEN
 
 class DiagnosticTests(CLITests):
     def command(self, pin=PIN):
+        """Build an isolated pairing command with an optional explicit fingerprint."""
         args = ['--config',str(self.dest),'printer','pair','--host',HOST]
         return args if pin is None else args+['--trust-sha256',pin]
 
     def test_full_synthetic_http_to_cli_and_interactive_stderr(self):
+        """Exercise HTTP decoding through terminal consent and compatible saved configuration."""
         data = {'deviceId':self.bundle.device_id,'modelId':20030,'username':self.bundle.username,
                 'password':self.bundle.password,'devicecrt':self.bundle.certificate,'devicepk':self.bundle.private_key}
         stdin = io.StringIO('yes\n'); stdin.isatty = lambda: True
@@ -357,6 +394,7 @@ class DiagnosticTests(CLITests):
         self.assertEqual(Config.load(self.dest).mqtt_username,self.bundle.username)
 
     def test_sanitized_protocol_network_filesystem_and_trust_diagnostics(self):
+        """Reject injected failures without leaking sensitive values to either output stream."""
         secret = 'SENSITIVE\x1b[31m\n'
         scenarios = [
             (patch('kobra_lan.provisioning.request_json',return_value={'token':secret,'ctrlInfoUrl':secret}),2,'Response validation'),
@@ -380,6 +418,7 @@ class DiagnosticTests(CLITests):
                 self.assertFalse(self.dest.exists()); self.assertEqual(list(self.dest.parent.iterdir()),[])
 
     def test_authentication_and_qualification_safe_output(self):
+        """Keep authentication and firmware diagnostics independent of untrusted response text."""
         for data in ({'model':'Anycubic Kobra X','version':'sensitive-firmware','state':'free'}, None):
             client = Mock(); client.query.return_value = {'data':data}
             transport = Mock(); transport.__enter__ = Mock(return_value=client); transport.__exit__ = Mock(return_value=False)
@@ -390,6 +429,7 @@ class DiagnosticTests(CLITests):
             self.assertFalse(self.dest.exists())
 
     def test_provisioning_network_error_safe(self):
+        """Report a provisioning network stage without printing tokenized URLs."""
         with patch.object(p,'provision',side_effect=OSError('sensitive tokenized URL')):
             code,result,_ = self.invoke(self.command())
         self.assertEqual(code,3); self.assertIn('Provisioning',result['error']); self.assertNotIn('sensitive',result['error'])
@@ -397,6 +437,7 @@ class DiagnosticTests(CLITests):
 
 class TerminalTests(unittest.TestCase):
     def test_acceptance_on_real_terminal_stdin(self):
+        """Verify explicit consent using a real terminal rather than an isatty mock."""
         import pty
         import subprocess
         import sys
@@ -417,13 +458,56 @@ class TerminalTests(unittest.TestCase):
 
 class AmbiguousPublicationTests(StorageTests):
     def test_publication_raises_after_link_preserves_referenced_pems(self):
+        """Retain referenced PEMs after filesystem errors, KeyboardInterrupt and SystemExit."""
         link = os.link
-        def ambiguous(*args,**kwargs):
-            link(*args,**kwargs)
-            raise OSError('ambiguous publication')
+        for failure in (OSError, KeyboardInterrupt, SystemExit):
+            with self.subTest(failure=failure.__name__):
+                destination = self.dest.parent / (failure.__name__ + '.json')
+                def ambiguous(*args, **kwargs):
+                    """Create the destination link, then simulate an ambiguous completion result."""
+                    link(*args, **kwargs)
+                    raise failure('interrupted after publication')
+                with p.PrivateStage(destination) as stage:
+                    cfg = stage.prepare(self.bundle, HOST)
+                    with patch.object(p.os, 'link', side_effect=ambiguous):
+                        self.assertRaises(failure, stage.publish, cfg)
+                loaded = Config.load(destination)
+                self.assertTrue(Path(loaded.client_key).is_file())
+
+    def test_interruption_before_link_removes_unpublished_secrets(self):
+        """Clean staged files when interruption happens before the destination exists."""
         with p.PrivateStage(self.dest) as stage:
-            cfg = stage.prepare(self.bundle,HOST)
-            with patch.object(p.os,'link',side_effect=ambiguous):
-                self.assertRaises(OSError, stage.publish, cfg)
+            cfg = stage.prepare(self.bundle, HOST)
+            with patch.object(p.os, 'link', side_effect=KeyboardInterrupt):
+                self.assertRaises(KeyboardInterrupt, stage.publish, cfg)
+        self.assertFalse(self.dest.exists())
+        self.assertEqual(list(self.dest.parent.iterdir()), [])
+
+    def test_cleanup_reconciles_publication_without_committed_flag(self):
+        """Use destination ownership rather than a stale in-memory flag during cleanup."""
+        def interrupted_context():
+            """Simulate interruption after publication before an in-memory commit is recorded."""
+            with p.PrivateStage(self.dest) as stage:
+                cfg = stage.prepare(self.bundle, HOST)
+                stage.write_secret(p.CANDIDATE_FILE, json.dumps(asdict(cfg)).encode())
+                os.link(p.CANDIDATE_FILE, self.dest.name, src_dir_fd=stage.stage_fd,
+                        dst_dir_fd=stage.parent_fd, follow_symlinks=False)
+                raise KeyboardInterrupt
+        self.assertRaises(KeyboardInterrupt, interrupted_context)
+        loaded = Config.load(self.dest)
+        self.assertTrue(Path(loaded.client_key).is_file())
+
+    def test_uncertain_inode_check_retains_published_secrets(self):
+        """Retain possibly referenced PEMs when ownership cannot be read reliably."""
+        fault = patch.object(p.os, 'stat', side_effect=OSError('uncertain filesystem'))
+        try:
+            with p.PrivateStage(self.dest) as stage:
+                cfg = stage.prepare(self.bundle, HOST)
+                stage.write_secret(p.CANDIDATE_FILE, json.dumps(asdict(cfg)).encode())
+                os.link(p.CANDIDATE_FILE, self.dest.name, src_dir_fd=stage.stage_fd,
+                        dst_dir_fd=stage.parent_fd, follow_symlinks=False)
+                fault.start()
+        finally:
+            fault.stop()
         loaded = Config.load(self.dest)
         self.assertTrue(Path(loaded.client_key).is_file())

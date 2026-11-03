@@ -16,10 +16,12 @@ import subprocess
 
 
 def run(*args, **kwargs):
+    """Run an acceptance command once and fail on a nonzero exit."""
     return subprocess.run(args, check=True, **kwargs)
 
 
 def snapshot(home):
+    """Capture synthetic private-state bytes, ownership and modes for lifecycle comparison."""
     result = {}
     for base in (home / ".config/kobra-lan", home / ".local/share/kobra-lan"):
         for path in [base] + sorted(base.rglob("*")):
@@ -30,6 +32,7 @@ def snapshot(home):
 
 
 def main():
+    """Exercise install, upgrade, remove and purge only in a disposable networkless system."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("deb", type=Path)
     parser.add_argument("version")
@@ -81,11 +84,13 @@ def main():
     def apt(*arguments):
         # APT's --no-download mishandles local .deb acquisition on both targets.
         # The empty network namespace enforces offline installation instead.
+        """Apply one package lifecycle operation and verify private fixtures are unchanged."""
         run("apt-get", "-y", *arguments, env=dict(os.environ, DEBIAN_FRONTEND="noninteractive"))
         assert snapshot(home) == before, f"Private data changed after {arguments}"
 
     def probe(*arguments, code=0):
         # Explicit installed path, empty environment, no checkout, development launcher or PYTHONPATH.
+        """Run the installed command as the fixture user outside the checkout."""
         result = subprocess.run(["runuser", "-u", "kobra-acceptance", "--", "env", "-i",
                                  f"HOME={home}", "PATH=/usr/bin:/bin", "/usr/bin/kobra-lan", *arguments],
                                 cwd=work, text=True, capture_output=True)
@@ -93,6 +98,7 @@ def main():
         return result.stdout
 
     def installed_probes():
+        """Check installed help, local inspection and synthetic pairing without printer access."""
         assert probe("--version").strip() == args.version
         assert "usage:" in probe("--help")
         assert "--trust-sha256" in probe("printer", "pair", "--help")

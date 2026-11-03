@@ -23,6 +23,7 @@ from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
 
 def main():
+    """Exercise the installed entry point with synthetic credentials and all real sockets blocked."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--command', required=True, type=Path)
     args = parser.parse_args()
@@ -53,9 +54,11 @@ def main():
         def __enter__(self): return self
         def __exit__(self,*args): pass
         def query(self,kind):
+            """Permit only the read-only info query in the installed-command probe."""
             assert kind=='info'
             return {'code':200,'data':info}
     def invoke(argv):
+        """Capture one installed command and reject failure, stderr or leaked synthetic credentials."""
         stdout,stderr = io.StringIO(),io.StringIO()
         with patch.object(sys,'argv',[str(args.command),*argv]), redirect_stdout(stdout), redirect_stderr(stderr):
             try: runpy.run_path(str(args.command),run_name='__main__')

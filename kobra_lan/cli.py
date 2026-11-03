@@ -12,6 +12,7 @@ from .pairing import pair, PairingLocalError
 
 
 def main(argv=None):
+    """Dispatch CLI operations and emit one JSON result using the established exit codes."""
     parser = argparse.ArgumentParser(description="Direct Kobra X LAN client; upload never requests print/start")
     parser.add_argument("--version", action="version", version=__version__)
     parser.add_argument("--config", type=Path, default=Path.home() / ".config/kobra-lan/config.json")

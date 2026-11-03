@@ -11,6 +11,7 @@ from release_version import source_version
 
 
 def check(deb, version):
+    """Verify Debian identity, dependencies and every packaged file against allowlists."""
     fields = subprocess.check_output(["dpkg-deb", "-f", str(deb), "Package", "Version", "Architecture", "Depends"], text=True)
     assert f"Package: kobra-lan-cli\n" in fields, fields
     assert f"Version: {version}-1\n" in fields, fields
