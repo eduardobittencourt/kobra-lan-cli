@@ -2,6 +2,7 @@
 from contextlib import redirect_stdout
 import hashlib
 import io
+from itertools import combinations
 import json
 import math
 from pathlib import Path
@@ -185,12 +186,15 @@ class DoctorTests(unittest.TestCase):
 
     def test_optional_report_identity_can_be_omitted_without_writes_or_extra_queries(self):
         before = {str(p): (p.read_bytes(), p.stat().st_mode) for p in self.registry.root.rglob('*') if p.is_file()}
-        for absent in (('deviceId',),('modelId','modeId'),('deviceId','modelId','modeId')):
+        optional = ('deviceId', 'modelId', 'modeId')
+        complete = {**INFO, 'modeId': INFO['modelId']}
+        omissions = [()] + [absent for size in range(1, 4) for absent in combinations(optional, size)]
+        for absent in omissions:
             class MissingIdentity(HealthyMQTT):
                 def query(self,kind):
                     self.calls.append(kind)
                     assert kind == 'info'
-                    return {'code':200,'data':{key:value for key,value in INFO.items() if key not in absent}}
+                    return {'code':200,'data':{key:value for key,value in complete.items() if key not in absent}}
             for mode in ([], ['--json']):
                 HealthyMQTT.calls = []
                 stdout = io.StringIO()
@@ -203,7 +207,10 @@ class DoctorTests(unittest.TestCase):
                     self.assertTrue(report['ok'])
                     self.assertTrue(report['result']['healthy'])
                     self.assertTrue(all(check['status'] == 'passed' for check in report['result']['checks']))
-                self.assertIn('optional MQTT identity fields omitted', stdout.getvalue())
+                if absent:
+                    self.assertIn('optional MQTT identity fields omitted: ' + ', '.join(absent), stdout.getvalue())
+                else:
+                    self.assertNotIn('optional MQTT identity fields omitted', stdout.getvalue())
                 self.assertEqual(HealthyMQTT.calls, ['info'])
         self.assertEqual(before, {str(p): (p.read_bytes(), p.stat().st_mode)
                                  for p in self.registry.root.rglob('*') if p.is_file()})

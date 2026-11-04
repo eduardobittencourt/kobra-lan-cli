@@ -156,7 +156,7 @@ only a fresh correlated `info` report. A busy/printing target can pass.
 Compatibility requires the fresh MQTT report to identify `Anycubic Kobra X`,
 firmware `2.0.2.2` and a valid state. As in pairing, `deviceId`, `modelId` and
 `modeId` are optional in this report; every supplied identifier must match the
-selected configuration. Omitted optional identifiers are noted without failing:
+selected configuration. Every omitted optional identifier is named without failing:
 target trust still requires the saved TLS pin and successful MQTT authentication.
 Missing required model/firmware/state evidence fails with `qualification_incomplete`;
 contradictory, unsupported or invalid values fail with `outside_qualification`.

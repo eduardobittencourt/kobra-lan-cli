@@ -115,9 +115,11 @@ class DiagnosticReport:
         issue = compatibility_issue(cfg, info)
         if issue is None:
             self.passed('compatibility')
-            if 'deviceId' not in info or not any(key in info for key in ('modelId', 'modeId')):
+            missing = [key for key in ('deviceId', 'modelId', 'modeId') if key not in info]
+            if missing:
                 self.checks['compatibility']['message'] += (
-                    '; optional MQTT identity fields omitted; target trust uses the saved TLS pin and MQTT authentication')
+                    '; optional MQTT identity fields omitted: ' + ', '.join(missing)
+                    + '; target trust uses the saved TLS pin and MQTT authentication')
         elif issue == 'qualification_incomplete':
             self.failed('compatibility', issue, 2,
                         'Fresh status omits required model, firmware or state; compatibility could not be established',
