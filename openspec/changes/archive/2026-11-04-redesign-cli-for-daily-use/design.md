@@ -144,3 +144,7 @@ one operand. Uploads use a nonblocking per-device lease in shared state storage
 from preflight through verification, preserving existing hash-based markers.
 The lock inode remains after release. Other clients/state directories do not
 participate in this coordination; atomic firmware-side exclusion is not claimed.
+Upload marker checks, reservations, atomic receipt publication, temporary-file
+cleanup and fsync use the leased directory descriptor. The configured path's
+inode is rechecked before POST and before success, refusing replacement while
+retaining receipts and markers in the original leased directory.

@@ -112,6 +112,10 @@ To request execution later, use `print start` with the same explicit arguments p
   State paths are walked without following symlinks; an existing device directory
   must be user-owned and private (0700). Invalid permissions are refused without
   changing them, and the lock must be a private regular file (0600).
+  Marker checks, reservations and atomic receipt writes stay relative to the
+  leased directory descriptor. A replaced state path blocks sending or records
+  uncertainty after a send; reservations and receipts remain in the original
+  directory and no request is replayed.
   Other clients or state directories do not share this lock, and firmware-side
   atomic rejection of an existing filename has not been established.
 - Existing remote files are not overwritten. Names must be safe ASCII basenames; only `.gcode` files up to 128 MiB are accepted.

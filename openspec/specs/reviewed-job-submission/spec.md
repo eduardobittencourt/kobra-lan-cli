@@ -35,6 +35,10 @@ Uploads sharing the same device state directory SHALL hold an exclusive device l
 - **WHEN** different reviewed payloads target the same remote filename through the same device state directory
 - **THEN** only the lease holder can access the printer, and any later lease holder checks the fresh listing before considering an upload
 
+#### Scenario: State path replaced during upload
+- **WHEN** the configured state path is replaced while an upload holds its device lease
+- **THEN** marker checks, reservations and receipt writes remain in the leased directory; detected replacement blocks a POST or records uncertainty after a POST without replay or writes into the replacement directory
+
 ### Requirement: Read-only print plan
 `print plan <file> --name <remote-name> --slot <1..4> --auto-leveling <on|off> --vibration-compensation <on|off> --flow-calibration <on|off>` SHALL validate the selected printer, local file, remote metadata and loaded material using the existing qualification checks. It SHALL report the reviewed plan hash, selected device, file hash/name, slot/material/color, explicit preparation settings and qualification limits without upload, start or attempt writes.
 

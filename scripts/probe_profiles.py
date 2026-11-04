@@ -69,7 +69,7 @@ def main():
             sha=hashlib.sha256(gcode.read_bytes()).hexdigest()
             device=hashlib.sha256(b'Synthetic01').hexdigest()[:16]
             state=home/'.local/share/kobra-lan/uploads'
-            directory=state/device; directory.mkdir(parents=True)
+            directory=state/device; directory.mkdir(parents=True, mode=0o700)
             marker=directory/(sha+'.attempt'); marker.write_bytes(b'synthetic uncertain upload')
             upload=['files','upload',str(gcode),'--execute','--sha256',sha]
             assert invoke(upload,expected=2)['error']['message']==duplicate_message

@@ -344,7 +344,7 @@ class CLITests(StorageTests):
         gcode = self.root/'input.gcode'; gcode.write_bytes(GCODE)
         sha = hashlib.sha256(GCODE).hexdigest()
         state = self.root/'custom-state'; device = hashlib.sha256(cfg.printer_id.encode()).hexdigest()[:16]
-        directory = state/device; directory.mkdir(parents=True)
+        directory = state/device; directory.mkdir(parents=True, mode=0o700)
         (directory/(sha+'.attempt')).write_text('uncertain upload')
         args = ['--state-dir',str(state),'files','upload',str(gcode),'--execute','--sha256',sha]
         self.assertEqual(self.invoke('--printer','bancada',*args)[0],2)
