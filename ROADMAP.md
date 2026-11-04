@@ -20,7 +20,7 @@ Our local `anycubic-next` launcher is a separate wrapper around the official sli
 
 Version 0.2.1 already implements direct MQTT/TLS and HTTP communication, status and file queries, local G-code inspection, reviewed uploads, and an experimental reviewed print start. It has 28 offline tests and one scoped hardware validation of upload and start. Completion and physical print quality have not been recorded.
 
-Current limits include model 20030 / firmware 2.0.2.2, Next-generated G-code, one filament, and the onboard four-slot configuration. The new `printer pair --host <IPv4>` flow provisions direct access for an already LAN-enabled printer, with explicit first-use trust or an exact externally supplied fingerprint. It saves a compatible private config only after a read-only status query; existing configs are preserved. Discovery, named profiles, replacement/revocation, and initial printer/app LAN-mode setup remain outside this implementation. Runtime operation is independent of HA, Next, and cloud services.
+Current limits include model 20030 / firmware 2.0.2.2, Next-generated G-code, one filament, and the onboard four-slot configuration. The new `printer pair --host <IPv4>` flow provisions direct access for an already LAN-enabled printer, with explicit first-use trust or an exact externally supplied fingerprint. It saves a compatible private config only after a read-only status query; existing configs are preserved. Version 0.4.0 adds named local profiles, explicit default selection, confirmed local removal and bounded read-only doctor diagnostics. Discovery, credential replacement/revocation and initial printer/app LAN-mode setup remain outside this implementation. Runtime operation is independent of HA, Next, and cloud services.
 
 The project has Python metadata and a console entry point in `pyproject.toml`, but the current documented installation is a source checkout with a Linux launcher. This roadmap does not assert that PyPI, Homebrew, apt, or mise installation has been published or tested.
 
@@ -44,8 +44,8 @@ Direct onboarding is implemented for an already LAN-enabled model 20030 / firmwa
 - Investigate the actual discovery and LAN provisioning mechanisms, then implement pairing in the CLI where possible. Support an explicit address when discovery cannot cross network boundaries.
 - Document the exact printer-panel and Anycubic-app steps, any physical confirmation or pairing code, and whether an account/internet connection is required during setup. Do not promise cloud-free provisioning until verified independently.
 - Obtain per-device identity, credentials, client certificate/key, and initial server trust through a documented process. Protect stored secrets and never silently accept a changed certificate pin.
-- Add named printer profiles, an explicit `--printer` override, a persistent default, connection verification, and local removal/re-pairing. Distinguish deleting a local profile from revoking access on the device.
-- Provide useful diagnostics for unsupported firmware, stale credentials, changed addresses, TLS changes, and network isolation.
+- Implemented in 0.4.0: named printer profiles, explicit `--printer`, opt-in persistent defaults, bounded connection verification and confirmed local removal. Re-pairing preserves device-based markers; deleting a profile does not revoke device access.
+- Implemented in 0.4.0: staged diagnostics for local configuration, reachability, trust/authentication, fresh status and qualification. Discovery and automatic address/credential repair remain future work.
 
 Exit evidence: an owner can follow public instructions from a fresh client installation to a successful status query using their own printer, with no HA/bridge configuration dependency. Record every external requirement and unresolved limitation.
 

@@ -89,7 +89,7 @@ class UploadTests(unittest.TestCase):
             with self.assertRaises(ProtocolError): execute(config(), self.file, "0" * 64, self.root)
             mqtt.assert_not_called()
     def test_dry_run_has_no_network(self):
-        with patch("kobra_lan.cli.Config.load") as cfg, contextlib.redirect_stdout(io.StringIO()):
+        with patch("kobra_lan.config.Config.load") as cfg, contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(main(["upload", str(self.file), "--name", "agent-test.gcode"]), 0)
             cfg.assert_not_called()
     def test_timeout_attempt_cannot_be_replayed(self):

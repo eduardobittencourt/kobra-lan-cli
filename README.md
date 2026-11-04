@@ -26,11 +26,13 @@ cd kobra-lan-cli
 ./kobra-lan file agent-model.gcode
 ```
 
-`upload` is a local dry run unless given `--execute` and the reviewed hash. It never starts a print. Output is JSON; exit codes are 0 (success), 2 (protocol/validation error), and 3 (configuration/network error). Global options `--config` and `--state-dir` go before the subcommand.
+`upload` is a local dry run unless given `--execute` and the reviewed hash. It never starts a print. Output is JSON; exit codes are 0 (success), 2 (protocol/validation error), and 3 (configuration/network error). Global options `--config`, `--printer` and `--state-dir` go before the subcommand.
 
 ## Setup and safe operation
 
 Pairing and status access require private configuration. Read [LAN onboarding and initial trust](docs/pairing.md) before connecting: initial HTTP provisioning is unauthenticated and exposes credentials on the network. Provision only on a trusted network and establish the TLS fingerprint explicitly.
+
+Named access supports offline `printer list`, `printer info [name]` and `printer use <name>`. Use `--printer <name>` for one command, `printer pair --name <name> --host <IPv4> [--default]` for new managed access, and confirmed `printer remove <name>` for local deletion. `doctor` performs bounded read-only checks without provisioning or repair. See [profile selection and recovery](docs/pairing.md#select-and-inspect-saved-printers) and [diagnostics](docs/usage.md#diagnose-a-selected-connection).
 
 Read [operation and protocol guarantees](docs/usage.md) before uploading or starting a print. Print start is experimental, requires an explicitly reviewed plan and authorization for the physical action, and never repeats automatically. Preserve private credentials, upload receipts and durable attempt markers.
 

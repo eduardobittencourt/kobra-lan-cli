@@ -37,54 +37,104 @@ def packet(header, body):
     return bytes(result) + body
 
 
+class MQTTFailure(ProtocolError):
+    """Typed diagnostic category retaining the operational ProtocolError contract."""
+    def __init__(self, stage, code, message, exit_code=2):
+        super().__init__(message)
+        self.stage, self.code, self.exit_code = stage, code, exit_code
+
+
+class MQTTIOFailure(OSError):
+    def __init__(self, stage):
+        super().__init__("MQTT network operation failed; no automatic retry")
+        self.stage = stage
+
+
 class MQTT:
-    def __init__(self, config, timeout=12):
+    def __init__(self, config, timeout=12, deadline=None, observer=None):
         self.config = config
         self.timeout = timeout
         self.sock = None
+        self.deadline = deadline
+        self.observer = observer
+        self.stage = 'status'
+        self.stage_deadline = None
+
+    def begin_stage(self, stage):
+        self.stage = stage
+        self.stage_deadline = self.limit()
+
+    def limit(self):
+        end = time.monotonic() + self.timeout
+        return min(end, self.deadline) if self.deadline is not None else end
+
+    def remaining(self):
+        remaining = (self.stage_deadline or self.limit()) - time.monotonic()
+        if remaining <= 0:
+            raise MQTTFailure(self.stage, 'timeout', 'MQTT response timeout (command was not retried)', 3)
+        return remaining
+
+    def passed(self, stage):
+        if self.observer is not None:
+            self.observer(stage)
 
     def __enter__(self):
         cfg = self.config
-        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-        # The printer uses a private certificate: pin DER before sending credentials.
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
-        ctx.load_cert_chain(cfg.client_cert, cfg.client_key)
-        raw = socket.create_connection((cfg.host, cfg.mqtt_port), self.timeout)
+        raw = None
+        self.begin_stage('tls_pin')
         try:
+            ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+            # Pin DER before MQTT credentials. No CA/hostname substitution.
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+            ctx.load_cert_chain(cfg.client_cert, cfg.client_key)
+            raw = socket.create_connection((cfg.host, cfg.mqtt_port), self.remaining())
+            raw.settimeout(self.remaining())
             self.sock = ctx.wrap_socket(raw, server_hostname=cfg.host)
             digest = hashlib.sha256(self.sock.getpeercert(binary_form=True)).hexdigest()
             if not hmac.compare_digest(digest, cfg.tls_sha256.lower()):
-                raise ProtocolError("Printer TLS fingerprint changed; credentials were not sent")
-            self.sock.settimeout(self.timeout)
-            client_id = "kobra-lan-" + uuid.uuid4().hex[:16]
-            connect = b"\x00\x04MQTT\x04\xc2\x00\x3c"
+                raise MQTTFailure('tls_pin', 'pin_mismatch', 'Printer TLS fingerprint changed; credentials were not sent')
+            self.passed('tls_pin')
+            self.begin_stage('mqtt_auth')
+            self.sock.settimeout(self.remaining())
+            client_id = 'kobra-lan-' + uuid.uuid4().hex[:16]
+            connect = b'\x00\x04MQTT\x04\xc2\x00\x3c'
             connect += string(client_id) + string(cfg.mqtt_username) + string(cfg.mqtt_password)
             self.sock.sendall(packet(0x10, connect))
-            header, body = self.receive(time.monotonic() + self.timeout)
-            if header != 0x20 or body != b"\x00\x00":
-                raise ProtocolError("MQTT authentication rejected")
-            topic = f"{BASE}/printer/+/{cfg.type_id}/{cfg.printer_id}/#"
-            self.sock.sendall(packet(0x82, b"\x00\x01" + string(topic) + b"\x00"))
-            deadline = time.monotonic() + self.timeout
+            header, body = self.receive(self.stage_deadline)
+            if header != 0x20 or body != b'\x00\x00':
+                raise MQTTFailure('mqtt_auth', 'authentication_rejected', 'MQTT authentication rejected')
+            topic = f'{BASE}/printer/+/{cfg.type_id}/{cfg.printer_id}/#'
+            self.sock.settimeout(self.remaining())
+            self.sock.sendall(packet(0x82, b'\x00\x01' + string(topic) + b'\x00'))
             while True:
-                header, body = self.receive(deadline)
+                header, body = self.receive(self.stage_deadline)
                 if header == 0x90:
-                    if body != b"\x00\x01\x00":
-                        raise ProtocolError("MQTT subscription rejected")
+                    if body != b'\x00\x01\x00':
+                        raise MQTTFailure('mqtt_auth', 'subscription_rejected', 'MQTT subscription rejected')
                     break
+            self.passed('mqtt_auth')
+            self.stage = 'status'
+            self.stage_deadline = None
             return self
-        except BaseException:
+        except BaseException as error:
             if self.sock:
                 self.sock.close()
-            else:
+            elif raw is not None:
                 raw.close()
+            if isinstance(error, OSError):
+                raise MQTTIOFailure(self.stage) from None
+            if isinstance(error, ProtocolError) and not isinstance(error, MQTTFailure):
+                raise MQTTFailure(self.stage, 'protocol_rejected', str(error)) from None
             raise
 
     def __exit__(self, *args):
         if self.sock:
             try:
-                self.sock.sendall(b"\xe0\x00")
+                if self.deadline is None or time.monotonic() < self.deadline:
+                    if self.deadline is not None:
+                        self.sock.settimeout(max(0.001, min(self.timeout, self.deadline - time.monotonic())))
+                    self.sock.sendall(b"\xe0\x00")
             except OSError:
                 pass
             self.sock.close()
@@ -94,7 +144,7 @@ class MQTT:
         while len(result) < size:
             left = deadline - time.monotonic()
             if left <= 0:
-                raise ProtocolError("MQTT response timeout (command was not retried)")
+                raise MQTTFailure(self.stage, "timeout", "MQTT response timeout (command was not retried)", 3)
             self.sock.settimeout(left)
             part = self.sock.recv(size - len(result))
             if not part:
@@ -123,13 +173,15 @@ class MQTT:
                    ("file", "listLocal")}
         if (kind, action) not in allowed:
             raise ProtocolError("Unqualified MQTT command")
+        self.begin_stage('status')
         msgid = str(uuid.uuid4())
         sent_timestamp = int(time.time() * 1000)
         payload = {"type": kind, "action": action, "msgid": msgid,
                    "timestamp": sent_timestamp, "data": data}
         topic = f"{BASE}/slicer/printer/{self.config.type_id}/{self.config.printer_id}/{kind}"
+        self.sock.settimeout(self.remaining())
         self.sock.sendall(packet(0x30, string(topic) + json.dumps(payload, separators=(",", ":")).encode()))
-        deadline = time.monotonic() + self.timeout
+        deadline = self.stage_deadline
         acknowledged = False
         while True:
             header, body = self.receive(deadline)

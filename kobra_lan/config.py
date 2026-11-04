@@ -27,6 +27,15 @@ class Config:
         if stat.S_IMODE(path.stat().st_mode) & 0o077:
             raise ProtocolError("Config must have permissions 0600")
         config = cls(**json.loads(path.read_text()))
+        return config.validate()
+
+    def validate(self):
+        config = self
+        text_fields = ('host', 'printer_id', 'mqtt_username', 'mqtt_password', 'client_cert', 'client_key', 'tls_sha256')
+        if (any(not isinstance(getattr(config, field), str) for field in text_fields)
+                or type(config.type_id) is not int
+                or any(type(port) is not int or not 1 <= port <= 65535 for port in (config.mqtt_port, config.http_port))):
+            raise ValueError('Invalid configuration field types or ports')
         ipaddress.IPv4Address(config.host)
         if config.type_id != 20030:
             raise ProtocolError("Only Kobra X model 20030 is qualified")

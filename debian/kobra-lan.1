@@ -1,4 +1,4 @@
-.TH KOBRA-LAN 1 "2026-11-02" "Kobra LAN CLI" "User Commands"
+.TH KOBRA-LAN 1 "2026-11-04" "Kobra LAN CLI" "User Commands"
 .SH NAME
 kobra-lan \- experimental direct Anycubic Kobra X LAN client
 .SH SYNOPSIS
@@ -17,7 +17,10 @@ Show commands and options. Each command also accepts --help.
 Show the application version.
 .TP
 .BI --config " path"
-Select private configuration (default ~/.config/kobra-lan/config.json).
+Select an explicit private configuration; conflicts with --printer.
+.TP
+.BI --printer " name"
+Select a named local profile for this command.
 .TP
 .BI --state-dir " path"
 Select durable state (default ~/.local/share/kobra-lan/uploads).
@@ -50,3 +53,39 @@ Configuration and state belong to the invoking user. Removing or purging the
 package preserves them. Do not delete attempt markers to retry uncertain actions.
 .SH SEE ALSO
 Installed README.md, NOTICE.md and releases.md in /usr/share/doc/kobra-lan-cli/.
+.SH SAVED PRINTER PROFILES
+.B printer list
+lists local profiles without contacting printers.
+.B printer info [name]
+shows saved safe metadata.
+.B printer use name
+selects a locally loadable default without network access.
+Global
+.B --printer name
+and
+.B --config path
+are mutually exclusive and precede the command. Explicit selection overrides
+the saved default. Before default selection, legacy config remains the fallback.
+Broken saved defaults never fall back to another printer. Local inspect and
+upload dry runs require no configured printer.
+.B printer pair --name name --host IPv4 [--default]
+creates a new named profile after explicit trust and qualified fresh status.
+Omitting --default preserves the prior selection. Named pairing rejects --config.
+.B printer remove name [--yes]
+requires terminal consent or --yes, detaches registration before owned-file
+cleanup and never revokes credentials or removes operational markers. Removing
+the default clears implicit selection, including legacy fallback. Receipts list
+deleted and preserved files. Shared, external and ambiguous files are retained.
+.SH CONNECTION DIAGNOSIS
+.B doctor
+uses ordinary target selection and reports configuration, dependencies, HTTP TCP,
+MQTT TCP, pinned TLS, MQTT authentication, fresh status and compatibility in order.
+Each network stage has at most 12 seconds, sharing a 60-second network deadline.
+No retries, provisioning, repairs, HTTP requests or printer controls occur.
+HTTP TCP failure does not block MQTT. TCP success is not protocol qualification.
+A printing target can pass. Only matching model 20030 / firmware 2.0.2.2 is qualified.
+The version 1 JSON result contains target, ordered checks and healthy, including
+on failure; check fields are stage, status, code, message and nullable next_step.
+Exit 0 means healthy; 2 means selection/trust/protocol/compatibility failure;
+3 means config/dependency/I/O/network failure and takes precedence when mixed.
+Preserve trust and markers; follow safe next steps instead of pairing again.

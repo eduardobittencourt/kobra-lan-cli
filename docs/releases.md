@@ -210,3 +210,22 @@ setup does not publish a real release.
 References: [setuptools pyproject configuration](https://setuptools.pypa.io/en/latest/userguide/pyproject_config.html),
 [Debian Python packaging](https://www.debian.org/doc/manuals/debmake-doc/ch14.en.html#python),
 [GitHub release API](https://docs.github.com/en/rest/releases/releases).
+
+
+## Profiles and doctor in 0.4.0
+
+This additive minor version preserves config, receipt and attempt formats and
+adds registry version 1. No automatic migration occurs. Python and Debian archive
+allowlists include `profiles.py` and `diagnostics.py`; installed probes exercise
+synthetic legacy/named selection, default clearing, local removal and healthy /
+failed doctor outside the checkout. Lifecycle fixtures include private registry,
+managed config/key material and uncertain device markers for a non-root user.
+Package hooks never invoke pairing or doctor. Both distribution acceptance runs
+must use the same immutable Debian artifact with networking disabled.
+
+For rollback, keep the registry, configs, PEMs and every operational marker.
+An older executable can use the unchanged legacy config or an explicit complete
+managed config after state-compatibility review, but ignores named and cleared
+defaults. Deliberately specify the intended config; an old binary cannot enforce
+`require-explicit`. Do not delete profiles/state as a downgrade procedure. This
+source preparation does not create a release tag or switch the live executable.

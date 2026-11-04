@@ -19,7 +19,7 @@ ENTRY_POINTS_FILE = "entry_points.txt"
 RUNTIME_LOCK = ROOT / "requirements-runtime.txt"
 
 MODULES = {f"kobra_lan/{name}.py" for name in
-           ("__init__", "cli", "config", "mqtt", "printer", "start", "upload", "provisioning", "pairing")}
+           ("__init__", "cli", "config", "mqtt", "printer", "start", "upload", "provisioning", "pairing", "profiles", "diagnostics")}
 DOCS = {
     "README.md", "LICENSE", "NOTICE.md", "CHANGELOG.md", "ROADMAP.md", "CONTRIBUTING.md",
     "AGENTS.md", "SECURITY.md", "CODE_OF_CONDUCT.md", "docs/README.md", "docs/pairing.md",
@@ -112,6 +112,9 @@ def main():
     subprocess.run([str(command), "--help"], cwd=outside, env=env, check=True, stdout=subprocess.DEVNULL)
     subprocess.run([str(command), "printer", "pair", "--help"], cwd=outside, env=env, check=True, stdout=subprocess.DEVNULL)
     subprocess.run([str(python), str(ROOT / "scripts/probe_pairing.py"), "--command", str(command)],
+                   cwd=outside, env=env, check=True)
+    subprocess.run([str(command), "doctor", "--help"], cwd=outside, env=env, check=True, stdout=subprocess.DEVNULL)
+    subprocess.run([str(python), str(ROOT / "scripts/probe_profiles.py"), "--command", str(command)],
                    cwd=outside, env=env, check=True)
     print(f"Python archives and independent installation verified: {version}")
 
