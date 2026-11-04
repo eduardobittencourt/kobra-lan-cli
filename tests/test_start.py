@@ -108,6 +108,63 @@ class StartTests(unittest.TestCase):
             result = self.run_start(True, p["plan_sha256"])
         self.assertEqual(result["status"], "start_acknowledged_not_confirmed")
         self.assertEqual(Client.starts, 1)
+    def invoke_route(self, command, mode=True, digest=None, client=Client):
+        import io
+        from contextlib import redirect_stdout
+        from kobra_lan.cli import main
+        argv = ['--json'] if mode else []
+        argv += ['--state-dir', str(self.root/'state'), 'print', command, str(self.file),
+                 '--name', 'test.gcode', '--slot', '1', '--auto-leveling', 'on',
+                 '--vibration-compensation', 'off', '--flow-calibration', 'off']
+        if command == 'start':
+            argv += ['--execute', '--plan-sha256', digest]
+        stdout = io.StringIO()
+        with patch('kobra_lan.cli.Registry') as registry, patch('kobra_lan.start.MQTT', client), \
+                patch('kobra_lan.start.time.sleep'), redirect_stdout(stdout):
+            registry.return_value.access.return_value.__enter__.return_value = (config(), {})
+            code = main(argv)
+        return code, json.loads(stdout.getvalue()) if mode else stdout.getvalue()
+
+    def test_plan_routes_have_format_independent_hash_without_writes(self):
+        code, report = self.invoke_route('plan')
+        self.assertEqual(code, 0)
+        code, text = self.invoke_route('plan', mode=False)
+        self.assertEqual(code, 0)
+        self.assertIn(report['result']['plan_sha256'], text)
+        self.assertIn(report['result']['file_sha256'], text)
+        self.assertEqual(Client.starts, 0)
+        self.assertFalse((self.root/'state').exists())
+
+    def test_start_route_rebuilds_review_and_requires_provenance(self):
+        digest = self.plan()['plan_sha256']
+        self.assertEqual(self.invoke_route('start', digest='0'*64)[0], 2)
+        self.assertEqual(self.invoke_route('start', digest=digest)[0], 2)
+        self.assertEqual(Client.starts, 0)
+        self.assertFalse((self.root/'state'/'starts').exists())
+        self.receipt()
+        code, report = self.invoke_route('start', digest=digest)
+        self.assertEqual(code, 0)
+        self.assertEqual(report['result']['status'], 'start_acknowledged_not_confirmed')
+        self.assertEqual(Client.starts, 1)
+        self.assertEqual(self.invoke_route('start', digest=digest)[0], 2)
+        self.assertEqual(Client.starts, 1)
+
+    def test_final_idle_check_precedes_reservation_and_send(self):
+        class Busy(Client):
+            info_calls = 0
+            def query(self, kind, action='query', data=None):
+                result = super().query(kind, action, data)
+                if kind == 'info':
+                    self.info_calls += 1
+                    if self.info_calls > 1:
+                        result['data']['state'] = 'busy'
+                return result
+        self.receipt()
+        code, report = self.invoke_route('start', digest=self.plan()['plan_sha256'], client=Busy)
+        self.assertEqual(code, 2)
+        self.assertEqual(Client.starts, 0)
+        self.assertFalse((self.root/'state'/'starts').exists())
+
     def test_transport_publishes_once_on_timeout(self):
         m = MQTT(config());m.sock = Mock()
         with patch.object(m, "receive", side_effect=TimeoutError()):

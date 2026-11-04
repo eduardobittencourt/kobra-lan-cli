@@ -60,22 +60,23 @@ def main():
     def invoke(argv):
         """Capture one installed command and reject failure, stderr or leaked synthetic credentials."""
         stdout,stderr = io.StringIO(),io.StringIO()
-        with patch.object(sys,'argv',[str(args.command),*argv]), redirect_stdout(stdout), redirect_stderr(stderr):
+        with patch.object(sys,'argv',[str(args.command),"--json",*argv]), redirect_stdout(stdout), redirect_stderr(stderr):
             try: runpy.run_path(str(args.command),run_name='__main__')
             except SystemExit as exit: assert exit.code==0, (exit.code,stdout.getvalue())
         result = json.loads(stdout.getvalue()); assert result['ok']; assert not stderr.getvalue()
         assert 'offline-password' not in stdout.getvalue()
         return result['result']
     with tempfile.TemporaryDirectory(prefix='pairing-probe-',dir=Path.cwd()) as temporary:
-        destination = Path(temporary)/'private/config.json'
-        with patch('socket.create_connection',side_effect=AssertionError('No real network permitted')) as network, \
+        home = Path(temporary)
+        destination = home/'.config/kobra-lan/profiles/bench/config.json'
+        with patch.dict('os.environ', {'HOME': str(home)}), patch('socket.create_connection',side_effect=AssertionError('No real network permitted')) as network, \
              patch('kobra_lan.provisioning.http.client.HTTPConnection',return_value=connection), \
              patch('kobra_lan.pairing.observe_fingerprint',return_value=pin), \
              patch('kobra_lan.pairing.MQTT',ReadOnlyMQTT), patch('kobra_lan.printer.MQTT',ReadOnlyMQTT):
-            result = invoke(['--config',str(destination),'printer','pair','--host','192.0.2.10','--trust-sha256',pin])
+            result = invoke(['printer','pair','--name','bench','--default','--host','192.0.2.10','--trust-sha256',pin])
             assert result['tls_sha256']==pin and result['model_id']==20030
             assert Config.load(destination).mqtt_password=='offline-password'
-            assert invoke(['--config',str(destination),'status'])['info']['state']=='free'
+            assert invoke(['--printer','bench','status'])['info']['state']=='free'
             network.assert_not_called()
     print('Installed synthetic pairing and ordinary status verified; no printer access')
 

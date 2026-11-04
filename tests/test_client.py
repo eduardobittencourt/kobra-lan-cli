@@ -68,6 +68,29 @@ class UploadTests(unittest.TestCase):
         self.tmp.cleanup()
     def run_upload(self):
         return execute(config(), self.file, self.sha, self.root / "state", "agent-test.gcode")
+    def test_mismatched_review_before_registry_access(self):
+        with patch('kobra_lan.cli.Registry') as registry, contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(main(['--json', 'files', 'upload', str(self.file), '--execute', '--sha256', '0' * 64]), 2)
+            registry.assert_not_called()
+
+    def test_new_route_uploads_identical_bytes_once_without_start(self):
+        def uploaded(cfg, target, data, name):
+            self.assertEqual(data, GCODE)
+            FakeMQTT.posted = True
+            return 200, {'code': 200}
+        with patch('kobra_lan.cli.Registry') as registry, patch('kobra_lan.upload.MQTT', FakeMQTT), \
+                patch('kobra_lan.upload.post_once', side_effect=uploaded) as post:
+            registry.return_value.access.return_value.__enter__.return_value = (config(), {})
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                self.assertEqual(main(['--json', '--state-dir', str(self.root/'state'), 'files', 'upload',
+                                      str(self.file), '--name', FakeMQTT.name, '--sha256', self.sha, '--execute']), 0)
+            result = json.loads(out.getvalue())['result']
+            self.assertFalse(result['starts_print'])
+            self.assertFalse(result['remote_byte_hash_verified'])
+            post.assert_called_once()
+            self.assertNotIn(('print', 'start'), FakeMQTT.calls)
+
     def test_multipart_preserves_exact_bytes_without_print_flag(self):
         body = multipart(GCODE, "agent-test.gcode", "boundary")
         payload = body.split(b"Content-Type: application/octet-stream\r\n\r\n", 1)[1].rsplit(b"\r\n--boundary--\r\n", 1)[0]
@@ -90,7 +113,7 @@ class UploadTests(unittest.TestCase):
             mqtt.assert_not_called()
     def test_dry_run_has_no_network(self):
         with patch("kobra_lan.config.Config.load") as cfg, contextlib.redirect_stdout(io.StringIO()):
-            self.assertEqual(main(["upload", str(self.file), "--name", "agent-test.gcode"]), 0)
+            self.assertEqual(main(["gcode", "inspect", str(self.file), "--name", "agent-test.gcode"]), 0)
             cfg.assert_not_called()
     def test_timeout_attempt_cannot_be_replayed(self):
         with patch("kobra_lan.upload.MQTT", FakeMQTT), patch("kobra_lan.upload.post_once", side_effect=socket.timeout) as post:

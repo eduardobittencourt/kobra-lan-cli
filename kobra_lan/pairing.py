@@ -133,7 +133,7 @@ class PrivateStage:
             except FileNotFoundError:
                 pass
             else:
-                raise OSError("Persistence: config exists; choose a separate absent --config destination")
+                raise OSError("Persistence: config exists; inspect the profile or choose another unused --name")
             current = os.fstat(self.parent_fd)
             if current.st_uid != os.geteuid() or stat.S_IMODE(current.st_mode) != 0o700:
                 raise OSError("Persistence: config parent must be user-owned with permissions 0700")
@@ -178,7 +178,7 @@ class PrivateStage:
             os.fsync(stream.fileno())
 
     def prepare(self, bundle, host):
-        """Stage validated client PEMs and construct an unpublished compatible config."""
+        """Stage validated client PEMs and construct an unpublished private config."""
         name = '.pair-' + uuid.uuid4().hex
         os.mkdir(name, 0o700, dir_fd=self.parent_fd)
         self.stage_name = name
@@ -256,8 +256,8 @@ def pair(destination, host, expected=None):
     except OSError:
         if failure_stage == "Persistence":
             message = ("Persistence: private configuration could not be saved or finalized; "
-                       "an existing config is preserved. Choose a separate absent --config path "
-                       "in a user-owned 0700 directory. If a config is visible, retain its PEM files.")
+                       "an existing config is preserved. Inspect the profile or choose another unused --name "
+                       "with private user-owned storage. If a config is visible, retain its PEM files.")
         else:
             message = failure_stage + ": network operation failed; no automatic retry"
         raise PairingLocalError(message) from None

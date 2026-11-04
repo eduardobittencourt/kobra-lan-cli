@@ -183,28 +183,88 @@ class DoctorTests(unittest.TestCase):
             self.assertRaises(MQTTFailure,client.query,'info')
         client.sock.sendall.assert_not_called()
 
-    def test_missing_report_identity_is_not_fully_qualified(self):
+    def test_optional_report_identity_can_be_omitted_without_writes_or_extra_queries(self):
+        before = {str(p): (p.read_bytes(), p.stat().st_mode) for p in self.registry.root.rglob('*') if p.is_file()}
         for absent in (('deviceId',),('modelId','modeId'),('deviceId','modelId','modeId')):
             class MissingIdentity(HealthyMQTT):
                 def query(self,kind):
+                    self.calls.append(kind)
+                    assert kind == 'info'
                     return {'code':200,'data':{key:value for key,value in INFO.items() if key not in absent}}
-            report,code=self.run_doctor(client=MissingIdentity)
-            self.assertEqual(code,2)
-            self.assertEqual(report['result']['checks'][-2]['status'],'passed')
-            self.assertEqual(report['result']['checks'][-1]['code'],'outside_qualification')
+            for mode in ([], ['--json']):
+                HealthyMQTT.calls = []
+                stdout = io.StringIO()
+                with patch('kobra_lan.cli.Registry', return_value=self.registry), \
+                        patch.object(d, 'MQTT', MissingIdentity), patch.object(d.socket, 'create_connection'), \
+                        redirect_stdout(stdout):
+                    self.assertEqual(main([*mode, 'doctor']), 0)
+                if mode:
+                    report = json.loads(stdout.getvalue())
+                    self.assertTrue(report['ok'])
+                    self.assertTrue(report['result']['healthy'])
+                    self.assertTrue(all(check['status'] == 'passed' for check in report['result']['checks']))
+                self.assertIn('optional MQTT identity fields omitted', stdout.getvalue())
+                self.assertEqual(HealthyMQTT.calls, ['info'])
+        self.assertEqual(before, {str(p): (p.read_bytes(), p.stat().st_mode)
+                                 for p in self.registry.root.rglob('*') if p.is_file()})
         alias={**INFO,'modeId':INFO['modelId']}; del alias['modelId']
-        self.assertTrue(d.compatible(self.registry.load('bancada'),alias))
+        self.assertIsNone(d.compatibility_issue(self.registry.load('bancada'),alias))
+
+    def test_missing_required_evidence_is_distinct_from_contradiction(self):
+        for missing in ('model', 'version', 'state'):
+            for value in ('absent', None):
+                info = {key: val for key, val in INFO.items() if key != missing}
+                if value is None:
+                    info[missing] = None
+                class Incomplete(HealthyMQTT):
+                    def query(self, kind): return {'code': 200, 'data': info}
+                with self.subTest(missing=missing, value=value):
+                    report, code = self.run_doctor(client=Incomplete)
+                    self.assertEqual(code, 2)
+                    self.assertEqual(report['result']['checks'][-2]['status'], 'passed')
+                    self.assertEqual(report['result']['checks'][-1]['code'], 'qualification_incomplete')
+
+        # Optional does not mean ignored: reject conflicting/null IDs even when
+        # the other optional identifiers are absent, or required evidence is missing.
+        for key, value in (('deviceId', 'Other01'), ('deviceId', None), ('modelId', 9),
+                           ('modelId', None), ('modeId', 9), ('modeId', None)):
+            info = {k: v for k, v in INFO.items() if k not in ('deviceId', 'modelId', 'modeId', 'version')}
+            info[key] = value
+            class Contradictory(HealthyMQTT):
+                def query(self, kind): return {'code': 200, 'data': info}
+            with self.subTest(key=key, value=value):
+                report, code = self.run_doctor(client=Contradictory)
+                self.assertEqual(code, 2)
+                self.assertEqual(report['result']['checks'][-1]['code'], 'outside_qualification')
 
     def test_cli_envelope_and_conflict(self):
         stdout=io.StringIO()
         with patch('kobra_lan.cli.Registry',return_value=self.registry), patch.object(d,'MQTT',HealthyMQTT), \
                 patch.object(d.socket,'create_connection'), redirect_stdout(stdout):
-            self.assertEqual(main(['doctor']),0)
+            self.assertEqual(main(['--json','doctor']),0)
         self.assertTrue(json.loads(stdout.getvalue())['result']['healthy'])
         stdout=io.StringIO()
         with redirect_stdout(stdout), patch.object(d.socket,'create_connection') as network:
             self.assertEqual(main(['--printer','bancada','--config','unused','doctor']),2)
         network.assert_not_called()
+
+    def test_both_cli_formats_preserve_failed_stages_and_precedence(self):
+        outputs = []
+        for mode in ([], ['--json']):
+            stdout = io.StringIO()
+            with patch('kobra_lan.cli.Registry', return_value=self.registry), \
+                    patch.object(d, 'MQTT', HealthyMQTT), \
+                    patch.object(d.socket, 'create_connection', side_effect=OSError('private network detail')), \
+                    redirect_stdout(stdout):
+                self.assertEqual(main([*mode, 'doctor']), 3)
+            outputs.append(stdout.getvalue())
+        report = json.loads(outputs[1])
+        self.assertEqual(report['error']['code'], 'diagnostic_failed')
+        self.assertFalse(report['result']['healthy'])
+        for check in report['result']['checks']:
+            self.assertIn(check['stage'], outputs[0])
+            self.assertIn(check['status'], outputs[0])
+        self.assertNotIn('private network detail', ''.join(outputs))
 
     def test_missing_dependency_does_not_crash_cli_import(self):
         script = '''
@@ -229,7 +289,7 @@ class AbsentCrypto:
         if fullname.startswith('cryptography'): raise ImportError('secret missing dependency')
 sys.meta_path.insert(0, AbsentCrypto())
 from kobra_lan.cli import main
-sys.exit(main(['--config', '/nonexistent-synthetic/config.json', 'doctor']))
+sys.exit(main(['--json', '--config', '/nonexistent-synthetic/config.json', 'doctor']))
 """
         process = subprocess.run([sys.executable,'-c',script],capture_output=True,text=True)
         self.assertEqual(process.returncode,3,process.stderr)

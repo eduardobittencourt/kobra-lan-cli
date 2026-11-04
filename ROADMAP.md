@@ -18,9 +18,9 @@ Our local `anycubic-next` launcher is a separate wrapper around the official sli
 
 ## Starting point
 
-Version 0.2.1 already implements direct MQTT/TLS and HTTP communication, status and file queries, local G-code inspection, reviewed uploads, and an experimental reviewed print start. It has 28 offline tests and one scoped hardware validation of upload and start. Completion and physical print quality have not been recorded.
+Version 0.2.1 already implements direct MQTT/TLS and HTTP communication, status and file queries, local G-code inspection, reviewed uploads, and an experimental reviewed print start. It has 28 offline tests and one scoped hardware validation of upload and start. Physical print completion and quality have not been recorded.
 
-Current limits include model 20030 / firmware 2.0.2.2, Next-generated G-code, one filament, and the onboard four-slot configuration. The new `printer pair --host <IPv4>` flow provisions direct access for an already LAN-enabled printer, with explicit first-use trust or an exact externally supplied fingerprint. It saves a compatible private config only after a read-only status query; existing configs are preserved. Version 0.4.0 adds named local profiles, explicit default selection, confirmed local removal and bounded read-only doctor diagnostics. Discovery, credential replacement/revocation and initial printer/app LAN-mode setup remain outside this implementation. Runtime operation is independent of HA, Next, and cloud services.
+Current limits include model 20030 / firmware 2.0.2.2, Next-generated G-code, one filament, and the onboard four-slot configuration. The new `printer pair --name <name> --host <IPv4>` flow provisions direct access for an already LAN-enabled printer, with explicit first-use trust or an exact externally supplied fingerprint. It saves a compatible private config only after a read-only status query; existing configs are preserved. Version 0.4.0 adds named local profiles, explicit default selection, confirmed local removal and bounded read-only doctor diagnostics. Discovery, credential replacement/revocation and initial printer/app LAN-mode setup remain outside this implementation. Runtime operation is independent of HA, Next, and cloud services.
 
 The project has Python metadata and a console entry point in `pyproject.toml`, but the current documented installation is a source checkout with a Linux launcher. This roadmap does not assert that PyPI, Homebrew, apt, or mise installation has been published or tested.
 
@@ -51,11 +51,11 @@ Exit evidence: an owner can follow public instructions from a fresh client insta
 
 ## Milestone 2 — A coherent CLI and an installable preview
 
-- Establish the command hierarchy above, with concise top-level help, contextual `--help`, real examples, and `--version`.
+- Implemented in 0.5.0: canonical `files`, `gcode` and `print` hierarchy, with concise top-level help, contextual `--help`, real examples, and `--version`.
 - Add readable terminal output and an explicit `--json` mode with a documented schema, error codes, and exit statuses. Keep stdout suitable for automation and diagnostics/progress on stderr.
 - Define noninteractive behavior and explicit execution controls. Prompts must not hang scripts or accidentally approve physical actions.
-- Preserve existing automation through aliases or a documented deprecation/migration path; changing today's JSON default is a compatibility change.
-- Add shell completions for bash, zsh, and fish, and documentation for installation, onboarding, common workflows, troubleshooting, and compatibility.
+- Implemented in 0.5.0: replace flat commands outright, with text default and explicit root `--json` version-1 envelopes. No aliases or deprecation period; update scripts deliberately. Named-only pairing and a null unset default replace unnamed access without migration; device-based operational protection remains intact.
+- Implemented in 0.5.0: offline shell completion generators for bash, zsh, and fish, and documentation for installation, onboarding, common workflows, troubleshooting, and compatibility.
 - Implement and validate the packaging/release path below. A preview can ship with clearly stated onboarding and hardware limits; broad availability is not a claim of broad compatibility.
 
 Exit evidence: install a built artifact into a clean environment outside the checkout, run help/version, diagnose missing configuration, and query a configured printer. Users can discover the supported workflow from help and public docs.
@@ -126,7 +126,7 @@ Distribution references consulted on 2026-10-16:
 
 - What exactly does independent pairing require from the owner, the printer, and Anycubic services?
 - Which discovery, storage, and lifecycle operations does the supported firmware expose reliably?
-- What is the least disruptive migration from the current flat commands and JSON output?
+- Version 0.5.0 deliberately replaces flat commands and the JSON default; preserve access/state and update invocations to the documented tree and root `--json`.
 - Which platforms and firmware versions can we maintain and physically qualify?
 - When do additional distribution channels justify their ongoing maintenance?
 

@@ -5,8 +5,8 @@ kobra-lan \- experimental direct Anycubic Kobra X LAN client
 .B kobra-lan
 .RI [ global-options ] " command " [ arguments ]
 .SH DESCRIPTION
-Inspect G-code locally and perform explicitly reviewed LAN operations with JSON
-output. Upload and print start require separate reviewed execution flags.
+Inspect G-code locally and perform explicitly reviewed LAN operations with readable text
+by default and root --json for the version-1 machine envelope. Upload and print start require separate reviewed execution flags.
 Use the help for each command before attempting an operation.
 .SH OPTIONS
 .TP
@@ -24,8 +24,31 @@ Select a named local profile for this command.
 .TP
 .BI --state-dir " path"
 Select durable state (default ~/.local/share/kobra-lan/uploads).
+.TP
+.B --json
+Emit one schema_version: 1 operational envelope; place before command.
+Help, version and completion remain native text.
+.SH COMMANDS
+.B printer pair|list|info|use|remove
+manages private access locally and establishes explicit trust.
+.B status
+and
+.B files list|info
+are read-only network observations.
+.B gcode inspect FILE [--name NAME]
+inspects local immutable bytes without configuration or network.
+.B files upload FILE [--name NAME] --sha256 HASH --execute
+uploads inspected bytes once; never starts a print and has no implicit dry run.
+.B print plan FILE --name NAME --slot N --auto-leveling on|off --vibration-compensation on|off --flow-calibration on|off
+reviews a stored print without writes.
+.B print start
+requires those same inputs plus --plan-sha256 HASH --execute; it rebuilds the
+reviewed plan, requires a verified receipt and checks idle before one send.
+.B completion bash|zsh|fish
+generates offline shell scripts without configuration or device queries.
+See usage.md for user-level installation; startup files are not modified.
 .SH PAIRING
-.B kobra-lan printer pair --host 192.0.2.10
+.B kobra-lan printer pair --name bench --default --host 192.0.2.10
 provisions an already LAN-enabled Kobra X, model 20030 / firmware 2.0.2.2.
 It queries status without uploading or controlling the printer.
 HTTP provisioning is unauthenticated and requires a trusted network even with
@@ -37,8 +60,9 @@ For unattended setup, supply --trust-sha256 followed by an independently obtaine
 The TLS handshake exchanges the client certificate; MQTT credentials are sent
 only after checking the accepted server pin on the subsequent connection.
 .PP
-Use global --config before printer to choose an alternate absent destination.
-Existing configs, including symlinks, are refused before network access.
+Pairing requires --name and rejects global --config and --printer.
+Choose another unused name for independent access.
+Existing managed destinations, including symlinks, are refused before network access.
 The parent must be user-owned, nonsymlink and mode 0700; missing directories are
 created privately. Generated PEMs use mode 0600 in a private .pair-ID directory.
 The config is published atomically after verification without overwriting.
@@ -65,27 +89,43 @@ Global
 and
 .B --config path
 are mutually exclusive and precede the command. Explicit selection overrides
-the saved default. Before default selection, legacy config remains the fallback.
-Broken saved defaults never fall back to another printer. Local inspect and
-upload dry runs require no configured printer.
+the saved named default. With no default, explicit selection is required.
+No root config is discovered automatically and inventory has no legacy section.
+Broken saved defaults never fall back to another printer. Local gcode inspect
+requires no configured printer.
 .B printer pair --name name --host IPv4 [--default]
 creates a new named profile after explicit trust and qualified fresh status.
 Omitting --default preserves the prior selection. Named pairing rejects --config.
 .B printer remove name [--yes]
 requires terminal consent or --yes, detaches registration before owned-file
 cleanup and never revokes credentials or removes operational markers. Removing
-the default clears implicit selection, including legacy fallback. Receipts list
+the default sets default to null and requires explicit selection. Receipts list
 deleted and preserved files. Shared, external and ambiguous files are retained.
 .SH CONNECTION DIAGNOSIS
 .B doctor
 uses ordinary target selection and reports configuration, dependencies, HTTP TCP,
 MQTT TCP, pinned TLS, MQTT authentication, fresh status and compatibility in order.
+Compatibility requires the qualified model name, firmware and valid state.
+Optional MQTT device/model IDs must match when supplied; their absence is noted
+without failing. Missing required evidence and conflicting values have distinct
+diagnostic reason codes. TLS pin verification and authentication remain mandatory.
 Each network stage has at most 12 seconds, sharing a 60-second network deadline.
 No retries, provisioning, repairs, HTTP requests or printer controls occur.
 HTTP TCP failure does not block MQTT. TCP success is not protocol qualification.
 A printing target can pass. Only matching model 20030 / firmware 2.0.2.2 is qualified.
-The version 1 JSON result contains target, ordered checks and healthy, including
+The root --json envelope contains schema_version: 1 and ok.
+Failures include error.code and error.message; doctor retains partial result.
+The inner version 1 diagnostic result contains target, ordered checks and healthy, including
 on failure; check fields are stage, status, code, message and nullable next_step.
 Exit 0 means healthy; 2 means selection/trust/protocol/compatibility failure;
 3 means config/dependency/I/O/network failure and takes precedence when mixed.
 Preserve trust and markers; follow safe next steps instead of pairing again.
+
+.SH OUTPUT
+Final results and sanitized errors use stdout; prompts/progress use stderr.
+Errors use invalid_arguments (exit 2), validation_failed (exit 2),
+operation_failed (exit 3), or diagnostic_failed (exit 2/3 by stage precedence).
+Redirection never changes format. Full file and plan hashes are copyable in
+both modes. Upload confirms listing/metadata, not remote byte hashes.
+Acknowledged, observed-active and uncertain start states never prove completion.
+Preserve reservations and do not resend uncertain operations.

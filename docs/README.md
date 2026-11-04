@@ -5,7 +5,7 @@ Start with the [project overview](../README.md) for experimental status and qual
 | Purpose | Guide |
 | --- | --- |
 | Pair a LAN-enabled printer; select/remove profiles; establish trust; recover private configuration | [Pairing](pairing.md) |
-| Upload, experimental print start, doctor diagnostics, state markers and protocol limitations | [Operation and protocol](usage.md) |
+| Canonical commands, text/JSON contract, shell completion, reviewed upload/start, diagnostics and state guarantees | [Operation and protocol](usage.md) |
 | Offline tests and validation evidence | [Development](development.md), [hardware observations](usage.md#validation-evidence) |
 | Reproducible contributions and agent instructions | [Contributing](../CONTRIBUTING.md), [agents](../AGENTS.md) |
 | Package builds, supported targets, installation and release gates | [Releases](releases.md) |
