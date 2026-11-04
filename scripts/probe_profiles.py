@@ -18,9 +18,11 @@ def main():
     args = parser.parse_args()
     import kobra_lan
     from kobra_lan.mqtt import MQTTFailure
+    from kobra_lan.pairing import QUALIFIED_FIRMWARE
     from kobra_lan.provisioning import Bundle
     assert {'site-packages','dist-packages'} & set(Path(kobra_lan.__file__).resolve().parts)
     pin = 'a'*64
+    duplicate_message = 'Upload already attempted; no network write was repeated'
     bundle = Bundle('Synthetic01',20030,'synthetic-user','synthetic-password','synthetic cert','synthetic key')
 
     class ReadOnly:
@@ -38,7 +40,7 @@ def main():
         def query(self,kind):
             assert kind=='info'
             # Qualified firmware may omit optional numeric model/device IDs.
-            return {'code':200,'data':{'model':'Anycubic Kobra X','version':'2.0.2.2','state':'printing',
+            return {'code':200,'data':{'model':'Anycubic Kobra X','version':QUALIFIED_FIRMWARE,'state':'printing',
                                      **self.report_changes}}
 
     def invoke(argv, expected=0):
@@ -70,10 +72,10 @@ def main():
             directory=state/device; directory.mkdir(parents=True)
             marker=directory/(sha+'.attempt'); marker.write_bytes(b'synthetic uncertain upload')
             upload=['files','upload',str(gcode),'--execute','--sha256',sha]
-            assert invoke(upload,expected=2)['error']['message']=='Upload already attempted; no network write was repeated'
+            assert invoke(upload,expected=2)['error']['message']==duplicate_message
             invoke(['printer','pair','--name','bancada','--host','192.0.2.10','--trust-sha256',pin])
             assert invoke(['printer','list'])['result']['default']=={'name':'first'}
-            assert invoke(['--printer','bancada',*upload],expected=2)['error']['message']=='Upload already attempted; no network write was repeated'
+            assert invoke(['--printer','bancada',*upload],expected=2)['error']['message']==duplicate_message
             invoke(['printer','use','bancada'])
             assert invoke(['printer','info'])['result']['name']=='bancada'
             root=home/'.config/kobra-lan'
@@ -102,7 +104,7 @@ def main():
             assert marker.read_bytes()==b'synthetic uncertain upload'
             invoke(['printer','pair','--name','bancada','--host','192.0.2.10','--trust-sha256',pin])
             assert invoke(['printer','list'])['result']['default'] is None
-            assert invoke(['--printer','bancada',*upload],expected=2)['error']['message']=='Upload already attempted; no network write was repeated'
+            assert invoke(['--printer','bancada',*upload],expected=2)['error']['message']==duplicate_message
             assert marker.read_bytes()==b'synthetic uncertain upload'
             assert invoke(['--config',str(root/'profiles/bancada/config.json'),'printer','info'])['result']['source']=='profile'
             missing=invoke(['--config',str(home/'missing.json'),'doctor'],expected=3)

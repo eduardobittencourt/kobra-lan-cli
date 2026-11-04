@@ -88,7 +88,7 @@ class StorageTests(unittest.TestCase):
 
     def test_default_states_and_failures(self):
         self.add_profile()
-        self.assertEqual(self.registry.read()['default'], None)
+        self.assertIsNone(self.registry.read()['default'])
         self.registry.select('bancada')
         self.assertEqual(self.registry.resolve()[1]['name'], 'bancada')
         self.assertEqual(self.registry.resolve(config=(self.root/'explicit.json'))[0], (self.root/'explicit.json'))
@@ -231,7 +231,7 @@ class CLITests(StorageTests):
                 patch('kobra_lan.pairing.verify_status', return_value={'firmware':'2.0.2.2','state':'printing'}):
             code, report = self.invoke('printer','pair','--name','bancada','--host','192.0.2.10','--trust-sha256','a'*64)
             self.assertEqual(code,0); self.assertFalse(report['result']['default'])
-            self.assertEqual(self.registry.read()['default'],None)
+            self.assertIsNone(self.registry.read()['default'])
             self.assertEqual(self.invoke('printer','pair','--name','oficina','--host','192.0.2.10','--trust-sha256','a'*64,'--default')[0],0)
         self.assertEqual(self.registry.read()['default'], {'name':'oficina'})
         self.assertEqual(self.registry.load('bancada').printer_id, self.registry.load('oficina').printer_id)
@@ -274,7 +274,7 @@ class CLITests(StorageTests):
             real_write(data)
         with patch('kobra_lan.pairing.pair',side_effect=publish), patch.object(self.registry,'write',side_effect=fail_default):
             self.assertRaisesRegex(ProfileLocalError,'default unchanged',self.registry.pair,'registered','192.0.2.10','a'*64,True)
-        self.assertEqual(self.registry.read()['default'],None)
+        self.assertIsNone(self.registry.read()['default'])
         self.registry.select('registered')
         self.assertEqual(self.registry.read()['default'],{'name':'registered'})
 
@@ -284,7 +284,7 @@ class CLITests(StorageTests):
         for answer, terminal in (('yes\n',False), ('no\n',True), ('',True), ('yes'+' '*32,True)):
             stdin = io.StringIO(answer); stdin.isatty = lambda: terminal
             self.assertRaises(ProtocolError,self.registry.remove,'bancada',False,stdin,io.StringIO())
-            self.assertEqual(before,{str(p):p.read_bytes() for p in self.root.rglob('*') if p.is_file()})
+            self.assertEqual({str(p):p.read_bytes() for p in self.root.rglob('*') if p.is_file()},before)
         stdin = io.StringIO('yes\n'); stdin.isatty = lambda: True
         stderr = io.StringIO()
         result = self.registry.remove('bancada',stdin=stdin,stderr=stderr)
@@ -292,7 +292,7 @@ class CLITests(StorageTests):
         self.assertEqual(len(result['deleted_files']),3); self.assertEqual(result['preserved_files'],[])
         self.assertIn('local_removal_preview',stderr.getvalue())
         self.assertNotIn('secret-',json.dumps(result))
-        self.assertEqual(self.registry.read()['default'],None)
+        self.assertIsNone(self.registry.read()['default'])
         self.assertRaises(ProtocolError,self.registry.resolve)
         self.assertFalse(self.registry.path('bancada').parent.exists())
         self.assertEqual(self.invoke('printer','remove','bancada','--yes')[0],2)
@@ -383,7 +383,7 @@ class CLITests(StorageTests):
         self.assertEqual(code,3); self.assertTrue(report['result']['registration_removed'])
         self.assertEqual(report['result']['deleted_files'],[])
         self.assertTrue(self.registry.path('bancada').exists())
-        self.assertEqual(self.registry.read()['default'],None)
+        self.assertIsNone(self.registry.read()['default'])
 
     def test_write_failure_and_managed_parent_permissions(self):
         self.add_profile()
@@ -414,7 +414,7 @@ class CLITests(StorageTests):
             for filename in ('../outside', '/outside', '.pair-'+'a'*32+'/../../outside'):
                 invalid={**entry,'owned_files':['config.json',filename]}
                 self.assertRaises(ProtocolError,self.registry._cleanup,'bancada',invalid,set(),False)
-        self.assertEqual(original,{str(p):p.read_bytes() for p in self.root.rglob('*') if p.is_file()})
+        self.assertEqual({str(p):p.read_bytes() for p in self.root.rglob('*') if p.is_file()},original)
 
     def test_symlinked_managed_root_is_rejected(self):
         actual=Path(self.temporary.name)/'actual'

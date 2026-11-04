@@ -36,10 +36,11 @@ class CommandTreeTests(unittest.TestCase):
         self.assertEqual(args.files_command, "list")
 
     def test_execution_options_cannot_be_abbreviated(self):
+        parser = build_parser()
         for argv in (["files", "upload", "a.gcode", "--sha256", "0" * 64, "--exec"],
                      ["files", "upload", "a.gcode", "--execute", "--sha", "0" * 64]):
             with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(ArgumentFailure):
-                build_parser().parse_args(argv)
+                parser.parse_args(argv)
 
 
 class OutputTests(unittest.TestCase):

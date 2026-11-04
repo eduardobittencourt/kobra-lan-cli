@@ -26,15 +26,7 @@ def safe_result(value):
 def text_lines(value, depth=0):
     prefix = "  " * depth
     if isinstance(value, dict):
-        for key, item in value.items():
-            label = key.replace("_", " ").capitalize()
-            if key == "default" and item is None:
-                yield prefix + label + ": none"
-            elif isinstance(item, (dict, list)) and item:
-                yield prefix + label + ":"
-                yield from text_lines(item, depth + 1)
-            else:
-                yield prefix + label + ": " + scalar(item)
+        yield from mapping_lines(value, depth)
     elif isinstance(value, list):
         for item in value:
             if isinstance(item, (dict, list)):
@@ -43,6 +35,19 @@ def text_lines(value, depth=0):
                 yield prefix + "- " + scalar(item)
     else:
         yield prefix + scalar(value)
+
+
+def mapping_lines(value, depth):
+    prefix = "  " * depth
+    for key, item in value.items():
+        label = key.replace("_", " ").capitalize()
+        if key == "default" and item is None:
+            yield prefix + label + ": none"
+        elif isinstance(item, (dict, list)) and item:
+            yield prefix + label + ":"
+            yield from text_lines(item, depth + 1)
+        else:
+            yield prefix + label + ": " + scalar(item)
 
 
 def scalar(value):

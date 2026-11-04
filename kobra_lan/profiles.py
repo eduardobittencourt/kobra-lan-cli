@@ -13,6 +13,7 @@ from .config import Config, ProtocolError
 
 CONFIG_FILE = 'config.json'
 REGISTRY_FILE = 'profiles.json'
+UNKNOWN_PROFILE = 'Unknown profile; run printer list'
 
 DIRECTORY_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
 
@@ -219,7 +220,7 @@ class Registry:
         name = validate_name(name)
         data = self.read() if data is None else data
         if name not in data['profiles']:
-            raise ProfileSelectionError('Unknown profile; run printer list')
+            raise ProfileSelectionError(UNKNOWN_PROFILE)
         path = self.path(name)
         parent_fd = open_directory(self.root / "profiles")
         os.close(parent_fd)
@@ -304,7 +305,7 @@ class Registry:
                 raise ProfileSelectionError('No default selected; run printer use NAME or supply --printer/--config')
             name = selected['name']
         if name not in data['profiles']:
-            raise ProfileSelectionError('Unknown profile; run printer list')
+            raise ProfileSelectionError(UNKNOWN_PROFILE)
         return self.path(name), {'source': 'profile', 'name': name}
 
     @contextmanager
@@ -407,7 +408,7 @@ class Registry:
         validate_name(name)
         data = self.read()
         if name not in data['profiles']:
-            raise ProtocolError('Unknown profile; run printer list')
+            raise ProtocolError(UNKNOWN_PROFILE)
         entry = data['profiles'][name]
         return {'name': name, 'config_path': str(self.path(name)), 'entry': entry,
                 'default': data['default'] == {'name': name},

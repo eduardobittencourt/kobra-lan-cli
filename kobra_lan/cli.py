@@ -43,7 +43,8 @@ def root_json(argv):
         elif token in ("--config", "--printer", "--state-dir"):
             index += 1
         elif any(token.startswith(flag + "=") for flag in ("--config", "--printer", "--state-dir")):
-            pass
+            index += 1
+            continue
         else:
             break
         index += 1
