@@ -13,13 +13,25 @@ from dataclasses import asdict
 from pathlib import Path
 
 from .config import Config, ProtocolError
-from .provisioning import provision, validate_host
-
 from .mqtt import MQTT
 from .printer import payload_data
 
 CANDIDATE_FILE = "candidate.json"
 QUALIFIED_FIRMWARE = "2.0.2.2"
+
+
+def provision(host):
+    from .provisioning import provision as bootstrap
+    return bootstrap(host)
+
+
+def validate_host(host):
+    import ipaddress
+    try:
+        if str(ipaddress.IPv4Address(host)) != host:
+            raise ValueError
+    except (ValueError, TypeError):
+        raise ProtocolError("Identity: supply a bare IPv4 address") from None
 
 
 def observe_fingerprint(config):
