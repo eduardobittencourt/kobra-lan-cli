@@ -11,7 +11,7 @@ The CLI is ready to become a coherent daily-use tool, but currently mixes flat a
 - Separate inspection, upload, planning and start. `files upload` requires `--execute` and the inspected file's `--sha256`; it has no implicit dry run. `print plan` is read-only; `print start` requires `--execute` and the reviewed `--plan-sha256` and revalidates the plan before sending.
 - Apply uniform target selection, contextual help, end-to-end examples and offline `completion bash|zsh|fish` generation. Format and completion must never trigger extra printer queries or bypass confirmation.
 - **BREAKING** Require a named profile for every new pairing. Remove automatic root-config lookup, unnamed pairing, legacy inventory entries and legacy defaults without migration or compatibility shims. An unset default is null and requires explicit selection. Explicit `--config` remains a deliberate read/access selector, not a pairing destination.
-- Keep trust and device-based duplicate protection for all operations after setup. The owner separately authorized a complete one-time local reset without backups; do not introduce a CLI reset/retry feature.
+- Keep trust and device-based duplicate protection for all operations after setup. The owner separately authorized a one-time local reset; do not introduce a CLI reset/retry feature.
 - Prepare source version 0.5.0 and update documentation and installed-package acceptance; do not publish a release.
 
 ## Capabilities

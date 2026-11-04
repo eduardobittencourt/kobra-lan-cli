@@ -12,6 +12,9 @@
 - Require explicit reviewed hashes and `--execute` for upload and start;
   planning stays read-only. Upload never starts printing.
 - Add offline bash/zsh/fish completion generators and installed-interface probes.
+- Quote local file completions correctly in Bash, including paths with spaces.
+- Serialize uploads per device within shared state storage so different payloads
+  cannot race the destination preflight; existing attempt markers remain intact.
 - Fix doctor compatibility for qualified firmware that omits optional MQTT
   device/model IDs, aligning with pairing while retaining pinned authentication
   and rejecting supplied conflicting IDs. Distinguish missing required evidence

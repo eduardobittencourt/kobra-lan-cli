@@ -26,6 +26,13 @@ Let owners inspect immutable sliced files, review each submission and start a qu
 - **WHEN** transmission or subsequent verification has an uncertain outcome
 - **THEN** the durable attempt remains, the result explains uncertainty and no retry is performed
 
+### Requirement: Serialized upload preflight
+Uploads sharing the same device state directory SHALL hold an exclusive device lease across destination listing, durable reservation, POST and verification, regardless of file hash or profile name. Contention SHALL fail before printer access without waiting, retrying or creating an attempt. Releasing a lease SHALL NOT delete its lock file or any attempt marker. This coordination SHALL NOT claim atomic firmware-side exclusion against other tools or state directories.
+
+#### Scenario: Concurrent payloads for one destination
+- **WHEN** different reviewed payloads target the same remote filename through the same device state directory
+- **THEN** only the lease holder can access the printer, and any later lease holder checks the fresh listing before considering an upload
+
 ### Requirement: Read-only print plan
 `print plan <file> --name <remote-name> --slot <1..4> --auto-leveling <on|off> --vibration-compensation <on|off> --flow-calibration <on|off>` SHALL validate the selected printer, local file, remote metadata and loaded material using the existing qualification checks. It SHALL report the reviewed plan hash, selected device, file hash/name, slot/material/color, explicit preparation settings and qualification limits without upload, start or attempt writes.
 

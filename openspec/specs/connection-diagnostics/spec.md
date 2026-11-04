@@ -7,7 +7,7 @@ Help users identify configuration and connection failures through bounded read-o
 ## Requirements
 
 ### Requirement: Selected-target diagnosis
-`doctor` SHALL use the same explicit selectors, persistent default and legacy fallback rules as operational commands. It SHALL report safe target metadata and local configuration/dependency checks even when later network checks cannot run. It SHALL NOT scan addresses or try another target.
+`doctor` SHALL use an explicit --config/--printer selector or saved named default, as operational commands do, without automatic root-config fallback. It SHALL report safe target metadata and local configuration/dependency checks even when later network checks cannot run. It SHALL NOT scan addresses or try another target.
 
 #### Scenario: Missing config or dependency
 - **WHEN** the selected config or a required runtime dependency is absent

@@ -1,9 +1,12 @@
 """Immutable payload upload, separate from print/start, without automatic retries."""
 import hashlib
+from contextlib import contextmanager
+import fcntl
 import http.client
 import json
 import os
 import re
+import stat
 import time
 import uuid
 from pathlib import Path
@@ -132,6 +135,40 @@ def execute(config, path, expected_sha256, state_dir, remote_name=None):
     directory = Path(state_dir) / device
     if (directory / (manifest["sha256"] + ".attempt")).exists():
         raise ProtocolError("Upload already attempted; no network write was repeated")
+    with upload_lock(directory):
+        if (directory / (manifest["sha256"] + ".attempt")).exists():
+            raise ProtocolError("Upload already attempted; no network write was repeated")
+        return execute_locked(config, data, manifest, directory)
+
+
+@contextmanager
+def upload_lock(directory):
+    """Serialize cooperating uploads by device, retaining the lock inode after close."""
+    directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+    parent = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        if os.fstat(parent).st_uid != os.geteuid():
+            raise ProtocolError("Upload state directory must be user-owned")
+        os.fchmod(parent, 0o700)
+        fd = os.open('.upload.lock', os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600, dir_fd=parent)
+        try:
+            saved = os.fstat(fd)
+            if (not stat.S_ISREG(saved.st_mode) or saved.st_uid != os.geteuid()
+                    or stat.S_IMODE(saved.st_mode) != 0o600 or saved.st_nlink != 1):
+                raise ProtocolError("Upload lock must be a private user-owned regular file")
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                raise ProtocolError("Another upload is active for this device; no command was sent") from None
+            yield
+        finally:
+            os.close(fd)
+    finally:
+        os.close(parent)
+
+
+def execute_locked(config, data, manifest, directory):
+    """Keep listing, reservation, POST and verification in one device lease."""
     with MQTT(config) as client:
         info = payload_data(client.query("info"))
         if info.get("model") != "Anycubic Kobra X" or info.get("version") != "2.0.2.2":
@@ -159,26 +196,30 @@ def execute(config, path, expected_sha256, state_dir, remote_name=None):
             receipt["response_data_fields"] = sorted(result.get("data", {}).keys()) if isinstance(result.get("data"), dict) else []
             receipt["status"] = "http_response_received_unverified"
             atomic_json(receipt_path, receipt)
-            # Only reads may be polled. Never repeat the HTTP POST.
-            records = list_files(client)
-            matches = [r for r in records if r.get("filename") == manifest["remote_filename"]]
-            if len(matches) != 1 or matches[0].get("size") != len(data):
-                raise ProtocolError("Remote file presence/size not confirmed")
-            receipt["remote_listing"] = matches[0]
-            details = safe_file_details(file_details(client, manifest["remote_filename"]))
-            receipt["remote_details"] = details
-            if (details.get("file_size") != len(data)
-                    or details.get("layer_count") != manifest["layer_count"]
-                    or details.get("printer_model") != "Anycubic Kobra X"):
-                raise ProtocolError("Remote metadata does not match the reviewed file")
-            after = payload_data(client.query("info"))
-            receipt["after"] = sanitized(after)
-            receipt["active_project_after"] = sanitized(after.get("project") or {})
-            receipt["status"] = "uploaded_verified_by_listing_and_metadata"
-            receipt["remote_byte_hash_verified"] = False
-            atomic_json(receipt_path, receipt)
+            verify_uploaded(client, manifest, len(data), receipt, receipt_path)
         except Exception:
             receipt["status"] = "uncertain_no_retry"
             atomic_json(receipt_path, receipt)
             raise ProtocolError("Upload/verification is uncertain; attempt recorded, do not resend") from None
         return {**receipt, "receipt_path": str(receipt_path)}
+
+
+def verify_uploaded(client, manifest, size, receipt, receipt_path):
+    # Only reads may be polled. Never repeat the HTTP POST.
+    records = list_files(client)
+    matches = [r for r in records if r.get("filename") == manifest["remote_filename"]]
+    if len(matches) != 1 or matches[0].get("size") != size:
+        raise ProtocolError("Remote file presence/size not confirmed")
+    receipt["remote_listing"] = matches[0]
+    details = safe_file_details(file_details(client, manifest["remote_filename"]))
+    receipt["remote_details"] = details
+    if (details.get("file_size") != size
+            or details.get("layer_count") != manifest["layer_count"]
+            or details.get("printer_model") != "Anycubic Kobra X"):
+        raise ProtocolError("Remote metadata does not match the reviewed file")
+    after = payload_data(client.query("info"))
+    receipt["after"] = sanitized(after)
+    receipt["active_project_after"] = sanitized(after.get("project") or {})
+    receipt["status"] = "uploaded_verified_by_listing_and_metadata"
+    receipt["remote_byte_hash_verified"] = False
+    atomic_json(receipt_path, receipt)

@@ -87,7 +87,7 @@ def bourne(nodes, shell):
         lines += ['  mapfile -t COMPREPLY < <(compgen -W "$candidates" -- "$cur")']
     paths = [shlex.quote(path) for path, node in nodes.items() if node["files"]]
     lines += ['  if [[ "$cur" != -* ]]; then', '    case "$context" in',
-              '      ' + '|'.join(paths) + ')' + (' _files ;;' if zsh else ' local -a files; mapfile -t files < <(compgen -f -- "$cur"); COMPREPLY+=("${files[@]}") ;;'),
+              '      ' + '|'.join(paths) + ')' + (' _files ;;' if zsh else ' compopt -o filenames; local -a files; mapfile -t files < <(compgen -f -- "$cur"); COMPREPLY+=("${files[@]}") ;;'),
               '    esac', '  fi', '}']
     lines += ['compdef _kobra_lan kobra-lan' if zsh else 'complete -F _kobra_lan kobra-lan']
     return '\n'.join(lines) + '\n'
@@ -95,7 +95,7 @@ def bourne(nodes, shell):
 
 def bourne_values(nodes, zsh):
     lines = []
-    file_return = ' _files; return ;;' if zsh else ' mapfile -t COMPREPLY < <(compgen -f -- "$cur"); return ;;'
+    file_return = ' _files; return ;;' if zsh else ' compopt -o filenames; mapfile -t COMPREPLY < <(compgen -f -- "$cur"); return ;;'
     choices_return = ' compadd -- ${=candidates}; return ;;' if zsh else ' mapfile -t COMPREPLY < <(compgen -W "$candidates" -- "$cur"); return ;;'
     for path, flag, option in value_options(nodes):
         key = shlex.quote(path + ':' + flag)

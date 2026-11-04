@@ -1,13 +1,34 @@
 """Completion is static metadata, never a dynamic device inventory."""
 import contextlib
 import io
+import os
+import pty
+import select
 import shutil
 import subprocess
+import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
 from kobra_lan.cli import build_parser, main
 from kobra_lan.completions import generate, metadata
+
+
+def read_terminal(master):
+    output = b''
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        if not select.select([master], [], [], max(0, deadline - time.monotonic()))[0]:
+            break
+        try:
+            chunk = os.read(master, 65536)
+        except OSError:
+            break
+        if not chunk:
+            break
+        output += chunk
+    return output
 
 
 class CompletionTests(unittest.TestCase):
@@ -36,6 +57,7 @@ class CompletionTests(unittest.TestCase):
     def test_bash_sources_and_completes_root_nested_choices_and_files(self):
         script = generate(build_parser(), 'bash')
         script += '''
+compopt() { printf 'filename-mode:%s\\n' "$*"; }
 COMP_WORDS=(kobra-lan --json --printer bench files ''); COMP_CWORD=5
 _kobra_lan; printf '%s\\n' "${COMPREPLY[@]}"
 COMP_WORDS=(kobra-lan print plan test.gcode --auto-leveling o); COMP_CWORD=5
@@ -50,6 +72,36 @@ _kobra_lan; printf '%s\\n' "${COMPREPLY[@]}"
         self.assertEqual(process.stderr, '')
         for expected in ('list', 'info', 'upload', 'on', 'off', '--json', 'pyproject.toml'):
             self.assertIn(expected, process.stdout.splitlines())
+        self.assertIn('filename-mode:-o filenames', process.stdout.splitlines())
+
+    def test_bash_readline_inserts_spaced_paths_as_single_arguments(self):
+        with tempfile.TemporaryDirectory() as directory:
+            from pathlib import Path
+            root = Path(directory)
+            script = root / 'completion.bash'
+            script.write_text(generate(build_parser(), 'bash'))
+            (root / 'model with spaces.gcode').write_text('synthetic')
+            (root / 'config with spaces.json').write_text('{}')
+            master, slave = pty.openpty()
+            process = subprocess.Popen(['bash', '--noprofile', '--norc', '-i'], cwd=root,
+                                       stdin=slave, stdout=slave, stderr=slave,
+                                       env={**os.environ, 'TERM': 'dumb', 'PS1': ''})
+            os.close(slave)
+            try:
+                commands = ("source completion.bash\n"
+                            "kobra-lan() { printf 'OPERAND:<%s>\\n' \"$@\"; }\n"
+                            "kobra-lan gcode inspect model\t\n"
+                            "kobra-lan --config config\t\nexit\n")
+                os.write(master, commands.encode())
+                output = read_terminal(master)
+                self.assertEqual(process.wait(timeout=1), 0, output)
+                self.assertIn(b'OPERAND:<model with spaces.gcode>\r\n', output)
+                self.assertIn(b'OPERAND:<config with spaces.json>\r\n', output)
+            finally:
+                os.close(master)
+                if process.poll() is None:
+                    process.kill()
+                    process.wait()
 
     def test_fish_sources_and_completes_offline(self):
         if not shutil.which('fish'):

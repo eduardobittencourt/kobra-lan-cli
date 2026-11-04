@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Let users manage named local printer connections and select a predictable target while preserving legacy access, private material and device-based operational safeguards.
+Let users manage named local printer connections and select a predictable target while preserving private material and device-based operational safeguards.
 
 ## Requirements
 

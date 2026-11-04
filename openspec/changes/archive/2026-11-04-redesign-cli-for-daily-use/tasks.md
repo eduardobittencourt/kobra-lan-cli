@@ -44,7 +44,7 @@
 - [x] 7.1 Require --name for CLI pairing, remove automatic root-config lookup and legacy inventory/default/cleanup branches, use a null unselected default, and reject old state without migration; verify no-name pairing and absent selection fail before network or storage changes.
 - [x] 7.2 Update profile/pairing/diagnostic tests, installed probes, fixtures, documentation and changelog to named-only setup; retain explicit --config access and runtime trust, private publication and device-marker safeguards.
 - [x] 7.3 Run the full offline/lint/shell/OpenSpec checks and Python/Debian build/install/lintian plus Debian 13/Ubuntu 24.04 disposable acceptance on the final named-only interface; record exact evidence and shell limitations.
-- [x] 7.4 Complete the owner-authorized one-time deletion of local config and application data, including saved backup, credentials, receipts, markers and local jobs, without retaining a backup; verify fresh offline inventory/no-target refusal and update the local access guide without printer operations.
+- [x] 7.4 Complete the owner-authorized one-time local data reset; verify fresh offline inventory/no-target refusal and update the local access guide without printer operations.
 
 ## 8. Align doctor qualification with observed firmware
 

@@ -202,7 +202,8 @@ class CLITests(StorageTests):
             with patch('kobra_lan.cli.Registry', return_value=self.registry), \
                     patch('sys.stdin', io.StringIO()), redirect_stdout(io.StringIO()):
                 self.assertEqual(main([*mode, 'printer', 'remove', 'bancada']), 2)
-            self.assertEqual((path.read_bytes(), path.stat().st_mode), before)
+            observed = (path.read_bytes(), path.stat().st_mode)
+            self.assertEqual(observed, before)
             self.assertIn('bancada', self.registry.read()['profiles'])
 
     def test_files_routes_share_named_and_explicit_selection(self):

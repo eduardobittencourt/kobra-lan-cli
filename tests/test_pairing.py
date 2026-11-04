@@ -359,13 +359,14 @@ class CLITests(unittest.TestCase):
 
     def test_formats_never_authorize_unattended_trust(self):
         for mode in ([], ['--json']):
+            name = 'bench' + str(len(mode))
             with patch.object(p, 'provision', return_value=self.bundle), \
                     patch.object(p, 'observe_fingerprint', return_value=PIN), \
                     patch.object(p, 'verify_status') as status, patch('sys.stdin', io.StringIO()), \
                     redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
-                self.assertEqual(main([*mode, 'printer', 'pair', '--name', 'bench'+str(len(mode)), '--host', HOST]), 2)
+                self.assertEqual(main([*mode, 'printer', 'pair', '--name', name, '--host', HOST]), 2)
             status.assert_not_called()
-            self.assertFalse(self.dest.exists())
+            self.assertFalse(self.registry.path(name).exists())
 
     def test_synthetic_pair_then_ordinary_status(self):
         """Load a newly paired config with the ordinary status command."""

@@ -105,6 +105,12 @@ To request execution later, use `print start` with the same explicit arguments p
 - Hashing and multipart construction use the same bytes in memory. No G-code translation, `print=true` flag, or HTTP redirects.
 - Exclusive reservations are persisted with fsync per device and file hash in `~/.local/share/kobra-lan/uploads/`. Upload and start use separate markers. A second attempt is blocked after success or timeout, including across processes and restarts.
 - After an ambiguous response, inspect status/files/receipts. Do not delete markers to retry blindly. A different state directory or program does not share this protection; intentionally printing the same part again requires operational review.
+- Uploads sharing a device state directory hold a private device lock through
+  listing, reservation, POST and verification. A concurrent contender fails
+  before printer access, including for different hashes or profile names.
+  The lock file is retained; closing its descriptor releases the lease.
+  Other clients or state directories do not share this lock, and firmware-side
+  atomic rejection of an existing filename has not been established.
 - Existing remote files are not overwritten. Names must be safe ASCII basenames; only `.gcode` files up to 128 MiB are accepted.
 - Remote verification checks filename, size, layers, and printer model. The endpoints used did not provide a checksum of stored bytes: `remote_byte_hash_verified=false` explicitly indicates that the internal copy was not downloaded and independently hashed.
 - Firmware 2.0.2.2 sends a correlated ACK followed by a report with a different msgid. Queries are synchronous and accept a fresh report after the ACK. An idle printer does not produce a report for `print/query`; status uses `info/report`.

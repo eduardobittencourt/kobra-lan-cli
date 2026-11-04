@@ -117,7 +117,7 @@ Prepare `kobra_lan.__version__ = 0.5.0` and matching changelog notes through the
 
 ## Migration Plan
 
-Implement and validate in a normal change branch. Replace commands and consumers together and prepare source version 0.5.0 without publication. Remove unnamed access and legacy selection without migration or compatibility code. The owner explicitly authorized deleting this machine's entire config and application-data directories, including private material, receipts, markers and local jobs, without backups. This one-time local action is separate from package lifecycle behavior and is not a CLI capability. Newly created profiles retain the existing private publication, trust and device-based reservation guarantees. No physical operation is authorized by the reset or implementation.
+Implement and validate in a normal change branch. Replace commands and consumers together and prepare source version 0.5.0 without publication. Remove unnamed access and legacy selection without migration or compatibility code. The owner authorized a one-time local data reset. This one-time local action is separate from package lifecycle behavior and is not a CLI capability. Newly created profiles retain the existing private publication, trust and device-based reservation guarantees. No physical operation is authorized by the reset or implementation.
 
 ## Named-only setup revision
 
@@ -136,3 +136,11 @@ query, retry or trust update is added. Certificate pin/auth ordering, deadline,
 stage/envelope shape, exit precedence and physical-operation limits are unchanged.
 Offline and installed probes must cover the real report shape, incomplete
 required evidence and contradictory optional identifiers.
+
+## PR review follow-up
+
+Bash file-completion branches enable filename quoting so spaced paths remain
+one operand. Uploads use a nonblocking per-device lease in shared state storage
+from preflight through verification, preserving existing hash-based markers.
+The lock inode remains after release. Other clients/state directories do not
+participate in this coordination; atomic firmware-side exclusion is not claimed.

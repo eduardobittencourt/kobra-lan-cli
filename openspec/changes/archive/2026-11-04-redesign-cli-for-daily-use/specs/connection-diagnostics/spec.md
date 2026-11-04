@@ -1,5 +1,12 @@
 ## MODIFIED Requirements
 
+### Requirement: Selected-target diagnosis
+`doctor` SHALL use an explicit --config/--printer selector or saved named default, as operational commands do, without automatic root-config fallback. It SHALL report safe target metadata and local configuration/dependency checks even when later network checks cannot run. It SHALL NOT scan addresses or try another target.
+
+#### Scenario: Missing config or dependency
+- **WHEN** the selected config or a required runtime dependency is absent
+- **THEN** doctor reports the failed local stage and a concrete next step, marks dependent checks skipped and opens no printer connection
+
 ### Requirement: Explicit compatibility results
 Doctor SHALL distinguish successful connectivity from qualified model/firmware support. After pinned TLS verification and MQTT authentication, the fresh MQTT info report SHALL identify `Anycubic Kobra X`, firmware `2.0.2.2` and a nonempty printable ASCII state of at most 80 characters. As in pairing, `deviceId`, `modelId` and `modeId` SHALL be optional report fields; each supplied identifier SHALL match the selected configuration. Omitted optional identifiers SHALL be disclosed without failing compatibility. Missing or null required evidence SHALL fail with `qualification_incomplete`; supplied contradictory or invalid values SHALL fail with `outside_qualification`, taking precedence over missing evidence. Doctor SHALL NOT add HTTP identity fallback, queries, trust changes or retries to compensate for missing fields. Passing diagnosis SHALL NOT expand hardware or physical-operation qualification.
 
