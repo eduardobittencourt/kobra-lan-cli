@@ -59,7 +59,10 @@ address scan or retry. It reports eight ordered stages: `configuration`,
 independent HTTP/MQTT TCP checks continue. HTTP failure does not block MQTT.
 TCP success proves only that a port accepts connections, not protocol support.
 TLS pins are compared before MQTT credentials. One authenticated session requests
-only a fresh correlated `info` report. A busy/printing target can pass.
+only a fresh correlated `info` report. A busy/printing target can pass. Compatibility requires a fresh matching
+`deviceId` and at least one matching `modelId`/`modeId`; missing identifiers
+fail compatibility while successful connection stages remain passed. Firmware
+reports omitting these fields are not claimed fully qualified by doctor.
 
 Each network stage has at most 12 seconds and all network work shares a
 60-second monotonic deadline. No reconnect, provisioning request, HTTP request,

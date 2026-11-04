@@ -11,6 +11,9 @@ import uuid
 
 from .config import Config, ProtocolError
 
+CONFIG_FILE = 'config.json'
+REGISTRY_FILE = 'profiles.json'
+
 DIRECTORY_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
 
 
@@ -85,43 +88,62 @@ def read_json(fd, name):
 class Registry:
     def __init__(self, root=None):
         self.root = Path(os.path.abspath(root or Path.home() / '.config/kobra-lan'))
-        self.legacy = self.root / 'config.json'
+        self.legacy = self.root / CONFIG_FILE
 
     def path(self, name):
-        return self.root / 'profiles' / validate_name(name) / 'config.json'
+        return self.root / 'profiles' / validate_name(name) / CONFIG_FILE
 
     def empty(self):
         return {'version': 1, 'default': 'legacy-fallback', 'profiles': {}}
 
+    def _pristine(self):
+        """Legacy paths may follow symlinks only before registry adoption."""
+        for filename in (REGISTRY_FILE, '.profiles.lock'):
+            try:
+                os.lstat(self.root / filename)
+            except FileNotFoundError:
+                continue
+            return False
+        return True
+
+    def _validate_entry(self, name, entry):
+        validate_name(name)
+        if (not isinstance(entry, dict) or set(entry) != {'config_path', 'owned_files', 'firmware'}
+                or entry.get('config_path') != str(self.path(name))
+                or not isinstance(entry.get('owned_files'), list)):
+            raise ValueError
+        for relative in entry['owned_files']:
+            if not isinstance(relative, str) or not self._owned_name(relative):
+                raise ValueError
+        if entry.get('firmware') not in (None, '2.0.2.2'):
+            raise ValueError
+
+    def _validate_index(self, data):
+        if (not isinstance(data, dict) or type(data.get('version')) is not int or data['version'] != 1
+                or not isinstance(data.get('profiles'), dict)):
+            raise ValueError
+        for name, entry in data['profiles'].items():
+            self._validate_entry(name, entry)
+        selected = data.get('default')
+        if selected not in ('legacy-fallback', 'require-explicit'):
+            if not isinstance(selected, dict) or set(selected) != {'name'} or selected['name'] not in data['profiles']:
+                raise ValueError
+        return data
+
     def read(self):
+        if self._pristine():
+            return self.empty()
         try:
             fd = open_directory(self.root, require_private=False)
         except FileNotFoundError:
             return self.empty()
         try:
             try:
-                data = read_json(fd, 'profiles.json')
+                data = read_json(fd, REGISTRY_FILE)
             except FileNotFoundError:
                 return self.empty()
             private(fd, directory=True)
-            if (not isinstance(data, dict) or type(data.get('version')) is not int or data.get('version') != 1
-                    or not isinstance(data.get('profiles'), dict)):
-                raise ValueError
-            for name, entry in data['profiles'].items():
-                validate_name(name)
-                if (not isinstance(entry, dict) or set(entry) != {'config_path', 'owned_files', 'firmware'} or entry.get('config_path') != str(self.path(name))
-                        or not isinstance(entry.get('owned_files'), list)):
-                    raise ValueError
-                for relative in entry['owned_files']:
-                    if not isinstance(relative, str) or not self._owned_name(relative):
-                        raise ValueError
-                if entry.get('firmware') not in (None, '2.0.2.2'):
-                    raise ValueError
-            selected = data.get('default')
-            if selected not in ('legacy-fallback', 'require-explicit'):
-                if not isinstance(selected, dict) or set(selected) != {'name'} or selected['name'] not in data['profiles']:
-                    raise ValueError
-            return data
+            return self._validate_index(data)
         except (ValueError, TypeError, KeyError, ProtocolError):
             raise ProfileLocalError('Profile registry is invalid or has an unknown version; preserve it for local review') from None
         finally:
@@ -129,15 +151,18 @@ class Registry:
 
     @staticmethod
     def _owned_name(relative):
-        return relative == 'config.json' or re.fullmatch(r'\.pair-[0-9a-f]{32}/(client\.crt|client\.key|candidate\.json)', relative) is not None
+        return relative == CONFIG_FILE or re.fullmatch(r'\.pair-[0-9a-f]{32}/(client\.crt|client\.key|candidate\.json)', relative) is not None
 
     @contextmanager
     def lock(self, exclusive=True, create=True, timeout=1.0):
         """Readers do not create metadata; a missing lock means a pristine registry."""
+        if not create and self._pristine():
+            yield False
+            return
         try:
             fd = open_directory(self.root, create=create, require_private=create)
         except FileNotFoundError:
-            yield
+            yield False
             return
         lock_fd = None
         try:
@@ -148,9 +173,9 @@ class Registry:
                 lock_fd = os.open('.profiles.lock', flags, 0o600, dir_fd=fd)
             except FileNotFoundError:
                 # Every managed writer creates this file before publishing its index.
-                if (self.root / 'profiles.json').exists():
+                if (self.root / REGISTRY_FILE).exists():
                     raise ProfileLocalError('Managed registry lock is missing; preserve storage for local review') from None
-                yield
+                yield False
                 return
             private(fd, directory=True)
             private(lock_fd)
@@ -163,7 +188,7 @@ class Registry:
                     if time.monotonic() >= end:
                         raise ProfileLocalError('Profile storage is busy; wait for the active operation to finish') from None
                     time.sleep(min(0.02, max(0, end - time.monotonic())))
-            yield
+            yield True
         finally:
             if lock_fd is not None:
                 os.close(lock_fd)
@@ -182,7 +207,7 @@ class Registry:
                 os.fsync(stream.fileno())
             # Validate the existing index/destination again; never overwrite unknown formats.
             self.read()
-            os.replace(temporary, 'profiles.json', src_dir_fd=fd, dst_dir_fd=fd)
+            os.replace(temporary, REGISTRY_FILE, src_dir_fd=fd, dst_dir_fd=fd)
             os.fsync(fd)
         finally:
             try:
@@ -238,7 +263,7 @@ class Registry:
     def register(self, name, firmware):
         cfg = self.load_unregistered(name)
         parent = self.path(name).parent
-        owned = ['config.json']
+        owned = [CONFIG_FILE]
         for filename in (cfg.client_cert, cfg.client_key):
             relative = str(Path(filename).relative_to(parent))
             if not self._owned_name(relative):
@@ -265,24 +290,30 @@ class Registry:
             self.write(data)
         return {'name': name, 'default': True}
 
+    def _explicit(self, config):
+        path = Path(os.path.abspath(config))
+        for candidate in (self.root / 'profiles', (self.root / 'profiles').resolve()):
+            if not path.is_relative_to(candidate):
+                continue
+            relative = path.relative_to(candidate).parts
+            if len(relative) != 2 or relative[1] != CONFIG_FILE:
+                raise ProtocolError('Explicit managed configuration must name a complete profile config')
+            name = validate_name(relative[0])
+            if name in self.read()['profiles']:
+                self.load(name)
+                return self.path(name), {'source': 'profile', 'name': name}
+            # A published orphan is recoverable via explicit config, never via --printer.
+            break
+        return path, {'source': 'explicit-config', 'name': None}
+
     def resolve(self, config=None, name=None):
         if config is not None and name is not None:
             raise ProtocolError('--config and --printer are mutually exclusive')
         if name is not None:
             validate_name(name)
-        data = self.read() if config is None else None
         if config is not None:
-            path = Path(os.path.abspath(config))
-            # Explicit managed configs must still acquire an operation lease.
-            for candidate in (self.root / 'profiles', (self.root / 'profiles').resolve()):
-                if path.is_relative_to(candidate):
-                    relative = path.relative_to(candidate).parts
-                    if len(relative) != 2 or relative[1] != 'config.json':
-                        raise ProtocolError('Explicit managed configuration must name a registered profile config')
-                    name = validate_name(relative[0])
-                    self.load(name)
-                    return self.path(name), {'source': 'profile', 'name': name}
-            return path, {'source': 'explicit-config', 'name': None}
+            return self._explicit(config)
+        data = self.read()
         if name is None:
             selected = data['default']
             if selected == 'require-explicit':
@@ -297,10 +328,15 @@ class Registry:
     @contextmanager
     def access(self, config=None, name=None):
         # Lock before resolution so selection/removal cannot race config loading.
-        with self.lock(exclusive=False, create=False):
+        with self.lock(exclusive=False, create=False) as leased:
             path, source = self.resolve(config, name)
-            cfg = self.load(source['name']) if source['source'] == 'profile' else Config.load(path)
-            yield cfg, {**source, 'config_path': str(path)}
+            if source['source'] == 'profile' and not leased:
+                # A writer adopted profiles after the pristine check; acquire its lock.
+                with self.lock(exclusive=False, create=False):
+                    yield self.load(source['name']), {**source, 'config_path': str(path)}
+            else:
+                cfg = self.load(source['name']) if source['source'] == 'profile' else Config.load(path)
+                yield cfg, {**source, 'config_path': str(path)}
 
     def metadata(self, cfg, path, source, data):
         name = source.get('name')
@@ -332,6 +368,45 @@ class Registry:
                 pass
             return {'profiles': entries, 'legacy': legacy, 'default': data['default']}
 
+    def _observed_registration(self, name):
+        try:
+            return name in self.read()['profiles']
+        except (OSError, ValueError, TypeError, KeyError, ProtocolError):
+            return None
+
+    def _observed_default(self, name):
+        try:
+            return self.read()['default'] == {'name': name}
+        except (OSError, ValueError, TypeError, KeyError, ProtocolError):
+            return None
+
+    @staticmethod
+    def _outcome(value, yes, no, unknown='uncertain'):
+        if value is None:
+            return unknown
+        return yes if value else no
+
+    def _register_published(self, name, destination, firmware):
+        try:
+            self.register(name, firmware)
+        except (OSError, ValueError, TypeError, KeyError, ProtocolError):
+            registered = self._observed_registration(name)
+            outcome = self._outcome(registered, 'registered', 'unregistered', 'registration uncertain')
+            result = {'name': name, 'config_path': str(destination), 'registered': registered,
+                      'default': self._observed_default(name)}
+            raise ProfileLocalError(f'Named config committed; profile {name} {outcome}. Retain PEMs; inspect printer list and complete config locally, do not repeat provisioning', result) from None
+
+    def _select_published(self, name, destination):
+        data = self.read()
+        data['default'] = {'name': name}
+        try:
+            self.write(data)
+        except (OSError, ValueError, TypeError, KeyError, ProtocolError):
+            selected = self._observed_default(name)
+            outcome = self._outcome(selected, 'selected', 'unchanged')
+            result = {'name': name, 'config_path': str(destination), 'registered': True, 'default': selected}
+            raise ProfileLocalError(f'Profile {name} committed; default {outcome}. Retain PEMs, inspect printer list and run printer use {name} locally; do not repeat provisioning', result) from None
+
     def pair(self, name, host, expected=None, make_default=False):
         """Reserve before provisioning; reconcile ambiguous commits without replay."""
         from .pairing import pair, validate_host, validate_pin
@@ -346,26 +421,9 @@ class Registry:
                 if destination.exists():
                     raise ProfileLocalError('Named pairing finalization failed; complete config may exist. Retain PEMs and inspect locally; do not repeat provisioning') from None
                 raise
-            try:
-                self.register(name, result['firmware'])
-            except (OSError, ValueError, TypeError, KeyError, ProtocolError):
-                try:
-                    registered = name in self.read()['profiles']
-                except (OSError, ValueError, TypeError, KeyError, ProtocolError):
-                    registered = None
-                outcome = 'registered' if registered else ('unregistered' if registered is False else 'registration uncertain')
-                raise ProfileLocalError(f'Named config committed; profile {name} {outcome}. Retain PEMs; inspect printer list and complete config locally, do not repeat provisioning', {'name': name, 'config_path': str(destination), 'registered': registered, 'default': False}) from None
+            self._register_published(name, destination, result['firmware'])
             if make_default:
-                data = self.read(); data['default'] = {'name': name}
-                try:
-                    self.write(data)
-                except (OSError, ValueError, TypeError, KeyError, ProtocolError):
-                    try:
-                        selected = self.read()['default'] == {'name': name}
-                    except (OSError, ValueError, TypeError, KeyError, ProtocolError):
-                        selected = None
-                    outcome = 'selected' if selected else ('unchanged' if selected is False else 'uncertain')
-                    raise ProfileLocalError(f'Profile {name} committed; default {outcome}. Retain PEMs, inspect printer list and run printer use {name} locally; do not repeat provisioning', {'name': name, 'config_path': str(destination), 'registered': True, 'default': selected}) from None
+                self._select_published(name, destination)
             return {**result, 'name': name, 'default': self.read()['default'] == {'name': name}}
 
     def removal_preview(self, name):
@@ -378,6 +436,34 @@ class Registry:
                 'default': data['default'] == {'name': name},
                 'files': [str(self.path(name).parent / f) for f in entry['owned_files']]}
 
+    @staticmethod
+    def _confirm_removal(preview, stdin, stderr):
+        if not stdin.isatty():
+            raise ProtocolError('Local removal requires terminal consent or --yes; no files changed')
+        print(json.dumps({'local_removal_preview': preview}, ensure_ascii=True), file=stderr)
+        print('Remove this local profile? Device credentials are not revoked. [y/N] ', end='', file=stderr, flush=True)
+        try:
+            answer = stdin.readline(32)
+        except (EOFError, OSError):
+            answer = ''
+        if len(answer) == 32 or answer.strip().lower() not in ('y', 'yes'):
+            raise ProtocolError('Local removal was not confirmed; no files changed')
+
+    def _detach(self, name, data, preview):
+        entry = data['profiles'].pop(name)
+        if data['default'] == {'name': name}:
+            data['default'] = 'require-explicit'
+        try:
+            self.write(data)
+        except OSError:
+            registered = self._observed_registration(name)
+            detached = None if registered is None else not registered
+            outcome = self._outcome(detached, 'detached', 'still registered')
+            result = {'name': name, 'registration_removed': detached, 'deleted_files': [],
+                      'preserved_files': preview['files'], 'device_credentials_revoked': False, 'cleanup_failed': True}
+            raise ProfileLocalError(f'Profile removal commit {outcome}; files retained. Inspect printer list and the managed directory locally; do not repeat provisioning', result) from None
+        return entry
+
     def remove(self, name, yes=False, stdin=None, stderr=None):
         import sys
         stdin = sys.stdin if stdin is None else stdin
@@ -385,33 +471,13 @@ class Registry:
         with self.lock(exclusive=False, create=False):
             preview = self.removal_preview(name)
         if not yes:
-            if not stdin.isatty():
-                raise ProtocolError('Local removal requires terminal consent or --yes; no files changed')
-            print(json.dumps({'local_removal_preview': preview}, ensure_ascii=True), file=stderr)
-            print('Remove this local profile? Device credentials are not revoked. [y/N] ', end='', file=stderr, flush=True)
-            try:
-                answer = stdin.readline(32)
-            except (EOFError, OSError):
-                answer = ''
-            if len(answer) == 32 or answer.strip().lower() not in ('y', 'yes'):
-                raise ProtocolError('Local removal was not confirmed; no files changed')
+            self._confirm_removal(preview, stdin, stderr)
         with self.lock():
             if self.removal_preview(name) != preview:
                 raise ProtocolError('Profile metadata changed after preview; inspect again before removal')
             data = self.read()
             references, uncertain = self._references(data, name)
-            entry = data['profiles'].pop(name)
-            if data['default'] == {'name': name}:
-                data['default'] = 'require-explicit'
-            try:
-                self.write(data)
-            except OSError:
-                try:
-                    detached = name not in self.read()['profiles']
-                except (OSError, ValueError, TypeError, KeyError, ProtocolError):
-                    detached = None
-                outcome = 'detached' if detached else ('still registered' if detached is False else 'uncertain')
-                raise ProfileLocalError(f'Profile removal commit {outcome}; files retained. Inspect printer list and the managed directory locally; do not repeat provisioning', {'name': name, 'registration_removed': detached, 'deleted_files': [], 'preserved_files': preview['files'], 'device_credentials_revoked': False, 'cleanup_failed': True}) from None
+            entry = self._detach(name, data, preview)
             return self._cleanup(name, entry, references, uncertain)
 
     def _references(self, data, removed):
@@ -440,6 +506,71 @@ class Registry:
             uncertain = True
         return references, uncertain
 
+    @staticmethod
+    def _exclusive_file(current, path, relative, references, uncertain):
+        return (stat.S_ISREG(current.st_mode) and current.st_uid == os.geteuid()
+                and stat.S_IMODE(current.st_mode) == 0o600 and current.st_nlink == 1
+                and path not in references and (not uncertain or relative == CONFIG_FILE))
+
+    def _cleanup_file(self, fd, root, relative, references, uncertain, deleted, preserved):
+        parts = Path(relative).parts
+        parent = fd
+        path = str(root / relative)
+        try:
+            if len(parts) == 2:
+                parent = os.open(parts[0], DIRECTORY_FLAGS, dir_fd=fd)
+                private(parent, directory=True)
+            current = os.stat(parts[-1], dir_fd=parent, follow_symlinks=False)
+            if not self._exclusive_file(current, path, relative, references, uncertain):
+                preserved.append(path)
+                return False
+            os.unlink(parts[-1], dir_fd=parent)
+            deleted.append(path)
+            os.fsync(parent)
+        except FileNotFoundError:
+            return False
+        except OSError:
+            if path not in deleted:
+                preserved.append(path)
+            return True
+        finally:
+            if parent != fd:
+                os.close(parent)
+        return False
+
+    @staticmethod
+    def _cleanup_directories(fd, root, directories, preserved):
+        for directory in directories:
+            try:
+                os.rmdir(directory, dir_fd=fd)
+            except FileNotFoundError:
+                continue
+            except OSError:
+                preserved.append(str(root / directory))
+        preserved.extend(str(root / f) for f in os.listdir(fd) if str(root / f) not in preserved)
+        os.fsync(fd)
+
+    @staticmethod
+    def _cleanup_root(root, preserved):
+        try:
+            parent = open_directory(root.parent)
+            try:
+                os.rmdir(root.name, dir_fd=parent)
+                os.fsync(parent)
+            finally:
+                os.close(parent)
+        except OSError:
+            if root.exists() and str(root) not in preserved:
+                preserved.append(str(root))
+            return not preserved
+        return False
+
+    @staticmethod
+    def _cleanup_receipt(name, deleted, preserved, errors=False):
+        return {'name': name, 'registration_removed': True, 'deleted_files': sorted(deleted),
+                'preserved_files': sorted(set(preserved)), 'device_credentials_revoked': False,
+                'cleanup_failed': errors}
+
     def _cleanup(self, name, entry, references, uncertain):
         # Enforce the ownership boundary here too, even for a direct internal caller.
         name = validate_name(name)
@@ -453,66 +584,19 @@ class Registry:
         try:
             fd = open_directory(root)
         except FileNotFoundError:
-            return {'name': name, 'registration_removed': True, 'deleted_files': [], 'preserved_files': [],
-                    'device_credentials_revoked': False, 'cleanup_failed': False}
+            return self._cleanup_receipt(name, [], [])
         except OSError:
-            return {'name': name, 'registration_removed': True, 'deleted_files': [], 'preserved_files': [str(root)],
-                    'device_credentials_revoked': False, 'cleanup_failed': True}
-        directories = set()
+            return self._cleanup_receipt(name, [], [str(root)], True)
         try:
-            for relative in entry['owned_files']:
-                parts = Path(relative).parts
-                parent = fd
-                try:
-                    if len(parts) == 2:
-                        directories.add(parts[0])
-                        parent = os.open(parts[0], DIRECTORY_FLAGS, dir_fd=fd)
-                        private(parent, directory=True)
-                    current = os.stat(parts[-1], dir_fd=parent, follow_symlinks=False)
-                    path = str(root / relative)
-                    if (not stat.S_ISREG(current.st_mode) or current.st_uid != os.geteuid()
-                            or stat.S_IMODE(current.st_mode) != 0o600 or current.st_nlink != 1
-                            or path in references or (uncertain and relative != 'config.json')):
-                        preserved.append(path)
-                        continue
-                    os.unlink(parts[-1], dir_fd=parent)
-                    deleted.append(path)
-                    os.fsync(parent)
-                except FileNotFoundError:
-                    pass
-                except OSError:
-                    if str(root / relative) not in deleted:
-                        preserved.append(str(root / relative))
-                    errors = True
-                finally:
-                    if parent != fd:
-                        os.close(parent)
-            for directory in directories:
-                try:
-                    os.rmdir(directory, dir_fd=fd)
-                except FileNotFoundError:
-                    pass
-                except OSError:
-                    preserved.append(str(root / directory))
-            # Unknown contents remain untouched and visible in the receipt.
-            preserved.extend(str(root / f) for f in os.listdir(fd) if str(root / f) not in preserved)
-            os.fsync(fd)
+            for relative in owned_files:
+                failed = self._cleanup_file(fd, root, relative, references, uncertain, deleted, preserved)
+                errors |= failed
+            directories = {Path(f).parts[0] for f in owned_files if len(Path(f).parts) == 2}
+            self._cleanup_directories(fd, root, directories, preserved)
         except OSError:
-            preserved.append(str(root)); errors = True
+            preserved.append(str(root))
+            errors = True
         finally:
             os.close(fd)
-        try:
-            parent = open_directory(root.parent)
-            try:
-                os.rmdir(root.name, dir_fd=parent)
-                os.fsync(parent)
-            finally:
-                os.close(parent)
-        except OSError:
-            if root.exists() and str(root) not in preserved:
-                preserved.append(str(root))
-            if not preserved:
-                errors = True
-        return {'name': name, 'registration_removed': True, 'deleted_files': sorted(deleted),
-                'preserved_files': sorted(set(preserved)), 'device_credentials_revoked': False,
-                'cleanup_failed': errors}
+        errors |= self._cleanup_root(root, preserved)
+        return self._cleanup_receipt(name, deleted, preserved, errors)

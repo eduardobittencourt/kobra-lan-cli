@@ -24,7 +24,8 @@ class HealthyMQTT:
     calls = []
     def __init__(self, cfg, timeout=12, deadline=None, observer=None):
         self.observer = observer
-        assert timeout <= 12 and math.isfinite(deadline)
+        assert timeout <= 12
+        assert math.isfinite(deadline)
     def __enter__(self):
         self.observer('tls_pin'); self.observer('mqtt_auth'); return self
     def __exit__(self,*args): pass
@@ -132,22 +133,67 @@ class DoctorTests(unittest.TestCase):
             with patch('kobra_lan.mqtt.ssl.SSLContext',return_value=ctx), \
                     patch('kobra_lan.mqtt.socket.create_connection',return_value=raw), \
                     patch.object(MQTT,'receive',side_effect=packets):
+                client = MQTT(cfg,observer=observed.append)
                 with self.assertRaises(MQTTFailure) as caught:
-                    MQTT(cfg,observer=observed.append).__enter__()
+                    client.__enter__()
             self.assertEqual(caught.exception.stage,stage); self.assertEqual(caught.exception.code,category)
-            if changed: tls.sendall.assert_not_called()
+            self.assertEqual(observed, [] if changed else ['tls_pin'])
+            if changed:
+                tls.sendall.assert_not_called()
+            else:
+                tls.sendall.assert_called()
             tls.close.assert_called_once()
 
     def test_shared_deadline_and_no_retries(self):
-        with patch.object(d.time,'monotonic',side_effect=[0,0,61,62]), patch.object(d.socket,'create_connection') as network, patch.object(d,'MQTT') as mqtt:
-            report,code = d.diagnose(self.registry)
-        self.assertEqual(code,3); network.assert_not_called(); mqtt.assert_not_called()
+        clock = {'now': 100.0}
+        timeouts = []
+        def tcp(address, timeout):
+            timeouts.append(timeout)
+            clock['now'] += 12 if len(timeouts) == 1 else 1
+            return Mock(__enter__=Mock(),__exit__=Mock())
+        def mqtt(cfg, **kwargs):
+            self.assertEqual(kwargs['deadline'],100+total)
+            self.assertEqual(clock['now'],113)
+            self.assertLessEqual(kwargs['timeout'],12)
+            return HealthyMQTT(cfg,**kwargs)
+        # Verify the real deadline and a shortened budget that exposes cumulative accounting.
+        for total,expected in ((60,[12,12]),(15,[12,3])):
+            clock['now']=100
+            timeouts.clear()
+            with patch.object(d.time,'monotonic',side_effect=lambda: clock['now']), \
+                    patch.object(d,'NETWORK_TIMEOUT',total), patch.object(d.socket,'create_connection',side_effect=tcp), \
+                    patch.object(d,'MQTT',side_effect=mqtt):
+                report,code = d.diagnose(self.registry)
+            self.assertEqual(code,0)
+            self.assertEqual(timeouts,expected)
+        clock['now']=100
+        def expired(address, timeout):
+            self.assertEqual(timeout,12)
+            clock['now']=161
+            raise TimeoutError
+        with patch.object(d.time,'monotonic',side_effect=lambda: clock['now']), \
+                patch.object(d.socket,'create_connection',side_effect=expired) as network, \
+                patch.object(d,'MQTT') as mqtt_client:
+            report,code=d.diagnose(self.registry)
+        self.assertEqual(code,3); self.assertEqual(network.call_count,1); mqtt_client.assert_not_called()
         self.assertEqual(report['result']['checks'][2]['status'],'failed')
         cfg = self.registry.load('bancada')
         client = MQTT(cfg,deadline=5); client.stage='status'; client.sock=Mock()
         with patch('kobra_lan.mqtt.time.monotonic',return_value=6):
             self.assertRaises(MQTTFailure,client.query,'info')
         client.sock.sendall.assert_not_called()
+
+    def test_missing_report_identity_is_not_fully_qualified(self):
+        for absent in (('deviceId',),('modelId','modeId'),('deviceId','modelId','modeId')):
+            class MissingIdentity(HealthyMQTT):
+                def query(self,kind):
+                    return {'code':200,'data':{key:value for key,value in INFO.items() if key not in absent}}
+            report,code=self.run_doctor(client=MissingIdentity)
+            self.assertEqual(code,2)
+            self.assertEqual(report['result']['checks'][-2]['status'],'passed')
+            self.assertEqual(report['result']['checks'][-1]['code'],'outside_qualification')
+        alias={**INFO,'modeId':INFO['modelId']}; del alias['modelId']
+        self.assertTrue(d.compatible(self.registry.load('bancada'),alias))
 
     def test_cli_envelope_and_conflict(self):
         stdout=io.StringIO()

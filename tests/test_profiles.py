@@ -228,6 +228,10 @@ class CLITests(StorageTests):
         with patch('kobra_lan.pairing.pair', side_effect=publish), patch.object(self.registry,'write',side_effect=OSError('secret')):
             self.assertRaisesRegex(ProfileLocalError,'unregistered',self.registry.pair,'orphan','192.0.2.10','a'*64)
         self.assertEqual(Config.load(self.registry.path('orphan')).mqtt_password,'secret-password')
+        code,report=self.invoke('--config',str(self.registry.path('orphan')),'printer','info')
+        self.assertEqual(code,0); self.assertEqual(report['result']['source'],'explicit-config')
+        self.assertEqual(report['result']['printer_id'],'Synthetic01')
+        self.assertNotIn('orphan',self.registry.read()['profiles'])
         real_write = self.registry.write
         def commit_then_fail(data):
             real_write(data); raise OSError('secret')
@@ -403,3 +407,31 @@ class CLITests(StorageTests):
                 invalid={**entry,'owned_files':['config.json',filename]}
                 self.assertRaises(ProtocolError,self.registry._cleanup,'bancada',invalid,set(),False)
         self.assertEqual(original,{str(p):p.read_bytes() for p in self.root.rglob('*') if p.is_file()})
+
+    def test_pristine_symlinked_legacy_parent_and_explicit_config(self):
+        actual=Path(self.temporary.name)/'actual'
+        fixture(actual/'config.json')
+        self.root.symlink_to(actual,target_is_directory=True)
+        self.assertEqual(self.invoke('printer','info')[0],0)
+        self.assertEqual(self.invoke('printer','list')[0],0)
+        self.assertEqual(self.invoke('--config',str(self.root/'config.json'),'printer','info')[0],0)
+        self.assertFalse((actual/'.profiles.lock').exists())
+        self.assertFalse((actual/'profiles.json').exists())
+        # Adoption restores strict no-follow access even for explicit external configs.
+        for artifact in ('profiles.json','.profiles.lock'):
+            path=actual/artifact; path.symlink_to(actual/'missing')
+            self.assertEqual(self.invoke('printer','list')[0],3)
+            self.assertEqual(self.invoke('--config',str(actual/'config.json'),'printer','info')[0],3)
+            path.unlink()
+
+    def test_first_adoption_acquires_a_lease_before_loading_a_managed_selection(self):
+        original_resolve=self.registry.resolve
+        def adopt(config=None,name=None):
+            self.add_profile()
+            self.registry.select('bancada')
+            return original_resolve(config,name)
+        with patch.object(self.registry,'resolve',side_effect=adopt):
+            with self.registry.access() as (cfg,source):
+                self.assertEqual(source['name'],'bancada')
+                with self.assertRaisesRegex(ProfileLocalError,'busy'):
+                    with self.registry.lock(timeout=0): pass

@@ -36,7 +36,7 @@ def main():
         def __exit__(self,*args): pass
         def query(self,kind):
             assert kind=='info'
-            return {'code':200,'data':{'model':'Anycubic Kobra X','version':'2.0.2.2','state':'printing'}}
+            return {'code':200,'data':{'model':'Anycubic Kobra X','version':'2.0.2.2','state':'printing','modelId':20030,'deviceId':'Synthetic01'}}
 
     def invoke(argv, expected=0):
         stdout, stderr = io.StringIO(), io.StringIO()
@@ -67,10 +67,10 @@ def main():
             directory=state/device; directory.mkdir(parents=True)
             marker=directory/(sha+'.attempt'); marker.write_bytes(b'synthetic uncertain upload')
             upload=['upload',str(gcode),'--execute','--sha256',sha]
-            invoke(upload,expected=2)
+            assert invoke(upload,expected=2)['error']=='Upload already attempted; no network write was repeated'
             invoke(['printer','pair','--name','bancada','--host','192.0.2.10','--trust-sha256',pin])
             assert invoke(['printer','list'])['result']['default']=='legacy-fallback'
-            invoke(['--printer','bancada',*upload],expected=2)
+            assert invoke(['--printer','bancada',*upload],expected=2)['error']=='Upload already attempted; no network write was repeated'
             invoke(['printer','use','bancada'])
             assert invoke(['printer','info'])['result']['name']=='bancada'
             root=home/'.config/kobra-lan'
@@ -91,7 +91,7 @@ def main():
             assert marker.read_bytes()==b'synthetic uncertain upload'
             invoke(['printer','pair','--name','bancada','--host','192.0.2.10','--trust-sha256',pin])
             assert invoke(['printer','list'])['result']['default']=='require-explicit'
-            invoke(['--printer','bancada',*upload],expected=2)
+            assert invoke(['--printer','bancada',*upload],expected=2)['error']=='Upload already attempted; no network write was repeated'
             assert marker.read_bytes()==b'synthetic uncertain upload'
             assert invoke(['--config',str(root/'config.json'),'printer','info'])['result']['source']=='explicit-config'
             missing=invoke(['--config',str(home/'missing.json'),'doctor'],expected=3)

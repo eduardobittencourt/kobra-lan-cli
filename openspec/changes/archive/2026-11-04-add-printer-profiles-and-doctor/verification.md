@@ -4,7 +4,7 @@ Verified locally on 2026-11-04 against implementation branch
 `feat/printer-profiles-and-doctor`, based on merged main `4c653be`.
 Source version preparation: 0.4.0. No tag or release was created.
 
-## Gates and artifacts
+## Initial implementation gates and artifacts
 
 - Locked Ruff and coverage-backed unittest discovery: **152 tests passed**.
 - `profiles.py` and `diagnostics.py`: each **91%** branch-aware unit coverage.
@@ -23,10 +23,9 @@ Source version preparation: 0.4.0. No tag or release was created.
   provisioning. Installed probes explicitly substitute synthetic transports.
 - Artifact SHA-256 (`kobra-lan-cli_0.4.0-1_all.deb`):
   `e93f94d2ada6d9fe0a0816422c1d51b9ddb2b76475dffa5fbd5415852a79cf77`.
-- Final wheel bytes match all 11 current application source modules.
+- The initial local wheel matched all 11 application source modules at that implementation snapshot.
 
-Evidence is retained at
-`/root/research/kobra-lan-cli/add-printer-profiles-and-doctor/`: unit/coverage
+Retained validation evidence includes unit/coverage
 reports, `build-candidate.log`, distribution acceptance logs and digest-bound JSON
 reports, official rootfs download checksums and `artifacts/`. Disposable chroots
 were used because Docker/Podman are unavailable; the repository's Docker CI
@@ -112,3 +111,24 @@ and manifest paths and verifies rejection before any filesystem operation.
 All **153 offline tests** and locked Ruff passed after this hardening. Hosted
 checks and Sonar must run again on the resulting commit before merge; no analyzer
 suppression, gate change or new hardware qualification is part of this fix.
+
+
+## CodeRabbit review follow-up
+
+The ten review threads were addressed with legacy symlink compatibility before
+registry adoption, explicit orphan-config recovery, stricter fresh-report
+identity qualification, and more auditable registry/cleanup/diagnostic helpers.
+Managed storage still fails closed after adoption. A first-adoption race test
+confirms that managed access acquires the newly created operation lease.
+
+Doctor now requires matching `deviceId` plus `modelId` or `modeId` in the fresh
+report. Missing fields fail compatibility; firmware field availability was not
+validated on real hardware and is not claimed. Synthetic installed probes supply
+explicit identifiers. Pairing's existing identity rules are preserved.
+
+All **156 offline tests** passed, with coverage instrumentation. Additional
+assertions verify pin-stage callbacks, credential-send ordering, the actual
+60-second deadline, shrinking remaining budgets, and marker-specific duplicate
+errors in installed probes. The updated sdist-derived wheel and independent
+installed probes passed with the declared locked runtime closure. Hosted Debian /
+Ubuntu gates and external review must rerun on this revision before merge.

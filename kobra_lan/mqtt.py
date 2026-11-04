@@ -118,15 +118,19 @@ class MQTT:
             self.stage_deadline = None
             return self
         except BaseException as error:
-            if self.sock:
-                self.sock.close()
-            elif raw is not None:
-                raw.close()
-            if isinstance(error, OSError):
-                raise MQTTIOFailure(self.stage) from None
-            if isinstance(error, ProtocolError) and not isinstance(error, MQTTFailure):
-                raise MQTTFailure(self.stage, 'protocol_rejected', str(error)) from None
+            self._abort(error, raw)
             raise
+
+    def _abort(self, error, raw):
+        """Close transport before translating an operational failure."""
+        if self.sock:
+            self.sock.close()
+        elif raw is not None:
+            raw.close()
+        if isinstance(error, OSError):
+            raise MQTTIOFailure(self.stage) from None
+        if isinstance(error, ProtocolError) and not isinstance(error, MQTTFailure):
+            raise MQTTFailure(self.stage, 'protocol_rejected', str(error)) from None
 
     def __exit__(self, *args):
         if self.sock:
