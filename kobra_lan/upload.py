@@ -15,8 +15,10 @@ from urllib.parse import urlsplit
 from .config import ProtocolError
 from .mqtt import MQTT
 from .printer import payload_data, sanitized, file_details, safe_file_details, list_files
+from .profiles import open_directory
 
 MAX_FILE = 128 * 1024 * 1024
+ATTEMPT_SUFFIX = ".attempt"
 
 
 def atomic_json(path, data):
@@ -110,7 +112,7 @@ def post_once(config, target, data, name):
 def reserve(directory, manifest):
     directory.mkdir(parents=True, exist_ok=True, mode=0o700)
     directory.chmod(0o700)
-    marker = directory / (manifest["sha256"] + ".attempt")
+    marker = directory / (manifest["sha256"] + ATTEMPT_SUFFIX)
     try:
         fd = os.open(marker, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     except FileExistsError:
@@ -133,10 +135,10 @@ def execute(config, path, expected_sha256, state_dir, remote_name=None):
         raise ProtocolError("File SHA-256 differs from reviewed manifest")
     device = hashlib.sha256(config.printer_id.encode()).hexdigest()[:16]
     directory = Path(state_dir) / device
-    if (directory / (manifest["sha256"] + ".attempt")).exists():
+    if (directory / (manifest["sha256"] + ATTEMPT_SUFFIX)).exists():
         raise ProtocolError("Upload already attempted; no network write was repeated")
     with upload_lock(directory):
-        if (directory / (manifest["sha256"] + ".attempt")).exists():
+        if (directory / (manifest["sha256"] + ATTEMPT_SUFFIX)).exists():
             raise ProtocolError("Upload already attempted; no network write was repeated")
         return execute_locked(config, data, manifest, directory)
 
@@ -144,12 +146,8 @@ def execute(config, path, expected_sha256, state_dir, remote_name=None):
 @contextmanager
 def upload_lock(directory):
     """Serialize cooperating uploads by device, retaining the lock inode after close."""
-    directory.mkdir(parents=True, exist_ok=True, mode=0o700)
-    parent = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    parent = open_directory(directory, create=True)
     try:
-        if os.fstat(parent).st_uid != os.geteuid():
-            raise ProtocolError("Upload state directory must be user-owned")
-        os.fchmod(parent, 0o700)
         fd = os.open('.upload.lock', os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600, dir_fd=parent)
         try:
             saved = os.fstat(fd)

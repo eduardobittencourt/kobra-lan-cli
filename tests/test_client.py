@@ -147,6 +147,7 @@ class UploadTests(unittest.TestCase):
             with self.assertRaises(ProtocolError): self.run_upload()
             post.assert_not_called()
     def test_concurrent_different_hashes_cannot_upload_to_same_destination(self):
+        cfg, state = config(), self.root / 'state'
         other = self.root / 'different.gcode'
         other.write_bytes(GCODE + b'; different payload\n')
         other_sha = hashlib.sha256(other.read_bytes()).hexdigest()
@@ -164,7 +165,7 @@ class UploadTests(unittest.TestCase):
                     self.assertTrue(entered.wait(3))
                     calls_before = list(FakeMQTT.calls)
                     with self.assertRaisesRegex(ProtocolError, 'Another upload is active'):
-                        execute(config(), other, other_sha, self.root / 'state', FakeMQTT.name)
+                        execute(cfg, other, other_sha, state, FakeMQTT.name)
                     self.assertEqual(FakeMQTT.calls, calls_before)
                     self.assertEqual(post.call_count, 1)
                 finally:
@@ -172,7 +173,7 @@ class UploadTests(unittest.TestCase):
                 self.assertEqual(first.result(timeout=3)['status'], 'uploaded_verified_by_listing_and_metadata')
             # A later contender must re-list after acquiring the released lease.
             with self.assertRaisesRegex(ProtocolError, 'Remote filename already exists'):
-                execute(config(), other, other_sha, self.root / 'state', FakeMQTT.name)
+                execute(cfg, other, other_sha, state, FakeMQTT.name)
             self.assertEqual(post.call_count, 1)
         self.assertEqual(len(list((self.root / 'state').rglob('*.attempt'))), 1)
         self.assertFalse(list((self.root / 'state').rglob(other_sha + '.*')))
@@ -201,6 +202,25 @@ class UploadTests(unittest.TestCase):
             with upload_lock(directory):
                 pass
         self.assertEqual(target.read_text(), 'retain')
+
+    def test_upload_lock_rejects_symlink_ancestors_and_preserves_existing_modes(self):
+        from kobra_lan.profiles import ProfileLocalError
+        outside = self.root / 'outside'
+        outside.mkdir(mode=0o700)
+        alias = self.root / 'alias'
+        alias.symlink_to(outside, target_is_directory=True)
+        with self.assertRaises(OSError):
+            with upload_lock(alias / 'device'):
+                pass
+        self.assertFalse((outside / 'device').exists())
+        directory = self.root / 'not-private'
+        directory.mkdir(mode=0o755)
+        before = directory.stat().st_mode
+        with self.assertRaises(ProfileLocalError):
+            with upload_lock(directory):
+                pass
+        self.assertEqual(directory.stat().st_mode, before)
+        self.assertFalse((directory / '.upload.lock').exists())
     def test_http_transport_sends_once_and_does_not_redirect(self):
         response = SimpleNamespace(status=302, read=lambda n: b'{}')
         conn = unittest.mock.Mock()

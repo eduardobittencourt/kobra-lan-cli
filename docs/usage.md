@@ -109,6 +109,9 @@ To request execution later, use `print start` with the same explicit arguments p
   listing, reservation, POST and verification. A concurrent contender fails
   before printer access, including for different hashes or profile names.
   The lock file is retained; closing its descriptor releases the lease.
+  State paths are walked without following symlinks; an existing device directory
+  must be user-owned and private (0700). Invalid permissions are refused without
+  changing them, and the lock must be a private regular file (0600).
   Other clients or state directories do not share this lock, and firmware-side
   atomic rejection of an existing filename has not been established.
 - Existing remote files are not overwritten. Names must be safe ASCII basenames; only `.gcode` files up to 128 MiB are accepted.
