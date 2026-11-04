@@ -2,9 +2,26 @@
 
 A direct Anycubic Kobra X LAN client with readable text and opt-in JSON for automation. Slicing is handled separately by the official Anycubic Slicer Next. This client preserves G-code bytes and does not require KX-Bridge, Moonraker, a desktop, or Home Assistant at runtime.
 
-**Status:** upload and print start validated on Kobra X hardware running firmware 2.0.2.2 for one PLA High Speed print using onboard slot 1, automatic leveling on, vibration compensation off, and flow calibration off. Starting the stored file with `url=""` worked. Other combinations remain unqualified; the start feature is still experimental. Physical print quality and completion have not yet been assessed.
+**Status: experimental, under active development.** The CLI and its JSON automation interface are intended for testing and feedback. Commands, output and stored-state contracts can change during 0.x; read each version's [compatibility notes](https://github.com/eduardobittencourt/kobra-lan-cli/releases) before upgrading. A downloadable package does not imply stable or broadly qualified printer support.
 
-Product direction, proposed command areas, independent onboarding, and installation/distribution plans are tracked in the [product roadmap](ROADMAP.md). The [release guide](docs/releases.md) describes the implemented package tooling; a public package release and the roadmap's other proposed channels remain pending.
+Upload and print start were observed on Kobra X hardware running firmware 2.0.2.2 for one PLA High Speed print using onboard slot 1, automatic leveling on, vibration compensation off, and flow calibration off. Starting the stored file with `url=""` worked. Other combinations remain unqualified. Physical print completion and part quality have not yet been assessed.
+
+See the [roadmap](ROADMAP.md) for implemented capabilities and future work, and the [release guide](docs/releases.md) for supported installation targets, package checks and recovery.
+
+## Experimental packages
+
+Versioned Debian packages are distributed through [GitHub Releases](https://github.com/eduardobittencourt/kobra-lan-cli/releases). Select a published version with both its `.deb` and `SHA256SUMS` attached; CI artifacts and merged source alone do not establish package availability. Debian 13 and Ubuntu 24.04 on amd64 are the acceptance targets. There is no hosted apt repository or automatic update channel.
+
+Download both assets from the same release into an empty directory, then verify and install:
+
+```sh
+sha256sum --check SHA256SUMS
+sudo apt install ./kobra-lan-cli_0.5.0-1_all.deb
+/usr/bin/kobra-lan --version
+/usr/bin/kobra-lan --help
+```
+
+The package installs `/usr/bin/kobra-lan`. If a checkout launcher already exists in your PATH, inspect `type -a kobra-lan` and follow the [deliberate switching instructions](docs/releases.md#download-install-and-deliberately-switch-commands). Installation preserves private configuration and operational state and does not contact a printer. PyPI, mise and Homebrew distribution remain future work.
 
 ## Running the client
 

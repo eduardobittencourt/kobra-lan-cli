@@ -4,6 +4,12 @@
 
 ## 0.5.0
 
+- Experimental release for testing and feedback; the CLI and JSON automation
+  interface remain under active development. Breaking changes are expected
+  during 0.x and are documented per version.
+- Distribute a downloadable `.deb` and `SHA256SUMS` through GitHub Releases,
+  with package acceptance on Debian 13 and Ubuntu 24.04, amd64. There is no
+  hosted apt repository or automatic update channel.
 - Breaking: replace flat operations with `files list|info|upload`, `gcode inspect`
   and `print plan|start`, without aliases. Root options precede commands and
   cannot be abbreviated.
@@ -25,7 +31,10 @@
 - Preserve private config fields, receipts, permissions and device/file
   attempt identities during normal operations. Do not clear markers or repeat uncertain actions when
   updating commands. Existing qualification and experimental limits still apply.
-- Prepare source only: no release tag, publication or live installation migration.
+- Printer support remains limited to Kobra X model 20030 / firmware 2.0.2.2
+  and the recorded material/preparation observations. Physical print completion
+  and part quality remain unassessed. Package installation does not pair, upload,
+  start a print or migrate a live checkout installation.
 
 ## 0.4.0
 

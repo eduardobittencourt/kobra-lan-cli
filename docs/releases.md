@@ -1,5 +1,13 @@
 # Releases and compatibility
 
+The CLI and its JSON automation interface are experimental and under active
+development. Versioned packages support testing and feedback within the recorded
+hardware limits; they do not establish a stable API or a complete validated print
+cycle. Published downloads are listed on
+[GitHub Releases](https://github.com/eduardobittencourt/kobra-lan-cli/releases).
+Only a public version with its `.deb` and `SHA256SUMS` assets is an available
+package release; source versions, merged PRs and CI artifacts are not publication.
+
 The source of truth is the literal `__version__` in `kobra_lan/__init__.py`.
 Python metadata and `kobra-lan --version` derive from it. A release accepts only
 final `X.Y.Z` versions (for example `0.5.0`), matching `vX.Y.Z` tags and Debian
@@ -204,8 +212,11 @@ If publication succeeded but the response was lost, a retry fails on the already
 published version without mutation. Inspect/download the public assets and check
 the manifest; do not force an overwrite or retag. Any changed public artifact
 requires a new application version. GitHub-hosted CI execution and the actual
-release API remain separate from the local fixture-based verification; this
-setup does not publish a real release.
+release API remain separate from local fixture-based verification. Those tests
+do not by themselves establish that a version is published.
+After the workflow succeeds, inspect the public release's tag and commit, download
+both public assets into a fresh directory and run `sha256sum --check SHA256SUMS`.
+Record the release URL and verified digest without installing it on a live host.
 
 References: [setuptools pyproject configuration](https://setuptools.pypa.io/en/latest/userguide/pyproject_config.html),
 [Debian Python packaging](https://www.debian.org/doc/manuals/debmake-doc/ch14.en.html#python),
@@ -219,8 +230,10 @@ changes output to text by default. Scripts use the canonical commands and root
 `--json` version 1. Pairing requires `--name` and rejects global selectors;
 there is no unnamed setup, root-config discovery, old-default migration or legacy
 inventory. Registry version 1 uses a null default or a named selection object.
-Earlier string-default registries are unsupported. This is deliberate source
-preparation for the sole owner, not a compatibility migration.
+Earlier string-default registries are unsupported. This breaking preview
+provides no automatic migration. Inspect the documented named setup before
+upgrading; preserve credentials and durable markers and do not delete state to
+bypass an uncertain attempt.
 
 Private config fields and device/file receipt and attempt identities remain
 unchanged for current operations. Normal profile deletion and package lifecycle
@@ -232,5 +245,7 @@ Both packages include cli_output.py and completions.py. Installed probes cover
 named setup, missing-name refusal before provisioning, explicit/default target
 selection, empty inventory, removal, healthy/failed diagnosis, safe errors,
 local inspection and all offline completion generators outside the checkout.
-Native shell tests explicitly record unavailable shells. Source preparation
-creates no tag or publication and grants no physical-action authorization.
+Native shell tests explicitly record unavailable shells. Package availability
+does not authorize pairing, upload or physical printer operations. Creating a
+version tag and publishing a release remain explicit maintainer actions through
+the gated workflow above.
