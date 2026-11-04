@@ -24,3 +24,14 @@ directory; those tools are not packaged or installed in application acceptance
 environments. Sonar imports unit `coverage.xml` and `build-coverage.xml` from the
 same run. Package scripts executed only in these gates are not covered by the
 local unit-only report. Both sets of checks must succeed before analysis.
+
+## CLI 0.5.0 contract checks
+
+The offline suite covers the canonical command tree, sanitized parser failures,
+root option placement, text and version-1 JSON, reviewed execution routes and
+device markers preserved by normal operations. Named-only pairing and null
+defaults are tested without legacy conversion or root-config discovery. Completion metadata is derived from argparse; bash
+and fish smoke tests run when available, and missing shells are explicitly
+skipped. Installed archive/Debian probes use `--json` before operational
+commands and exercise `gcode inspect`, all completion generators and safe parse
+failures outside the checkout. See [usage](usage.md) for the supported workflow.

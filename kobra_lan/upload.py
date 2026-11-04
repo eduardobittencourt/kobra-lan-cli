@@ -1,9 +1,12 @@
 """Immutable payload upload, separate from print/start, without automatic retries."""
 import hashlib
+from contextlib import contextmanager
+import fcntl
 import http.client
 import json
 import os
 import re
+import stat
 import time
 import uuid
 from pathlib import Path
@@ -12,27 +15,38 @@ from urllib.parse import urlsplit
 from .config import ProtocolError
 from .mqtt import MQTT
 from .printer import payload_data, sanitized, file_details, safe_file_details, list_files
+from .profiles import open_directory
 
 MAX_FILE = 128 * 1024 * 1024
+ATTEMPT_SUFFIX = ".attempt"
 
 
-def atomic_json(path, data):
-    tmp = path.with_name(path.name + "." + uuid.uuid4().hex + ".tmp")
-    fd = os.open(tmp, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+def atomic_json(path, data, *, directory_fd=None):
+    parent = os.dup(directory_fd) if directory_fd is not None else open_directory(path.parent, require_private=False)
+    try:
+        atomic_json_at(parent, path.name, data)
+    finally:
+        os.close(parent)
+
+
+def atomic_json_at(parent, name, data):
+    if not name or name in ('.', '..') or Path(name).name != name:
+        raise ProtocolError("Invalid state filename")
+    tmp = name + "." + uuid.uuid4().hex + ".tmp"
+    fd = os.open(tmp, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600, dir_fd=parent)
     try:
         with os.fdopen(fd, "w") as stream:
             json.dump(data, stream, indent=2)
             stream.write("\n")
             stream.flush()
             os.fsync(stream.fileno())
-        os.replace(tmp, path)
-        directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
-        try:
-            os.fsync(directory)
-        finally:
-            os.close(directory)
+        os.replace(tmp, name, src_dir_fd=parent, dst_dir_fd=parent)
+        os.fsync(parent)
     finally:
-        tmp.unlink(missing_ok=True)
+        try:
+            os.unlink(tmp, dir_fd=parent)
+        except FileNotFoundError:
+            pass
 
 
 def describe(path, remote_name=None):
@@ -104,24 +118,43 @@ def post_once(config, target, data, name):
         conn.close()
 
 
-def reserve(directory, manifest):
-    directory.mkdir(parents=True, exist_ok=True, mode=0o700)
-    directory.chmod(0o700)
-    marker = directory / (manifest["sha256"] + ".attempt")
+def reserve(directory, manifest, *, directory_fd=None):
+    if directory_fd is None:
+        directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+        directory.chmod(0o700)
+        parent = open_directory(directory)
+    else:
+        parent = os.dup(directory_fd)
     try:
-        fd = os.open(marker, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        reserve_at(parent, manifest)
+    finally:
+        os.close(parent)
+    return directory / (manifest["sha256"] + ".json")
+
+
+def reserve_at(parent, manifest):
+    if not re.fullmatch(r'[a-f0-9]{64}', manifest["sha256"]):
+        raise ProtocolError("Invalid attempt identity")
+    marker = manifest["sha256"] + ATTEMPT_SUFFIX
+    try:
+        fd = os.open(marker, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=parent)
     except FileExistsError:
         raise ProtocolError("This file already has an upload attempt; inspect its receipt, do not resend") from None
     with os.fdopen(fd, "w") as stream:
         stream.write(json.dumps(manifest) + "\n")
         stream.flush()
         os.fsync(stream.fileno())
-    parent = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
+    os.fsync(parent)
+
+
+def attempted(parent, sha256):
+    if not re.fullmatch(r'[a-f0-9]{64}', sha256):
+        raise ProtocolError("Invalid attempt identity")
     try:
-        os.fsync(parent)
-    finally:
-        os.close(parent)
-    return directory / (manifest["sha256"] + ".json")
+        os.stat(sha256 + ATTEMPT_SUFFIX, dir_fd=parent, follow_symlinks=False)
+        return True
+    except FileNotFoundError:
+        return False
 
 
 def execute(config, path, expected_sha256, state_dir, remote_name=None):
@@ -130,8 +163,36 @@ def execute(config, path, expected_sha256, state_dir, remote_name=None):
         raise ProtocolError("File SHA-256 differs from reviewed manifest")
     device = hashlib.sha256(config.printer_id.encode()).hexdigest()[:16]
     directory = Path(state_dir) / device
-    if (directory / (manifest["sha256"] + ".attempt")).exists():
-        raise ProtocolError("Upload already attempted; no network write was repeated")
+    with upload_lock(directory) as directory_fd:
+        if attempted(directory_fd, manifest["sha256"]):
+            raise ProtocolError("Upload already attempted; no network write was repeated")
+        return execute_locked(config, data, manifest, directory, directory_fd)
+
+
+@contextmanager
+def upload_lock(directory):
+    """Serialize cooperating uploads by device, retaining the lock inode after close."""
+    parent = open_directory(directory, create=True)
+    try:
+        fd = os.open('.upload.lock', os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600, dir_fd=parent)
+        try:
+            saved = os.fstat(fd)
+            if (not stat.S_ISREG(saved.st_mode) or saved.st_uid != os.geteuid()
+                    or stat.S_IMODE(saved.st_mode) != 0o600 or saved.st_nlink != 1):
+                raise ProtocolError("Upload lock must be a private user-owned regular file")
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                raise ProtocolError("Another upload is active for this device; no command was sent") from None
+            yield parent
+        finally:
+            os.close(fd)
+    finally:
+        os.close(parent)
+
+
+def execute_locked(config, data, manifest, directory, directory_fd):
+    """Keep listing, reservation, POST and verification in one device lease."""
     with MQTT(config) as client:
         info = payload_data(client.query("info"))
         if info.get("model") != "Anycubic Kobra X" or info.get("version") != "2.0.2.2":
@@ -147,9 +208,10 @@ def execute(config, path, expected_sha256, state_dir, remote_name=None):
         target = upload_target(config, url)
         receipt = {**manifest, "timestamp": int(time.time()), "host": config.host,
                    "status": "attempt_reserved", "before": sanitized(before)}
-        receipt_path = reserve(directory, manifest)
-        atomic_json(receipt_path, receipt)
+        receipt_path = reserve(directory, manifest, directory_fd=directory_fd)
+        atomic_json(receipt_path, receipt, directory_fd=directory_fd)
         try:
+            ensure_directory_bound(directory, directory_fd)
             status, result = post_once(config, target, data, manifest["remote_filename"])
             if result.get("code") != 200:
                 raise ProtocolError("Printer did not return its qualified upload success code")
@@ -158,27 +220,46 @@ def execute(config, path, expected_sha256, state_dir, remote_name=None):
             receipt["response"] = {k: result[k] for k in ["code", "status", "success"] if k in result}
             receipt["response_data_fields"] = sorted(result.get("data", {}).keys()) if isinstance(result.get("data"), dict) else []
             receipt["status"] = "http_response_received_unverified"
-            atomic_json(receipt_path, receipt)
-            # Only reads may be polled. Never repeat the HTTP POST.
-            records = list_files(client)
-            matches = [r for r in records if r.get("filename") == manifest["remote_filename"]]
-            if len(matches) != 1 or matches[0].get("size") != len(data):
-                raise ProtocolError("Remote file presence/size not confirmed")
-            receipt["remote_listing"] = matches[0]
-            details = safe_file_details(file_details(client, manifest["remote_filename"]))
-            receipt["remote_details"] = details
-            if (details.get("file_size") != len(data)
-                    or details.get("layer_count") != manifest["layer_count"]
-                    or details.get("printer_model") != "Anycubic Kobra X"):
-                raise ProtocolError("Remote metadata does not match the reviewed file")
-            after = payload_data(client.query("info"))
-            receipt["after"] = sanitized(after)
-            receipt["active_project_after"] = sanitized(after.get("project") or {})
-            receipt["status"] = "uploaded_verified_by_listing_and_metadata"
-            receipt["remote_byte_hash_verified"] = False
-            atomic_json(receipt_path, receipt)
+            atomic_json(receipt_path, receipt, directory_fd=directory_fd)
+            verify_uploaded(client, manifest, len(data), receipt, receipt_path, directory_fd)
+            ensure_directory_bound(directory, directory_fd)
         except Exception:
             receipt["status"] = "uncertain_no_retry"
-            atomic_json(receipt_path, receipt)
+            atomic_json(receipt_path, receipt, directory_fd=directory_fd)
             raise ProtocolError("Upload/verification is uncertain; attempt recorded, do not resend") from None
         return {**receipt, "receipt_path": str(receipt_path)}
+
+
+def verify_uploaded(client, manifest, size, receipt, receipt_path, directory_fd):
+    # Only reads may be polled. Never repeat the HTTP POST.
+    records = list_files(client)
+    matches = [r for r in records if r.get("filename") == manifest["remote_filename"]]
+    if len(matches) != 1 or matches[0].get("size") != size:
+        raise ProtocolError("Remote file presence/size not confirmed")
+    receipt["remote_listing"] = matches[0]
+    details = safe_file_details(file_details(client, manifest["remote_filename"]))
+    receipt["remote_details"] = details
+    if (details.get("file_size") != size
+            or details.get("layer_count") != manifest["layer_count"]
+            or details.get("printer_model") != "Anycubic Kobra X"):
+        raise ProtocolError("Remote metadata does not match the reviewed file")
+    after = payload_data(client.query("info"))
+    receipt["after"] = sanitized(after)
+    receipt["active_project_after"] = sanitized(after.get("project") or {})
+    receipt["status"] = "uploaded_verified_by_listing_and_metadata"
+    receipt["remote_byte_hash_verified"] = False
+    atomic_json(receipt_path, receipt, directory_fd=directory_fd)
+
+
+def ensure_directory_bound(directory, directory_fd):
+    """Refuse a changed state location before sending and before reporting success."""
+    try:
+        current = open_directory(directory)
+    except OSError:
+        raise ProtocolError("Upload state location changed; no automatic retry") from None
+    try:
+        saved, observed = os.fstat(directory_fd), os.fstat(current)
+        if (saved.st_dev, saved.st_ino) != (observed.st_dev, observed.st_ino):
+            raise ProtocolError("Upload state location changed; no automatic retry")
+    finally:
+        os.close(current)

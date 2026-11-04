@@ -2,9 +2,9 @@
 
 The source of truth is the literal `__version__` in `kobra_lan/__init__.py`.
 Python metadata and `kobra-lan --version` derive from it. A release accepts only
-final `X.Y.Z` versions (for example `0.3.0`), matching `vX.Y.Z` tags and Debian
-version `X.Y.Z-1`. Leading zeroes, prereleases (`0.3.0-rc.1`, `0.3.0rc1`) and
-build metadata (`0.3.0+build`) fail validation. They need explicit Python/Debian
+final `X.Y.Z` versions (for example `0.5.0`), matching `vX.Y.Z` tags and Debian
+version `X.Y.Z-1`. Leading zeroes, prereleases (`0.5.0-rc.1`, `0.5.0rc1`) and
+build metadata (`0.5.0+build`) fail validation. They need explicit Python/Debian
 ordering rules before they can be supported. Do not use packaging-only revisions:
 changed published bytes require a new application version.
 
@@ -23,7 +23,7 @@ migration and hardware limitations in `CHANGELOG.md` under `## X.Y.Z`. Update th
 literal version, move the relevant Unreleased notes into that section, then run:
 
 ```sh
-python3 scripts/release_version.py --tag v0.3.0  # after setting version 0.3.0
+python3 scripts/release_version.py --tag v0.5.0  # after setting version 0.5.0
 python3 -m unittest discover -s tests -v
 ```
 
@@ -51,10 +51,10 @@ apt-get update
 apt-get install --no-install-recommends build-essential debhelper dh-sequence-python3 \
   pybuild-plugin-pyproject python3-all python3-setuptools python3-wheel \
   python3-build python3-venv python3-cryptography lintian
-python3 scripts/release_version.py --tag v0.3.0
-python3 scripts/build_deb.py --output build/debian --tag v0.3.0
-python3 scripts/check_deb.py build/debian/kobra-lan-cli_0.3.0-1_all.deb
-lintian build/debian/kobra-lan-cli_0.3.0-1_all.deb
+python3 scripts/release_version.py --tag v0.5.0
+python3 scripts/build_deb.py --output build/debian --tag v0.5.0
+python3 scripts/check_deb.py build/debian/kobra-lan-cli_0.5.0-1_all.deb
+lintian build/debian/kobra-lan-cli_0.5.0-1_all.deb
 (cd build/debian && sha256sum --check SHA256SUMS)
 python3 scripts/check_python.py build/python-acceptance
 ```
@@ -132,7 +132,7 @@ an empty directory, verify, and install the local package:
 
 ```sh
 sha256sum --check SHA256SUMS
-sudo apt install ./kobra-lan-cli_0.3.0-1_all.deb
+sudo apt install ./kobra-lan-cli_0.5.0-1_all.deb
 /usr/bin/kobra-lan --version
 /usr/bin/kobra-lan --help
 command -v kobra-lan
@@ -212,20 +212,25 @@ References: [setuptools pyproject configuration](https://setuptools.pypa.io/en/l
 [GitHub release API](https://docs.github.com/en/rest/releases/releases).
 
 
-## Profiles and doctor in 0.4.0
+## Named profiles and CLI 0.5.0
 
-This additive minor version preserves config, receipt and attempt formats and
-adds registry version 1. No automatic migration occurs. Python and Debian archive
-allowlists include `profiles.py` and `diagnostics.py`; installed probes exercise
-synthetic legacy/named selection, default clearing, local removal and healthy /
-failed doctor outside the checkout. Lifecycle fixtures include private registry,
-managed config/key material and uncertain device markers for a non-root user.
-Package hooks never invoke pairing or doctor. Both distribution acceptance runs
-must use the same immutable Debian artifact with networking disabled.
+The breaking experimental interface replaces flat commands without aliases and
+changes output to text by default. Scripts use the canonical commands and root
+`--json` version 1. Pairing requires `--name` and rejects global selectors;
+there is no unnamed setup, root-config discovery, old-default migration or legacy
+inventory. Registry version 1 uses a null default or a named selection object.
+Earlier string-default registries are unsupported. This is deliberate source
+preparation for the sole owner, not a compatibility migration.
 
-For rollback, keep the registry, configs, PEMs and every operational marker.
-An older executable can use the unchanged legacy config or an explicit complete
-managed config after state-compatibility review, but ignores named and cleared
-defaults. Deliberately specify the intended config; an old binary cannot enforce
-`require-explicit`. Do not delete profiles/state as a downgrade procedure. This
-source preparation does not create a release tag or switch the live executable.
+Private config fields and device/file receipt and attempt identities remain
+unchanged for current operations. Normal profile deletion and package lifecycle
+never clear device markers. The owner's separate complete local setup reset is
+not part of package install/upgrade/removal and adds no reset/retry command.
+Do not downgrade or reinterpret incompatible registry data automatically.
+
+Both packages include cli_output.py and completions.py. Installed probes cover
+named setup, missing-name refusal before provisioning, explicit/default target
+selection, empty inventory, removal, healthy/failed diagnosis, safe errors,
+local inspection and all offline completion generators outside the checkout.
+Native shell tests explicitly record unavailable shells. Source preparation
+creates no tag or publication and grants no physical-action authorization.

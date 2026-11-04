@@ -18,7 +18,7 @@ The examples use the source-checkout launcher. After package installation, use
 Interactive first use (prompts and fingerprint are shown on stderr):
 
 ```sh
-./kobra-lan printer pair --host 192.0.2.10
+./kobra-lan printer pair --name bench --default --host 192.0.2.10
 ./kobra-lan status
 ```
 
@@ -26,22 +26,14 @@ Unattended setup requires a fingerprint obtained through a trusted path. Replace
 `EXPECTED_SHA256` with its 64 hexadecimal digits; there is no `--yes` bypass:
 
 ```sh
-./kobra-lan printer pair --host 192.0.2.10 --trust-sha256 EXPECTED_SHA256
+./kobra-lan printer pair --name bench --default --host 192.0.2.10 --trust-sha256 EXPECTED_SHA256
 ```
 
-For an existing installation, use a separate absent destination. Global options
-go before `printer`; a missing private directory is created automatically:
-
-```sh
-./kobra-lan --config ~/.config/kobra-lan-test/config.json printer pair \
-  --host 192.0.2.10 --trust-sha256 EXPECTED_SHA256
-./kobra-lan --config ~/.config/kobra-lan-test/config.json status
-# Original access remains available:
-./kobra-lan status
-```
-
-Running pairing again with an existing destination returns exit 3 before network
-access and preserves the config. It never replaces or resets existing access.
+Every pairing requires a new local `--name`; `--config` and `--printer` are
+access selectors and are rejected for pairing. To create an independent profile,
+use another unused name. Existing names or destinations fail with exit 2 before
+network access. The first profile is selected only when `--default` is explicit;
+otherwise use `--printer NAME` or `printer use NAME` before network operations.
 
 Initial qualification is limited to Kobra X model 20030 / firmware 2.0.2.2.
 Pairing observes TLS using the provisioned client certificate, then requires
@@ -58,8 +50,8 @@ fresh supported identity/firmware before saving. It never uploads or controls
 the printer. Keep the accepted pin for subsequent connections.
 
 The selected config must be absent, including dangling symlinks. Pairing refuses
-replacement before any network access; choose another `--config` for an isolated
-setup. Its parent must be a nonsymlink, user-owned directory with mode 0700.
+replacement before any network access; choose another unused `--name` for an independent
+profile. Its parent must be a nonsymlink, user-owned directory with mode 0700.
 Missing directories are created privately; existing shared directories are
 refused without changing their permissions. Directory symlinks are refused.
 
@@ -69,16 +61,12 @@ published atomically without replacement only after trust and status checks.
 Handled failures remove unpublished secrets. If a persistence error leaves a
 visible config, keep its referenced PEM directory: it may already be committed.
 
-To remove an isolated setup, first inspect its config's `client_cert` and
-`client_key` paths privately. Remove only that config and the `.pair-<id>/`
-directory it owns after checking no retained config references it. A process kill
-may leave an unreferenced private `.pair-<id>/` staging directory containing PEMs
-and possibly `candidate.json`; remove it only after confirming no pairing is
-running and no config references it. Do not promote `candidate.json` manually.
-Local deletion does not revoke printer credentials. Preserve original configs,
-PEMs, upload receipts and attempt markers; pairing never updates those markers.
+Remove registered access with `printer remove NAME` after confirmation.
+A process kill may leave an unpublished `.pair-<id>/` directory; inspect it
+privately and verify no config references it before manual cleanup. Never promote
+`candidate.json` manually or repeat an uncertain provisioning exchange.
 
-Store configuration in `~/.config/kobra-lan/config.json`, with file permissions 0600 and directory permissions 0700. Fields:
+Pairing stores configuration in `~/.config/kobra-lan/profiles/<name>/config.json`, with file permissions 0600 and directory permissions 0700. Fields:
 
 - `host`: printer LAN IPv4 address; `type_id`: 20030; `printer_id`: device identity returned by LAN provisioning.
 - `mqtt_username`, `mqtt_password`: per-device LAN credentials.
@@ -86,7 +74,7 @@ Store configuration in `~/.config/kobra-lan/config.json`, with file permissions 
 - `tls_sha256`: SHA-256 of the MQTT server's DER certificate, obtained through a trusted path.
 - `mqtt_port`: 9883; `http_port`: 18910. Both are optional and use these defaults.
 
-Use `printer pair` above to obtain credentials directly from the LAN-enabled printer, or retain an existing compatible configuration. This project includes no third-party certificates/credentials. Do not commit configuration, keys, tokens, or receipts. Connections verify the TLS pin **before** sending the MQTT username/password; do not automatically update a mismatched pin. The operator must establish initial trust. This is certificate pinning rather than public CA validation.
+Use `printer pair` above to obtain credentials directly from the LAN-enabled printer, using a required local name. This project includes no third-party certificates/credentials. Do not commit configuration, keys, tokens, or receipts. Connections verify the TLS pin **before** sending the MQTT username/password; do not automatically update a mismatched pin. The operator must establish initial trust. This is certificate pinning rather than public CA validation.
 
 The upload session token comes from `info/report`. URLs containing tokens are neither printed nor stored in receipts. The destination is restricted to the configured host/port and `/gcode_upload?s=...`. This implementation relies on community interoperability research, rather than an officially supported Anycubic SDK.
 
@@ -95,7 +83,7 @@ The upload session token comes from `info/report`. URLs containing tokens are ne
 
 Named profiles use `~/.config/kobra-lan/profiles.json` (registry version 1) and
 `~/.config/kobra-lan/profiles/<name>/config.json`. Names match
-`[a-z][a-z0-9-]{0,47}`. Each config retains the existing schema and references
+`[a-z][a-z0-9-]{0,47}`. Each config references
 pairing material in its private `.pair-<id>/` directory. Managed directories must
 be owned by the current user with mode 0700; files use 0600. Symlink components
 and existing destinations are rejected. The registry records destinations and
@@ -124,7 +112,7 @@ kobra-lan printer list
 kobra-lan printer info bancada
 kobra-lan printer use bancada
 kobra-lan --printer oficina status
-kobra-lan --config "$HOME/.config/kobra-lan/config.json" status
+kobra-lan --config "$HOME/.config/kobra-lan/profiles/bancada/config.json" status
 ```
 
 These inventory, info and use operations are offline. Inventory reports an
@@ -132,16 +120,16 @@ unavailable entry if its local config is damaged; addresses are saved metadata,
 not a reachability claim. Firmware is labeled last observed. `info` without a
 name follows ordinary selection. Explicit `--printer` or `--config` overrides
 the saved named default; both together are an error. With no registry or before
-any default is selected, ordinary commands still use the unchanged legacy config.
-A broken named default fails for that target without falling back to legacy.
-Registration alone never selects a default. An explicitly cleared default
+any default is selected, target-dependent commands refuse implicit selection.
+A broken named default fails for that target without trying another profile.
+Registration alone never selects a default. A null default
 requires `printer use NAME` or an explicit selector on subsequent operations.
 
 Global options precede the command. `printer list/use/remove` reject global
 target selectors; `printer info NAME` rejects them when a positional name is
-present. Local `inspect` and upload dry runs validate selector syntax but do not
-require config or network access. Legacy credentials stay in place; use explicit
-`--config` to reach them after choosing a named default, without pairing again.
+present. Local `gcode inspect` operations validate selector syntax but do not
+require config or network access. Explicit `--config` can inspect a complete config deliberately, including an
+unregistered publication; no config file is discovered automatically.
 
 ## Pair into a new named profile
 
@@ -151,11 +139,11 @@ kobra-lan printer pair --name oficina --host 192.0.2.11 --default
 # Unattended pairing additionally requires --trust-sha256 with an exact trusted pin.
 ```
 
-`--name` reserves a new managed destination before provisioning and conflicts
-with explicit `--config` and global `--printer`. `--default` requires `--name`;
-omitting it preserves the existing selection, even on a fresh installation.
-Unnamed pairing always uses the absent legacy or explicit config destination,
-regardless of the saved default. It never replaces existing access. Trust consent,
+`--name` is required and reserves a new managed destination before provisioning.
+Pairing rejects global `--config` and `--printer`. Omitting `--default` preserves
+the existing named default or null, even on a fresh installation. No unnamed
+pairing, automatic root-config selection, old-state conversion or migration is
+supported. Existing managed access is never replaced. Trust consent,
 exact fingerprint verification and qualified fresh status remain mandatory.
 
 A local finalization error reports whether registration/default selection was
@@ -175,11 +163,11 @@ kobra-lan printer remove bancada --yes # unattended local deletion consent
 Removal never contacts a printer or revokes its credentials. Refusal, EOF and
 nonterminal input without `--yes` leave files unchanged. Metadata is revalidated
 after consent and an active managed consumer prevents exclusive removal. Global
-target selectors and legacy configs are excluded from this command.
+target selectors and arbitrary config files are excluded from this command.
 
 Removal commits registry detachment first. Removing the default persists
-`require-explicit`, so an unqualified command refuses even when legacy or other
-profiles exist. Use `printer use NAME`, `--printer NAME` or explicit `--config`.
+`default: null`, so an unqualified command refuses even when other profiles
+exist. Use `printer use NAME`, `--printer NAME` or explicit `--config`.
 Removing a nondefault profile preserves the selected default.
 
 Only recorded, exclusively owned regular private files are cleanup candidates.
@@ -191,7 +179,7 @@ local review. Repeated removal cannot reclaim arbitrary orphan files. A failed
 index commit preserves files and reports whether detachment was observed.
 
 Manually sharing managed PEM paths in arbitrary external configs is unsupported:
-the CLI checks retained managed and legacy configs, but cannot discover every
+the CLI checks retained managed configs, but cannot discover every
 external reference. Preserve and review ambiguous files manually. Local removal,
 new names and re-pairing never delete upload receipts or start attempt markers;
 identities remain based on `printer_id`, including with explicit `--state-dir`.
@@ -206,3 +194,16 @@ config or dependency prevents printer connections. TCP checks do not prove
 protocol support. Pin mismatches fail before MQTT credentials; preserve existing
 trust and inspect locally. Doctor reads fresh status without provisioning or
 requiring idle state and never repairs profile/default/receipt state.
+
+## CLI presentation
+
+Pairing and profile commands print readable text by default. Automation uses
+root `--json`, before all commands and target options as desired:
+
+```sh
+kobra-lan --json printer list
+kobra-lan --json --printer bench printer info
+```
+
+Results use the [version-1 output contract](usage.md#output-and-exit-contract).
+Trust and removal prompts remain on stderr. JSON never confirms trust or removes profiles implicitly.

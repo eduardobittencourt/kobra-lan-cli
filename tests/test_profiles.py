@@ -75,7 +75,7 @@ class StorageTests(unittest.TestCase):
         self.add_profile()
         index = self.root/'profiles.json'
         original = index.read_bytes()
-        for content in ({'version': 2}, {'version': 1, 'profiles': {'../bad': {}}, 'default': 'legacy-fallback'}):
+        for content in ({'version': 2}, {'version': 1, 'profiles': {'../bad': {}}, 'default': None}):
             index.write_text(json.dumps(content))
             self.assertRaises(ProfileLocalError, self.registry.read)
             with self.registry.lock():
@@ -88,17 +88,17 @@ class StorageTests(unittest.TestCase):
 
     def test_default_states_and_failures(self):
         self.add_profile()
-        self.assertEqual(self.registry.read()['default'], 'legacy-fallback')
+        self.assertIsNone(self.registry.read()['default'])
         self.registry.select('bancada')
         self.assertEqual(self.registry.resolve()[1]['name'], 'bancada')
-        self.assertEqual(self.registry.resolve(config=self.registry.legacy)[0], self.registry.legacy)
-        self.assertRaises(ProtocolError, self.registry.resolve, self.registry.legacy, 'bancada')
+        self.assertEqual(self.registry.resolve(config=(self.root/'explicit.json'))[0], (self.root/'explicit.json'))
+        self.assertRaises(ProtocolError, self.registry.resolve, (self.root/'explicit.json'), 'bancada')
         self.assertRaises(ProtocolError, self.registry.resolve, name='unknown')
         self.registry.path('bancada').unlink()
         self.assertRaises(OSError, self.registry.select, 'bancada')
         self.assertEqual(self.registry.read()['default'], {'name': 'bancada'})
         with self.registry.lock():
-            data = self.registry.read(); data['default'] = 'require-explicit'; self.registry.write(data)
+            data = self.registry.read(); data['default'] = None; self.registry.write(data)
         self.assertRaises(ProtocolError, self.registry.resolve)
 
     def test_atomic_failures_never_replace_config(self):
@@ -152,7 +152,7 @@ class CLITests(StorageTests):
         stdout = io.StringIO()
         with patch('kobra_lan.cli.Registry', return_value=self.registry), redirect_stdout(stdout), \
                 patch('socket.create_connection', side_effect=AssertionError('network forbidden')):
-            code = main(list(args))
+            code = main(["--json", *args])
         return code, json.loads(stdout.getvalue())
 
     def test_local_commands_and_selector_conflicts(self):
@@ -168,31 +168,60 @@ class CLITests(StorageTests):
             self.assertEqual(self.invoke(*args)[0], 2)
         self.assertEqual(self.invoke('--printer','unknown','status')[0], 2)
         self.registry.path('bancada').unlink()
-        self.assertEqual(self.invoke('status')[0], 3)
+        self.assertEqual(self.invoke('--printer', 'bancada', 'status')[0], 3)
 
-    def test_selection_override_legacy_and_local_dry_runs(self):
+    def test_selection_override_and_local_inspection(self):
         from kobra_lan.cli import main
         from test_client import GCODE
         self.add_profile('bancada'); self.add_profile('oficina')
         other = self.registry.load('oficina'); other.host = '192.0.2.11'
         path = self.registry.path('oficina'); path.write_text(json.dumps(asdict(other)))
-        fixture(self.registry.legacy, 'Legacy01')
-        self.assertEqual(self.invoke('printer', 'info')[1]['result']['printer_id'], 'Legacy01')
+        fixture((self.root/'explicit.json'), 'Explicit01')
+        self.assertEqual(self.invoke('printer', 'info')[0], 2)
         self.registry.select('bancada')
         self.assertEqual(self.invoke('--printer','oficina','printer','info')[1]['result']['host'], '192.0.2.11')
-        self.assertEqual(self.invoke('--config',str(self.registry.legacy),'printer','info')[1]['result']['printer_id'], 'Legacy01')
+        self.assertEqual(self.invoke('--config',str((self.root/'explicit.json')),'printer','info')[1]['result']['printer_id'], 'Explicit01')
         stdout = io.StringIO()
         with patch('kobra_lan.cli.Registry', return_value=self.registry), redirect_stdout(stdout), \
                 patch('kobra_lan.cli.snapshot', side_effect=lambda cfg: {'host': cfg.host}):
-            self.assertEqual(main(['--printer','oficina','status']), 0)
-        self.assertEqual(json.loads(stdout.getvalue())['result'], {'host': '192.0.2.11'})
+            self.assertEqual(main(['--json','--printer','oficina','status']), 0)
+        self.assertEqual(json.loads(stdout.getvalue())['result']['host'], '192.0.2.11')
         self.assertEqual(self.registry.read()['default'], {'name': 'bancada'})
         self.registry.path('bancada').unlink()
         self.assertEqual(self.invoke('status')[0], 3)
         local = self.root/'input.gcode'; local.write_bytes(GCODE)
-        self.assertEqual(self.invoke('--printer','unknown','inspect',str(local))[0], 0)
-        self.assertEqual(self.invoke('--printer','unknown','upload',str(local))[0], 0)
-        self.assertEqual(self.invoke('--printer','../invalid','inspect',str(local))[0], 2)
+        self.assertEqual(self.invoke('--printer','unknown','gcode','inspect',str(local))[0], 0)
+        self.assertEqual(self.invoke('--printer','../invalid','gcode','inspect',str(local))[0], 2)
+
+    def test_formats_never_confirm_local_removal(self):
+        from kobra_lan.cli import main
+        self.add_profile()
+        path = self.registry.path('bancada')
+        before = (path.read_bytes(), path.stat().st_mode)
+        for mode in ([], ['--json']):
+            with patch('kobra_lan.cli.Registry', return_value=self.registry), \
+                    patch('sys.stdin', io.StringIO()), redirect_stdout(io.StringIO()):
+                self.assertEqual(main([*mode, 'printer', 'remove', 'bancada']), 2)
+            observed = (path.read_bytes(), path.stat().st_mode)
+            self.assertEqual(observed, before)
+            self.assertIn('bancada', self.registry.read()['profiles'])
+
+    def test_files_routes_share_named_and_explicit_selection(self):
+        self.add_profile('bancada')
+        fixture((self.root/'explicit.json'), 'Explicit01')
+        for selectors, identity in ((['--printer', 'bancada'], 'Synthetic01'),
+                                    (['--config', str((self.root/'explicit.json'))], 'Explicit01')):
+            with patch('kobra_lan.cli.MQTT') as mqtt, \
+                    patch('kobra_lan.cli.list_files', return_value=[]), \
+                    patch('kobra_lan.cli.file_details', return_value={'filename': 'test.gcode'}):
+                self.assertEqual(self.invoke(*selectors, 'files', 'list')[0], 0)
+                self.assertEqual(mqtt.call_args.args[0].printer_id, identity)
+                self.assertEqual(self.invoke(*selectors, 'files', 'info', 'test.gcode')[0], 0)
+                self.assertEqual(mqtt.call_args.args[0].printer_id, identity)
+        self.registry.select('bancada')
+        with patch('kobra_lan.cli.MQTT') as mqtt, patch('kobra_lan.cli.list_files', return_value=[]):
+            self.assertEqual(self.invoke('files', 'list')[0], 0)
+            self.assertEqual(mqtt.call_args.args[0].printer_id, 'Synthetic01')
 
     def test_named_pairing_real_publication_and_default(self):
         from types import SimpleNamespace
@@ -203,7 +232,7 @@ class CLITests(StorageTests):
                 patch('kobra_lan.pairing.verify_status', return_value={'firmware':'2.0.2.2','state':'printing'}):
             code, report = self.invoke('printer','pair','--name','bancada','--host','192.0.2.10','--trust-sha256','a'*64)
             self.assertEqual(code,0); self.assertFalse(report['result']['default'])
-            self.assertEqual(self.registry.read()['default'],'legacy-fallback')
+            self.assertIsNone(self.registry.read()['default'])
             self.assertEqual(self.invoke('printer','pair','--name','oficina','--host','192.0.2.10','--trust-sha256','a'*64,'--default')[0],0)
         self.assertEqual(self.registry.read()['default'], {'name':'oficina'})
         self.assertEqual(self.registry.load('bancada').printer_id, self.registry.load('oficina').printer_id)
@@ -246,7 +275,7 @@ class CLITests(StorageTests):
             real_write(data)
         with patch('kobra_lan.pairing.pair',side_effect=publish), patch.object(self.registry,'write',side_effect=fail_default):
             self.assertRaisesRegex(ProfileLocalError,'default unchanged',self.registry.pair,'registered','192.0.2.10','a'*64,True)
-        self.assertEqual(self.registry.read()['default'],'legacy-fallback')
+        self.assertIsNone(self.registry.read()['default'])
         self.registry.select('registered')
         self.assertEqual(self.registry.read()['default'],{'name':'registered'})
 
@@ -256,7 +285,7 @@ class CLITests(StorageTests):
         for answer, terminal in (('yes\n',False), ('no\n',True), ('',True), ('yes'+' '*32,True)):
             stdin = io.StringIO(answer); stdin.isatty = lambda: terminal
             self.assertRaises(ProtocolError,self.registry.remove,'bancada',False,stdin,io.StringIO())
-            self.assertEqual(before,{str(p):p.read_bytes() for p in self.root.rglob('*') if p.is_file()})
+            self.assertEqual({str(p):p.read_bytes() for p in self.root.rglob('*') if p.is_file()},before)
         stdin = io.StringIO('yes\n'); stdin.isatty = lambda: True
         stderr = io.StringIO()
         result = self.registry.remove('bancada',stdin=stdin,stderr=stderr)
@@ -264,7 +293,7 @@ class CLITests(StorageTests):
         self.assertEqual(len(result['deleted_files']),3); self.assertEqual(result['preserved_files'],[])
         self.assertIn('local_removal_preview',stderr.getvalue())
         self.assertNotIn('secret-',json.dumps(result))
-        self.assertEqual(self.registry.read()['default'],'require-explicit')
+        self.assertIsNone(self.registry.read()['default'])
         self.assertRaises(ProtocolError,self.registry.resolve)
         self.assertFalse(self.registry.path('bancada').parent.exists())
         self.assertEqual(self.invoke('printer','remove','bancada','--yes')[0],2)
@@ -272,7 +301,7 @@ class CLITests(StorageTests):
     def test_removal_shared_symlink_unknown_and_io_failure(self):
         cfg = self.add_profile(); self.add_profile('oficina')
         self.registry.select('oficina')
-        # Retained profile and legacy references preserve known shared PEMs.
+        # Retained profile and other managed references preserve known shared PEMs.
         other = self.registry.load('oficina'); other.client_cert = cfg.client_cert
         self.registry.path('oficina').write_text(json.dumps(asdict(other)))
         root = self.registry.path('bancada').parent
@@ -315,9 +344,9 @@ class CLITests(StorageTests):
         gcode = self.root/'input.gcode'; gcode.write_bytes(GCODE)
         sha = hashlib.sha256(GCODE).hexdigest()
         state = self.root/'custom-state'; device = hashlib.sha256(cfg.printer_id.encode()).hexdigest()[:16]
-        directory = state/device; directory.mkdir(parents=True)
+        directory = state/device; directory.mkdir(parents=True, mode=0o700)
         (directory/(sha+'.attempt')).write_text('uncertain upload')
-        args = ['--state-dir',str(state),'upload',str(gcode),'--execute','--sha256',sha]
+        args = ['--state-dir',str(state),'files','upload',str(gcode),'--execute','--sha256',sha]
         self.assertEqual(self.invoke('--printer','bancada',*args)[0],2)
         self.assertEqual(self.invoke('--printer','oficina',*args)[0],2)
         self.registry.remove('bancada',yes=True); self.add_profile('bancada')
@@ -330,14 +359,20 @@ class CLITests(StorageTests):
         starts = state/'starts'/device; starts.mkdir(parents=True)
         (starts/(manifest['sha256']+'.attempt')).write_text('uncertain start')
         plan = build_plan(cfg,Client(cfg),gcode,'test.gcode',1,True,False,False)
-        args = ['--state-dir',str(state),'start',str(gcode),'--name','test.gcode','--slot','1',
+        args = ['--state-dir',str(state),'print','start',str(gcode),'--name','test.gcode','--slot','1',
                 '--auto-leveling','on','--vibration-compensation','off','--flow-calibration','off',
                 '--execute','--plan-sha256',plan['plan_sha256']]
+        tracked = [self.registry.path('bancada'), self.registry.path('oficina'),
+                   directory/(manifest['sha256']+'.json'), directory/(sha+'.attempt'),
+                   starts/(manifest['sha256']+'.attempt')]
+        baseline = [(p.read_bytes(), p.stat().st_mode) for p in tracked]
         with patch('kobra_lan.start.MQTT',Client):
             for name in ('bancada','oficina'):
                 code, result = self.invoke('--printer',name,*args)
                 self.assertEqual(code,2,result)
         self.assertEqual((starts/(manifest['sha256']+'.attempt')).read_text(),'uncertain start')
+        self.assertEqual([(p.read_bytes(), p.stat().st_mode) for p in tracked], baseline)
+        self.assertEqual(Client.starts, 0)
 
     def test_removal_commit_failure_reports_retained_files_and_actual_state(self):
         self.add_profile(); self.registry.select('bancada')
@@ -349,33 +384,7 @@ class CLITests(StorageTests):
         self.assertEqual(code,3); self.assertTrue(report['result']['registration_removed'])
         self.assertEqual(report['result']['deleted_files'],[])
         self.assertTrue(self.registry.path('bancada').exists())
-        self.assertEqual(self.registry.read()['default'],'require-explicit')
-
-    def test_legacy_without_registry_preserves_old_parent_permissions(self):
-        self.root.mkdir(mode=0o700)
-        fixture(self.registry.legacy)
-        self.root.chmod(0o755)
-        self.assertEqual(self.invoke('printer','info')[0],0)
-        self.assertEqual(self.invoke('printer','list')[0],0)
-        self.assertFalse((self.root/'profiles.json').exists())
-        self.assertFalse((self.root/'.profiles.lock').exists())
-
-    def test_legacy_symlink_references_preserve_shared_config_and_pems(self):
-        cfg = self.add_profile()
-        self.registry.legacy.symlink_to(self.registry.path('bancada'))
-        result = self.registry.remove('bancada',yes=True)
-        self.assertIn(str(self.registry.path('bancada')),result['preserved_files'])
-        self.assertIn(cfg.client_key,result['preserved_files'])
-        self.assertEqual(Config.load(self.registry.legacy).printer_id,'Synthetic01')
-        self.add_profile('oficina')
-        cfg = self.registry.load('oficina')
-        self.registry.legacy.unlink()
-        alias = self.root/'alias-cert'; alias.symlink_to(cfg.client_cert)
-        legacy = fixture(self.registry.legacy,'Legacy01'); legacy.client_cert=str(alias)
-        self.registry.legacy.write_text(json.dumps(asdict(legacy)))
-        result = self.registry.remove('oficina',yes=True)
-        self.assertIn(cfg.client_cert,result['preserved_files'])
-        self.assertEqual(Config.load(self.registry.legacy).printer_id,'Legacy01')
+        self.assertIsNone(self.registry.read()['default'])
 
     def test_write_failure_and_managed_parent_permissions(self):
         self.add_profile()
@@ -406,23 +415,17 @@ class CLITests(StorageTests):
             for filename in ('../outside', '/outside', '.pair-'+'a'*32+'/../../outside'):
                 invalid={**entry,'owned_files':['config.json',filename]}
                 self.assertRaises(ProtocolError,self.registry._cleanup,'bancada',invalid,set(),False)
-        self.assertEqual(original,{str(p):p.read_bytes() for p in self.root.rglob('*') if p.is_file()})
+        self.assertEqual({str(p):p.read_bytes() for p in self.root.rglob('*') if p.is_file()},original)
 
-    def test_pristine_symlinked_legacy_parent_and_explicit_config(self):
+    def test_symlinked_managed_root_is_rejected(self):
         actual=Path(self.temporary.name)/'actual'
         fixture(actual/'config.json')
         self.root.symlink_to(actual,target_is_directory=True)
-        self.assertEqual(self.invoke('printer','info')[0],0)
-        self.assertEqual(self.invoke('printer','list')[0],0)
-        self.assertEqual(self.invoke('--config',str(self.root/'config.json'),'printer','info')[0],0)
+        self.assertEqual(self.invoke('printer','info')[0],3)
+        self.assertEqual(self.invoke('printer','list')[0],3)
+        self.assertEqual(self.invoke('--config',str(actual/'config.json'),'printer','info')[0],3)
         self.assertFalse((actual/'.profiles.lock').exists())
         self.assertFalse((actual/'profiles.json').exists())
-        # Adoption restores strict no-follow access even for explicit external configs.
-        for artifact in ('profiles.json','.profiles.lock'):
-            path=actual/artifact; path.symlink_to(actual/'missing')
-            self.assertEqual(self.invoke('printer','list')[0],3)
-            self.assertEqual(self.invoke('--config',str(actual/'config.json'),'printer','info')[0],3)
-            path.unlink()
 
     def test_first_adoption_acquires_a_lease_before_loading_a_managed_selection(self):
         original_resolve=self.registry.resolve

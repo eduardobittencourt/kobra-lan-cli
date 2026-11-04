@@ -330,11 +330,20 @@ from contextlib import redirect_stdout, redirect_stderr
 from kobra_lan.cli import main
 
 
-class CLITests(StorageTests):
+class CLITests(unittest.TestCase):
+    def setUp(self):
+        StorageTests.setUp(self)
+        from kobra_lan.profiles import Registry
+        self.registry = Registry(self.root/'managed')
+        self.dest = self.registry.path('bench')
+        registry_patch = patch('kobra_lan.cli.Registry', return_value=self.registry)
+        registry_patch.start()
+        self.addCleanup(registry_patch.stop)
+
     def invoke(self, args):
         """Capture JSON stdout, stderr and exit status from one CLI invocation."""
         stdout, stderr = io.StringIO(), io.StringIO()
-        with redirect_stdout(stdout), redirect_stderr(stderr): code = main(args)
+        with redirect_stdout(stdout), redirect_stderr(stderr): code = main(["--json", *args])
         return code, json.loads(stdout.getvalue()), stderr.getvalue()
 
     def test_help_and_required_options(self):
@@ -345,14 +354,24 @@ class CLITests(StorageTests):
                 main(args)
             self.assertEqual(exit.exception.code,0)
             self.assertIn('usage:',stdout.getvalue())
-        with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as exit:
-            main(['printer','pair'])
-        self.assertEqual(exit.exception.code,2)
+        with redirect_stdout(io.StringIO()):
+            self.assertEqual(main(['printer','pair']), 2)
+
+    def test_formats_never_authorize_unattended_trust(self):
+        for mode in ([], ['--json']):
+            name = 'bench' + str(len(mode))
+            with patch.object(p, 'provision', return_value=self.bundle), \
+                    patch.object(p, 'observe_fingerprint', return_value=PIN), \
+                    patch.object(p, 'verify_status') as status, patch('sys.stdin', io.StringIO()), \
+                    redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                self.assertEqual(main([*mode, 'printer', 'pair', '--name', name, '--host', HOST]), 2)
+            status.assert_not_called()
+            self.assertFalse(self.registry.path(name).exists())
 
     def test_synthetic_pair_then_ordinary_status(self):
         """Load a newly paired config with the ordinary status command."""
         with patch.object(p,'provision',return_value=self.bundle), patch.object(p,'observe_fingerprint',return_value=PIN), patch.object(p,'verify_status',return_value={'firmware':'2.0.2.2','state':'free'}):
-            code, result, stderr = self.invoke(['--config',str(self.dest),'printer','pair','--host',HOST,'--trust-sha256',PIN])
+            code, result, stderr = self.invoke(['printer','pair','--name','bench','--default','--host',HOST,'--trust-sha256',PIN])
         self.assertEqual(code,0); self.assertTrue(result['ok']); self.assertEqual(stderr,'')
         self.assertEqual(result['result']['tls_sha256'],PIN)
         client = Mock(); client.query.return_value = {'data':{'model':'Anycubic Kobra X','version':'2.0.2.2','state':'free'}}
@@ -366,11 +385,13 @@ class CLITests(StorageTests):
         """Check CLI validation exits before any provisioning request."""
         with patch.object(p,'provision') as provision:
             for host,pin in [('localhost',PIN),(HOST,'bad')]:
-                code, result, _ = self.invoke(['--config',str(self.dest),'printer','pair','--host',host,'--trust-sha256',pin])
+                code, result, _ = self.invoke(['printer','pair','--name','bench','--host',host,'--trust-sha256',pin])
                 self.assertEqual(code,2); self.assertFalse(result['ok'])
-            self.dest.parent.mkdir(mode=0o700); self.dest.write_text('existing')
-            code, result, _ = self.invoke(['--config',str(self.dest),'printer','pair','--host',HOST,'--trust-sha256',PIN])
-            self.assertEqual(code,3); self.assertIn('separate absent --config',result['error'])
+            with self.registry.lock():
+                self.registry.reserve('bench')
+            self.dest.write_text('existing')
+            code, result, _ = self.invoke(['printer','pair','--name','bench','--default','--host',HOST,'--trust-sha256',PIN])
+            self.assertEqual(code,2); self.assertIn('Profile destination exists',result['error']['message'])
         provision.assert_not_called()
 
 from test_provisioning import encrypt, INFO
@@ -379,7 +400,10 @@ from test_provisioning import encrypt, INFO
 class DiagnosticTests(CLITests):
     def command(self, pin=PIN):
         """Build an isolated pairing command with an optional explicit fingerprint."""
-        args = ['--config',str(self.dest),'printer','pair','--host',HOST]
+        self.command_count = getattr(self, 'command_count', 0) + 1
+        name = 'bench' + str(self.command_count)
+        self.dest = self.registry.path(name)
+        args = ['printer','pair','--name',name,'--host',HOST]
         return args if pin is None else args+['--trust-sha256',pin]
 
     def test_full_synthetic_http_to_cli_and_interactive_stderr(self):
@@ -413,7 +437,7 @@ class DiagnosticTests(CLITests):
                             code,result,stderr = self.invoke(self.command())
                     else:
                         with override: code,result,stderr = self.invoke(self.command())
-                self.assertEqual(code,expected); self.assertIn(stage,result['error'])
+                self.assertEqual(code,expected); self.assertIn(stage,result['error']['message'])
                 self.assertNotIn('SENSITIVE',json.dumps(result)+stderr)
                 self.assertFalse(self.dest.exists()); self.assertEqual(list(self.dest.parent.iterdir()),[])
 
@@ -432,7 +456,7 @@ class DiagnosticTests(CLITests):
         """Report a provisioning network stage without printing tokenized URLs."""
         with patch.object(p,'provision',side_effect=OSError('sensitive tokenized URL')):
             code,result,_ = self.invoke(self.command())
-        self.assertEqual(code,3); self.assertIn('Provisioning',result['error']); self.assertNotIn('sensitive',result['error'])
+        self.assertEqual(code,3); self.assertIn('Provisioning',result['error']['message']); self.assertNotIn('sensitive',result['error']['message'])
 
 
 class TerminalTests(unittest.TestCase):

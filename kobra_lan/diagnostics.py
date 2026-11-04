@@ -21,7 +21,7 @@ MESSAGES = {
     'tls_pin': 'Server certificate matches the saved fingerprint',
     'mqtt_auth': 'Pinned MQTT authentication and subscription succeeded',
     'status': 'A fresh correlated info report was received',
-    'compatibility': 'Observed identity matches model 20030 / firmware 2.0.2.2 qualification',
+    'compatibility': 'Pinned authenticated target reports qualified Kobra X model / firmware 2.0.2.2',
 }
 MQTT_STAGES = ('tls_pin', 'mqtt_auth', 'status')
 
@@ -35,13 +35,19 @@ def dependencies():
         importlib.import_module(name)
 
 
-def compatible(cfg, info):
+def compatibility_issue(cfg, info):
+    """Match pairing's report evidence; optional IDs may be absent, never contradictory."""
     state = info.get('state')
-    return (info.get('model') == 'Anycubic Kobra X' and info.get('version') == QUALIFIED_FIRMWARE
-            and any(k in info for k in ('modelId', 'modeId'))
-            and all(str(info[k]) == str(cfg.type_id) for k in ('modelId', 'modeId') if k in info)
-            and info.get('deviceId') == cfg.printer_id
-            and isinstance(state, str) and 0 < len(state) <= 80 and state.isascii() and state.isprintable())
+    if (any(info.get(key) is not None and info[key] != expected for key, expected in
+            (('model', 'Anycubic Kobra X'), ('version', QUALIFIED_FIRMWARE)))
+            or any(str(info[key]) != str(cfg.type_id) for key in ('modelId', 'modeId') if key in info)
+            or ('deviceId' in info and info['deviceId'] != cfg.printer_id)
+            or (state is not None and not (isinstance(state, str) and 0 < len(state) <= 80
+                                          and state.isascii() and state.isprintable()))):
+        return 'outside_qualification'
+    if any(info.get(key) is None for key in ('model', 'version', 'state')):
+        return 'qualification_incomplete'
+    return None
 
 
 def budget(end):
@@ -106,11 +112,21 @@ class DiagnosticReport:
                             'Check the saved address, configured port, LAN mode, power and firewall; do not provision again')
 
     def compatibility(self, cfg, info):
-        if compatible(cfg, info):
+        issue = compatibility_issue(cfg, info)
+        if issue is None:
             self.passed('compatibility')
+            missing = [key for key in ('deviceId', 'modelId', 'modeId') if key not in info]
+            if missing:
+                self.checks['compatibility']['message'] += (
+                    '; optional MQTT identity fields omitted: ' + ', '.join(missing)
+                    + '; target trust uses the saved TLS pin and MQTT authentication')
+        elif issue == 'qualification_incomplete':
+            self.failed('compatibility', issue, 2,
+                        'Fresh status omits required model, firmware or state; compatibility could not be established',
+                        'Inspect firmware report support; connection succeeded but qualification evidence is incomplete')
         else:
-            self.failed('compatibility', 'outside_qualification', 2,
-                        'Observed identity or firmware is missing, conflicting or outside qualification',
+            self.failed('compatibility', issue, 2,
+                        'Observed model, firmware, identity or state conflicts with qualification',
                         'Verify the target locally; only matching Kobra X model 20030 / firmware 2.0.2.2 is qualified')
 
     def pending_mqtt_stage(self):

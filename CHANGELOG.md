@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+## 0.5.0
+
+- Breaking: replace flat operations with `files list|info|upload`, `gcode inspect`
+  and `print plan|start`, without aliases. Root options precede commands and
+  cannot be abbreviated.
+- Breaking: readable text is now the default. Automation uses root `--json`
+  and the version-1 envelope with safe error codes and partial diagnostic data.
+- Require explicit reviewed hashes and `--execute` for upload and start;
+  planning stays read-only. Upload never starts printing.
+- Add offline bash/zsh/fish completion generators and installed-interface probes.
+- Quote local file completions correctly in Bash, including paths with spaces.
+- Serialize uploads per device within shared state storage so different payloads
+  cannot race the destination preflight; existing attempt markers remain intact.
+- Fix doctor compatibility for qualified firmware that omits optional MQTT
+  device/model IDs, aligning with pairing while retaining pinned authentication
+  and rejecting supplied conflicting IDs. Distinguish missing required evidence
+  from observed incompatibility in diagnostic reasons.
+- Breaking: require `printer pair --name`; remove unnamed pairing, root-config
+  discovery, legacy inventory and default fallback without migration. Registry
+  default is null or a named selection; old string defaults are rejected.
+- Preserve private config fields, receipts, permissions and device/file
+  attempt identities during normal operations. Do not clear markers or repeat uncertain actions when
+  updating commands. Existing qualification and experimental limits still apply.
+- Prepare source only: no release tag, publication or live installation migration.
+
 ## 0.4.0
 
 - Add named private printer profiles, offline inventory/info, explicit target

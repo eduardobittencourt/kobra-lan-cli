@@ -13,6 +13,7 @@ from .config import Config, ProtocolError
 
 CONFIG_FILE = 'config.json'
 REGISTRY_FILE = 'profiles.json'
+UNKNOWN_PROFILE = 'Unknown profile; run printer list'
 
 DIRECTORY_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
 
@@ -88,23 +89,12 @@ def read_json(fd, name):
 class Registry:
     def __init__(self, root=None):
         self.root = Path(os.path.abspath(root or Path.home() / '.config/kobra-lan'))
-        self.legacy = self.root / CONFIG_FILE
 
     def path(self, name):
         return self.root / 'profiles' / validate_name(name) / CONFIG_FILE
 
     def empty(self):
-        return {'version': 1, 'default': 'legacy-fallback', 'profiles': {}}
-
-    def _pristine(self):
-        """Legacy paths may follow symlinks only before registry adoption."""
-        for filename in (REGISTRY_FILE, '.profiles.lock'):
-            try:
-                os.lstat(self.root / filename)
-            except FileNotFoundError:
-                continue
-            return False
-        return True
+        return {'version': 1, 'default': None, 'profiles': {}}
 
     def _validate_entry(self, name, entry):
         validate_name(name)
@@ -125,14 +115,12 @@ class Registry:
         for name, entry in data['profiles'].items():
             self._validate_entry(name, entry)
         selected = data.get('default')
-        if selected not in ('legacy-fallback', 'require-explicit'):
+        if selected is not None:
             if not isinstance(selected, dict) or set(selected) != {'name'} or selected['name'] not in data['profiles']:
                 raise ValueError
         return data
 
     def read(self):
-        if self._pristine():
-            return self.empty()
         try:
             fd = open_directory(self.root, require_private=False)
         except FileNotFoundError:
@@ -156,9 +144,6 @@ class Registry:
     @contextmanager
     def lock(self, exclusive=True, create=True, timeout=1.0):
         """Readers do not create metadata; a missing lock means a pristine registry."""
-        if not create and self._pristine():
-            yield False
-            return
         try:
             fd = open_directory(self.root, create=create, require_private=create)
         except FileNotFoundError:
@@ -235,7 +220,7 @@ class Registry:
         name = validate_name(name)
         data = self.read() if data is None else data
         if name not in data['profiles']:
-            raise ProfileSelectionError('Unknown profile; run printer list')
+            raise ProfileSelectionError(UNKNOWN_PROFILE)
         path = self.path(name)
         parent_fd = open_directory(self.root / "profiles")
         os.close(parent_fd)
@@ -316,13 +301,11 @@ class Registry:
         data = self.read()
         if name is None:
             selected = data['default']
-            if selected == 'require-explicit':
+            if selected is None:
                 raise ProfileSelectionError('No default selected; run printer use NAME or supply --printer/--config')
-            if selected == 'legacy-fallback':
-                return self.legacy, {'source': 'legacy', 'name': None}
             name = selected['name']
         if name not in data['profiles']:
-            raise ProfileSelectionError('Unknown profile; run printer list')
+            raise ProfileSelectionError(UNKNOWN_PROFILE)
         return self.path(name), {'source': 'profile', 'name': name}
 
     @contextmanager
@@ -331,7 +314,7 @@ class Registry:
         with self.lock(exclusive=False, create=False) as leased:
             path, source = self.resolve(config, name)
             if source['source'] == 'profile' and not leased:
-                # A writer adopted profiles after the pristine check; acquire its lock.
+                # A writer published profiles after the missing-lock check; acquire its lock.
                 with self.lock(exclusive=False, create=False):
                     yield self.load(source['name']), {**source, 'config_path': str(path)}
             else:
@@ -361,12 +344,7 @@ class Registry:
                     entry = {**source, 'available': False, 'default': data['default'] == {'name': name},
                              'code': 'local_config_unavailable'}
                 entries.append(entry)
-            legacy = {'source': 'legacy', 'available': False, 'config_path': str(self.legacy)}
-            try:
-                legacy = self.metadata(Config.load(self.legacy), self.legacy, {'source': 'legacy', 'name': None}, data)
-            except (OSError, ValueError, TypeError, KeyError, ProtocolError):
-                pass
-            return {'profiles': entries, 'legacy': legacy, 'default': data['default']}
+            return {'profiles': entries, 'default': data['default']}
 
     def _observed_registration(self, name):
         try:
@@ -430,7 +408,7 @@ class Registry:
         validate_name(name)
         data = self.read()
         if name not in data['profiles']:
-            raise ProtocolError('Unknown profile; legacy access cannot be removed by this command')
+            raise ProtocolError(UNKNOWN_PROFILE)
         entry = data['profiles'][name]
         return {'name': name, 'config_path': str(self.path(name)), 'entry': entry,
                 'default': data['default'] == {'name': name},
@@ -452,7 +430,7 @@ class Registry:
     def _detach(self, name, data, preview):
         entry = data['profiles'].pop(name)
         if data['default'] == {'name': name}:
-            data['default'] = 'require-explicit'
+            data['default'] = None
         try:
             self.write(data)
         except OSError:
@@ -494,16 +472,6 @@ class Registry:
                     references.update((os.path.abspath(filename), str(Path(filename).resolve(strict=True))))
             except (OSError, ValueError, TypeError, KeyError, ProtocolError):
                 uncertain = True
-        try:
-            references.add(str(self.legacy.resolve(strict=True)))
-            cfg = Config.load(self.legacy)
-            for filename in (cfg.client_cert, cfg.client_key):
-                references.update((os.path.abspath(filename), str(Path(filename).resolve(strict=True))))
-        except FileNotFoundError:
-            # A dangling legacy symlink is ambiguous, not an absent reference.
-            uncertain |= self.legacy.exists() or self.legacy.is_symlink()
-        except (OSError, ValueError, TypeError, KeyError, ProtocolError):
-            uncertain = True
         return references, uncertain
 
     @staticmethod
