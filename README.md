@@ -12,7 +12,7 @@ See the [roadmap](ROADMAP.md) for implemented capabilities and future work, and 
 
 Versioned Debian packages are distributed through [GitHub Releases](https://github.com/eduardobittencourt/kobra-lan-cli/releases). Select a published version with both its `.deb` and `SHA256SUMS` attached; CI artifacts and merged source alone do not establish package availability. Debian 13 and Ubuntu 24.04 on amd64 are the acceptance targets. There is no hosted apt repository or automatic update channel.
 
-Download both assets from the same release into an empty directory, then verify and install:
+Download both assets from the same release into an empty directory, then verify and install. The example uses 0.5.0; replace the `.deb` filename with the asset from your selected release:
 
 ```sh
 sha256sum --check SHA256SUMS

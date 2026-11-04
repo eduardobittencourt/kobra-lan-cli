@@ -16,12 +16,14 @@ Modeling, mesh editing, orientation, supports, toolpaths and slicing profiles be
 
 | Area | Implemented behavior |
 | --- | --- |
-| Access | Explicit-address named pairing, first-use trust, pinned authentication, local profiles, explicit/default selection and confirmed local removal |
+| Access | Explicit-address named pairing, [first-use trust](docs/pairing.md), pinned authentication, local profiles, explicit/default selection and confirmed local removal |
 | Diagnostics | Bounded read-only `doctor`, fresh status, qualified model/firmware checks and disclosure of optional MQTT identifiers omitted by firmware |
 | Stored files | `files list`, `files info`, local `gcode inspect` and reviewed execution-only `files upload` |
 | Print submission | Read-only `print plan` and experimental `print start`, with explicit material/slot/preparation choices and reviewed hashes |
 | Automation | English text by default, root `--json` version-1 envelope, documented error/exit contracts and offline bash/zsh/fish completion |
 | Distribution | Python archive/build/install validation and a gated GitHub release workflow for a downloadable `.deb` plus checksums; Debian 13 and Ubuntu 24.04 acceptance |
+
+Initial HTTP provisioning is unauthenticated and exposes credentials on the network. Use a trusted LAN and explicitly establish server trust; pinned MQTT authentication applies only after that trust is established. Follow the [pairing prerequisites and trust procedure](docs/pairing.md).
 
 The source launcher and Python archives work outside a desktop, bridge, HA or cloud service. Publication state is recorded on [GitHub Releases](https://github.com/eduardobittencourt/kobra-lan-cli/releases), not inferred from a source version or merged PR. PyPI, mise, Homebrew and a hosted apt repository are not current distribution channels.
 

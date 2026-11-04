@@ -136,7 +136,8 @@ performed by `kobra-lan` itself.
 ## Download, install and deliberately switch commands
 
 Download the package and `SHA256SUMS` from the same GitHub version release into
-an empty directory, verify, and install the local package:
+an empty directory, verify, and install the local package. The example uses
+0.5.0; use the actual `.deb` filename from your selected release:
 
 ```sh
 sha256sum --check SHA256SUMS
