@@ -391,3 +391,15 @@ class CLITests(StorageTests):
             code,report=self.invoke('printer','list')
             self.assertEqual(code,0)
             self.assertEqual([p['available'] for p in report['result']['profiles']],[False,True])
+
+    def test_cleanup_revalidates_name_and_entire_manifest_before_any_deletion(self):
+        self.add_profile()
+        entry=self.registry.read()['profiles']['bancada']
+        original={str(p):p.read_bytes() for p in self.root.rglob('*') if p.is_file()}
+        with patch('kobra_lan.profiles.open_directory',side_effect=AssertionError('must reject before filesystem access')):
+            for name in ('../outside', '/outside', 'bancada/../../outside', '..', '', 'Bancada'):
+                self.assertRaises(ProtocolError,self.registry._cleanup,name,entry,set(),False)
+            for filename in ('../outside', '/outside', '.pair-'+'a'*32+'/../../outside'):
+                invalid={**entry,'owned_files':['config.json',filename]}
+                self.assertRaises(ProtocolError,self.registry._cleanup,'bancada',invalid,set(),False)
+        self.assertEqual(original,{str(p):p.read_bytes() for p in self.root.rglob('*') if p.is_file()})

@@ -441,6 +441,12 @@ class Registry:
         return references, uncertain
 
     def _cleanup(self, name, entry, references, uncertain):
+        # Enforce the ownership boundary here too, even for a direct internal caller.
+        name = validate_name(name)
+        owned_files = entry['owned_files']
+        if not isinstance(owned_files, list) or any(
+                not isinstance(relative, str) or not self._owned_name(relative) for relative in owned_files):
+            raise ProtocolError('Unsafe managed cleanup manifest; preserve files for local review')
         root = self.path(name).parent
         deleted, preserved = [], []
         errors = False
@@ -498,7 +504,7 @@ class Registry:
         try:
             parent = open_directory(root.parent)
             try:
-                os.rmdir(name, dir_fd=parent)
+                os.rmdir(root.name, dir_fd=parent)
                 os.fsync(parent)
             finally:
                 os.close(parent)

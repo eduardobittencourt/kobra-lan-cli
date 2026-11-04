@@ -99,3 +99,16 @@ recorded Kobra X model 20030 / firmware 2.0.2.2 case. Arbitrary external configs
 sharing managed paths cannot be exhaustively discovered; known legacy/managed
 references and ambiguous material are retained conservatively. See pairing and
 release guides for local recovery and rollback/default-selection limitations.
+
+## PR security follow-up
+
+PR #6's hosted unit/build/Debian/Ubuntu gates passed on `60c7d5d`.
+Sonar reported a path-traversal flow into profile-directory deletion. Although
+public removal already validates the profile name, cleanup now independently
+validates the name and the entire ownership manifest before filesystem access,
+and removes only the validated path's final directory component relative to its
+opened parent descriptor. A regression test directly supplies traversal names
+and manifest paths and verifies rejection before any filesystem operation.
+All **153 offline tests** and locked Ruff passed after this hardening. Hosted
+checks and Sonar must run again on the resulting commit before merge; no analyzer
+suppression, gate change or new hardware qualification is part of this fix.
