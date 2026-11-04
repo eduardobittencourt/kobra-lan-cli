@@ -13,6 +13,9 @@ Start with the [project overview](../README.md) for experimental status and qual
 | Review, CI services, protections and recovery | [Maintenance](maintenance.md) |
 | Planned capabilities and distribution channels | [Roadmap](../ROADMAP.md) |
 
-Package tooling is implemented; a public release and other proposed distribution
-channels remain pending. Only Kobra X model 20030 / firmware 2.0.2.2 is initially
-qualified. See each guide for the narrower limits of its operations.
+The CLI and JSON automation interface are experimental and under active
+development. [GitHub Releases](https://github.com/eduardobittencourt/kobra-lan-cli/releases)
+is the downloadable `.deb` channel; select a published version with its package
+and checksums. PyPI, mise, Homebrew and a hosted apt repository remain future
+work. Only Kobra X model 20030 / firmware 2.0.2.2 is initially qualified; see
+each guide for the narrower limits of its operations.
