@@ -182,11 +182,18 @@ In both branches, never create the root as a side effect: do not run `openspec i
 
    **Check again immediately before the move:**
    - If the target now exists: Fail with error, leave `changeRoot` where it is, report any main specs step 4 synced, and suggest renaming the existing archive or this change
-   - If not: Move `changeRoot` to the archive directory
+   - If not: Move `changeRoot` to the exact target with a no-replace operation
+     that refuses to move into an existing directory. For GNU coreutils:
 
    ```bash
-   mv "<changeRoot>" "<planningHome.changesDir>/archive/<target-name>"
+   mv -nT -- "<changeRoot>" "<planningHome.changesDir>/archive/<target-name>"
    ```
+
+   Check that the source is gone and the target exists before reporting success.
+   GNU `mv -nT` can return success after skipping an existing destination. If
+   the source remains and the target exists, report the collision and leave both
+   in place. Report other move failures as errors. If the platform has no
+   equivalent no-replace operation, stop before moving and report the limitation.
 
 6. **Display summary**
 

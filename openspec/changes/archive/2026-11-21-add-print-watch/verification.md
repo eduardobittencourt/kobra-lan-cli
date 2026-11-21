@@ -3,9 +3,8 @@
 ## Kobra X model 20030 / firmware 2.0.2.2
 
 On 2026-11-21 the operator authorized observation of a print already in
-progress, with pairing if needed. Omada identified the printer on the home
-LAN and the LAN identity endpoint identified model 20030. A new local profile
-was paired with explicit first-use TLS trust. The capture requested fresh
+progress and first-use pairing. The identity endpoint confirmed model 20030,
+and pairing used explicit first-use TLS trust. The capture requested fresh
 `info/query` reports approximately every five seconds over pinned MQTT.
 It started after print preparation and the first five layers. Times below
 are seconds relative to the first fresh report. The capture retains field
@@ -87,6 +86,3 @@ does not invent a success, cancellation or failure mapping.
   amd64 chroots and verified help and completion after a fresh installation
   and an upgrade. Both acceptance runs used the same package with SHA-256
   `fd81c762558cbfc68be83471eaa6b5f81d1d1f2e967ed27213263e4afe18e07d`.
-
-The Home Assistant HTTPS request returned HTTP 403. The hardware evidence
-comes from the printer's pinned LAN session.
