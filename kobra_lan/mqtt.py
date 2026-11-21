@@ -45,9 +45,14 @@ class MQTTFailure(ProtocolError):
 
 
 class MQTTIOFailure(OSError):
-    def __init__(self, stage):
+    def __init__(self, stage, *, timed_out=False):
         super().__init__("MQTT network operation failed; no automatic retry")
         self.stage = stage
+        self.timed_out = timed_out
+
+
+class MQTTClosed(MQTTFailure):
+    """Peer closed the transport before the next packet was complete."""
 
 
 class MQTT:
@@ -71,8 +76,11 @@ class MQTT:
     def remaining(self):
         remaining = (self.stage_deadline or self.limit()) - time.monotonic()
         if remaining <= 0:
-            raise MQTTFailure(self.stage, 'timeout', 'MQTT response timeout (command was not retried)', 3)
+            raise self._timeout()
         return remaining
+
+    def _timeout(self):
+        return MQTTFailure(self.stage, 'timeout', 'MQTT response timeout (command was not retried)', 3)
 
     def passed(self, stage):
         if self.observer is not None:
@@ -128,31 +136,33 @@ class MQTT:
         elif raw is not None:
             raw.close()
         if isinstance(error, OSError):
-            raise MQTTIOFailure(self.stage) from None
+            raise MQTTIOFailure(self.stage, timed_out=isinstance(error, TimeoutError)) from None
         if isinstance(error, ProtocolError) and not isinstance(error, MQTTFailure):
             raise MQTTFailure(self.stage, 'protocol_rejected', str(error)) from None
 
     def __exit__(self, *args):
         if self.sock:
             try:
-                if self.deadline is None or time.monotonic() < self.deadline:
-                    if self.deadline is not None:
-                        self.sock.settimeout(max(0.001, min(self.timeout, self.deadline - time.monotonic())))
+                if self.deadline is None:
+                    self.sock.sendall(b"\xe0\x00")
+                elif (left := self.deadline - time.monotonic()) > 0:
+                    self.sock.settimeout(min(self.timeout, left))
                     self.sock.sendall(b"\xe0\x00")
             except OSError:
                 pass
-            self.sock.close()
+            finally:
+                self.sock.close()
 
     def _read(self, size, deadline):
         result = bytearray()
         while len(result) < size:
             left = deadline - time.monotonic()
             if left <= 0:
-                raise MQTTFailure(self.stage, "timeout", "MQTT response timeout (command was not retried)", 3)
+                raise self._timeout()
             self.sock.settimeout(left)
             part = self.sock.recv(size - len(result))
             if not part:
-                raise ProtocolError("MQTT connection closed")
+                raise MQTTClosed(self.stage, 'protocol_rejected', 'MQTT connection closed')
             result.extend(part)
         return bytes(result)
 
@@ -170,7 +180,7 @@ class MQTT:
             multiplier *= 128
         raise ProtocolError("Malformed MQTT length")
 
-    def query(self, kind, action="query", data=None):
+    def query(self, kind, action="query", data=None, *, require_fresh=False):
         # Keep this public method strictly read-only.
         allowed = {("info", "query"), ("print", "query"), ("status", "query"),
                    ("multiColorBox", "getInfo"), ("file", "fileDetails"),
@@ -203,8 +213,13 @@ class MQTT:
                 raise ProtocolError("Unsupported MQTT QoS")
             if qos == 1:
                 pid = body[offset:offset + 2]
+                if len(pid) != 2:
+                    raise ProtocolError("Malformed MQTT packet identifier")
                 offset += 2
+                self.sock.settimeout(self.remaining())
                 self.sock.sendall(packet(0x40, pid))
+            if require_fresh and header & 1:
+                continue
             try:
                 result = json.loads(body[offset:])
             except (ValueError, UnicodeDecodeError):
@@ -220,10 +235,11 @@ class MQTT:
                 continue
             is_report = topic.endswith(f"/{kind}/report") and result.get("type") == kind
             if is_report and isinstance(result.get("data"), dict):
-                if result.get("msgid") == msgid:
+                correlated = result.get("msgid") == msgid
+                if correlated and not require_fresh:
                     return result
                 stamp = result.get("timestamp")
-                if (acknowledged and isinstance(stamp, (int, float))
+                if ((correlated or acknowledged) and type(stamp) in (int, float)
                         and sent_timestamp <= stamp <= int(time.time() * 1000) + 5000):
                     return result
 

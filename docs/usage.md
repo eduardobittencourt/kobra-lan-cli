@@ -28,6 +28,7 @@ The output envelope does not change private receipt or registry schemas.
 | `validation_failed` | 2 | Selection, trust, protocol, qualification or reviewed-content refusal |
 | `operation_failed` | 3 | Configuration, dependency, I/O or network failure; may retain local partial outcome |
 | `diagnostic_failed` | 2 or 3 | Failed ordered doctor checks; exit 3 takes precedence |
+| `interrupted` | 130 | User interrupted print observation |
 
 Every result also includes a `qualification` string with the narrow model/firmware and experimental-start boundary. The `result` payloads retain these command-specific fields. Consumers should
 allow additional safe fields and inspect outcome flags rather than infer success
@@ -48,6 +49,7 @@ from a filename or network acknowledgement.
 | `files upload` | Manifest, verification/status flags, timestamp and `receipt_path` |
 | `print plan` | `file_sha256`, `device_digest`, model/firmware, canonical `payload`, `plan_sha256`, slot and experimental/qualification flags |
 | `print start` | Plan fields, `dry_run: false`, status/ack/observation evidence and `receipt_path` |
+| `print watch` | `outcome`, `reason`, and verified `phase`, `progress` (percent), `current_layer`, `total_layers` when available |
 
 Both formats preserve full review hashes, experimental qualification and uncertain
 outcomes. Upload metadata confirmation does not prove remote byte equality;
@@ -98,6 +100,43 @@ and device/file markers, including under `--state-dir`, remain authoritative.
 All three preparation options are required. The example does not claim to reproduce the graphical application's defaults. Both formats include the payload and full `plan_sha256`. Changing the file, slot, or options changes the hash. The plan includes `experimental=true`; `hardware_start_validated=true` only for the observed configuration described above, and false for other combinations. This flag describes the start operation, not the quality of an arbitrary model.
 
 To request execution later, use `print start` with the same explicit arguments plus `--execute --plan-sha256 REVIEWED_PLAN_HASH`. This is a physical action: run it only when printing is authorized and the printer is prepared. It requires a verified upload receipt from this CLI, rechecks the file/state/material, and writes a durable reservation before publishing **one** MQTT `print/start` command. It does not upload again. An ACK is not treated as proof of physical printing; the client subsequently queries the active project and distinguishes observed activity from an uncertain result. It never automatically repeats the command.
+
+## Watch an active print
+
+```sh
+kobra-lan --printer bench print watch --timeout 3600
+kobra-lan --json --printer bench print watch
+```
+
+Watch observes the job already active at startup on a Kobra X model 20030 /
+firmware 2.0.2.2. It accepts jobs started from any client. It polls fresh
+`info` reports on one pinned MQTT connection and releases the managed profile
+lease as soon as that session is established. It requests status every five
+seconds after the initial query. The timeout accepts 1 to 259200 whole seconds
+and defaults to 86400. It includes connection setup, polls and closing the session.
+
+The command sends one final summary to stdout. Exit 0 means the observer returned
+a result. The outcome `no_active_job` describes verified idle at startup.
+`unknown` covers cases such as an expired deadline, a lost job or telemetry
+that cannot distinguish attempts. An acknowledgement, idle transition, unchanged
+last project or 100 percent progress alone is insufficient evidence of completion.
+Only terminal signals attributable to the same attempt and validated in hardware
+can qualify for `completed`, `canceled` or `failed`.
+
+A live observation on 2026-11-21 verified increasing percent and layer
+counters, followed by an idle report with the initial `last_project` still
+empty. The active report had the `task_id` placeholder `"-1"`. A repeated
+filename and that placeholder are insufficient to follow the same attempt.
+Watch preserves the first verified progress and returns `unknown` if a
+subsequent report cannot establish continuity. No terminal outcome mappings
+are enabled for this firmware.
+
+Exit 2 indicates argument, trust, qualification or protocol refusal. Exit 3
+indicates a configuration or communication failure and 130 indicates a user
+interrupt. A failure after observing a job includes the last verified progress
+as a partial result. Clock skew between the printer and the host can cause a
+report to fail the freshness check and time out. Part quality requires separate
+physical inspection.
 
 ## Guarantees and limitations
 

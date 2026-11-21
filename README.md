@@ -4,7 +4,7 @@ A direct Anycubic Kobra X LAN client with readable text and opt-in JSON for auto
 
 **Status: experimental, under active development.** The CLI and its JSON automation interface are intended for testing and feedback. Commands, output and stored-state contracts can change during 0.x; read each version's [compatibility notes](https://github.com/eduardobittencourt/kobra-lan-cli/releases) before upgrading. A downloadable package does not imply stable or broadly qualified printer support.
 
-Upload and print start were observed on Kobra X hardware running firmware 2.0.2.2 for one PLA High Speed print using onboard slot 1, automatic leveling on, vibration compensation off, and flow calibration off. Starting the stored file with `url=""` worked. Other combinations remain unqualified. Physical print completion and part quality have not yet been assessed.
+Upload and print start were observed on Kobra X hardware running firmware 2.0.2.2 for one PLA High Speed print using onboard slot 1, automatic leveling on, vibration compensation off, and flow calibration off. Starting the stored file with `url=""` worked. That test observed preparation and the first layer. Other start combinations remain unqualified.
 
 See the [roadmap](ROADMAP.md) for implemented capabilities and future work, and the [release guide](docs/releases.md) for supported installation targets, package checks and recovery.
 
@@ -51,19 +51,26 @@ cd kobra-lan-cli
 ./kobra-lan print start /path/to/model.gcode --name agent-model.gcode --slot 1 \
   --auto-leveling on --vibration-compensation off --flow-calibration off \
   --plan-sha256 PLAN_HASH --execute
+# Observe a job already active on the selected printer:
+./kobra-lan --printer bench print watch --timeout 3600
 ./kobra-lan --json --printer bench status
 ./kobra-lan completion fish
 ```
 
 The canonical tree is `printer pair|list|info|use|remove`, `doctor`, `status`,
-`files list|info|upload`, `gcode inspect`, `print plan|start`, and
+`files list|info|upload`, `gcode inspect`, `print plan|start|watch`, and
 `completion bash|zsh|fish`. Group `--help` describes observation and execution.
 Upload requires both execution controls and never starts a print. Inspection is
 local; planning queries the printer without changing it. Text is the default;
 root `--json` selects the versioned machine contract. Exit codes are 0 (success),
-2 (arguments/protocol/validation), and 3 (configuration/network failure).
+2 (arguments/protocol/validation), 3 (configuration/network failure), and
+130 (interrupted print observation).
 Global `--config`, `--printer`, `--state-dir` and `--json` precede the command.
 These examples describe the workflow; automated checks use synthetic fixtures.
+
+`print watch` uses read-only telemetry on Kobra X model 20030 / firmware
+2.0.2.2. It defaults to 86400 seconds and returns `unknown` when telemetry
+cannot establish a job's outcome. See [watch outcomes and evidence](docs/usage.md#watch-an-active-print).
 
 ## Setup and safe operation
 

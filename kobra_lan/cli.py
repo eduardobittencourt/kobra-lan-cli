@@ -12,6 +12,7 @@ from .upload import describe, execute
 from .start import start
 from .pairing import PairingLocalError
 from .profiles import Registry, ProfileLocalError, validate_name
+from .watch import DEFAULT_TIMEOUT, MAX_TIMEOUT, WatchProgress, observe
 
 
 class ArgumentFailure(Exception):
@@ -28,6 +29,7 @@ class Parser(argparse.ArgumentParser):
             "kobra-lan printer pair": "; supply --name NAME and --host IPv4",
             "kobra-lan files upload": "; review first with kobra-lan gcode inspect",
             "kobra-lan print start": "; review first with kobra-lan print plan",
+            "kobra-lan print watch": f"; --timeout accepts whole seconds from 1 to {MAX_TIMEOUT}",
         }.get(self.prog, "")
         raise ArgumentFailure("Invalid arguments; use " + self.prog + " --help for supported commands and required options" + guidance)
 
@@ -49,6 +51,14 @@ def root_json(argv):
             break
         index += 1
     return selected
+
+
+def watch_timeout(value):
+    if value.isascii() and value.isdecimal():
+        seconds = int(value)
+        if 1 <= seconds <= MAX_TIMEOUT:
+            return seconds
+    raise argparse.ArgumentTypeError("Invalid observation timeout")
 
 
 def build_parser():
@@ -93,8 +103,8 @@ def build_parser():
     p = gcode.add_parser("inspect", help="Inspect immutable local G-code; no state writes")
     p.add_argument("file", type=Path)
     p.add_argument("--name")
-    p = sub.add_parser("print", help="Review a plan or explicitly start an experimental print",
-                       description="plan is read-only; start requires reviewed plan hash and --execute")
+    p = sub.add_parser("print", help="Watch, plan or explicitly start a print",
+                       description="watch and plan are read-only. start requires a reviewed plan hash and --execute")
     printing = p.add_subparsers(dest="print_command", required=True)
     for command in ("plan", "start"):
         p = printing.add_parser(command, help="Read-only plan" if command == "plan" else "Experimental guarded execution")
@@ -106,6 +116,11 @@ def build_parser():
         if command == "start":
             p.add_argument("--execute", action="store_true", required=True)
             p.add_argument("--plan-sha256", required=True, help="Reviewed hash from print plan")
+    p = printing.add_parser("watch", help="Observe the active print without controlling it",
+                            description="Read-only observation on Kobra X model 20030 / firmware 2.0.2.2. "
+                                        "Reports an unknown outcome when telemetry cannot establish it.")
+    p.add_argument("--timeout", type=watch_timeout, default=DEFAULT_TIMEOUT, metavar="SECONDS",
+                   help=f"Observation deadline in seconds (1 to {MAX_TIMEOUT}, default {DEFAULT_TIMEOUT})")
     p = sub.add_parser("completion", help="Generate offline shell completion; no access or state")
     p.add_argument("shell", choices=["bash", "zsh", "fish"])
     return parser
@@ -116,6 +131,7 @@ def main(argv=None):
     parser = build_parser()
     argv = list(sys.argv[1:] if argv is None else argv)
     json_mode = root_json(argv)
+    watch = None
     try:
         args = parser.parse_args(argv)
         json_mode = args.json
@@ -130,6 +146,8 @@ def main(argv=None):
             if not re.fullmatch(r"[0-9a-fA-F]{64}", args.plan_sha256):
                 raise ArgumentFailure("Start requires a full --plan-sha256 from print plan and --execute")
             args.plan_sha256 = args.plan_sha256.lower()
+        if args.command == "print" and args.print_command == "watch":
+            watch = WatchProgress()
         if args.command == "completion":
             from .completions import generate
             print(generate(parser, args.shell), end="")
@@ -170,6 +188,10 @@ def main(argv=None):
         elif args.command == "gcode":
             _, result = describe(args.file, args.name)
             result["dry_run"] = True
+        elif watch is not None:
+            result = observe(registry, args.config, args.selected_printer, args.timeout, watch.update)
+            if result is None:
+                result = watch.result("unknown", "deadline_expired")
         else:
             with registry.access(args.config, args.selected_printer) as (config, source):
                 result = operate(args, config)
@@ -180,14 +202,21 @@ def main(argv=None):
         return 2
     except ProtocolError as error:
         status = 3 if getattr(error, "exit_code", 2) == 3 else 2
-        emit(json_mode, code="operation_failed" if status == 3 else "validation_failed", message=str(error))
+        code = "operation_failed" if status == 3 else "validation_failed"
+        emit(json_mode, watch.partial(code) if watch else None, code=code, message=str(error))
         return status
     except (PairingLocalError, ProfileLocalError) as error:
         emit(json_mode, getattr(error, "result", None), code="operation_failed", message=str(error))
         return 3
     except (ImportError, OSError, ValueError, TypeError, KeyError):
-        emit(json_mode, code="operation_failed", message="Local configuration or network operation failed; no automatic retry")
+        emit(json_mode, watch.partial("operation_failed") if watch else None,
+             code="operation_failed", message="Local configuration or network operation failed; no automatic retry")
         return 3
+    except KeyboardInterrupt:
+        if watch is None:
+            raise
+        emit(json_mode, watch.partial("interrupted"), code="interrupted", message="Print observation interrupted")
+        return 130
 
 
 def operate(args, config):

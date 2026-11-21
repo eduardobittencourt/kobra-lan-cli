@@ -11,7 +11,7 @@ class CommandTreeTests(unittest.TestCase):
     def test_every_leaf_has_help_without_operations(self):
         leaves = [("printer", c) for c in ("pair", "list", "info", "use", "remove")]
         leaves += [("files", c) for c in ("list", "info", "upload")]
-        leaves += [("gcode", "inspect"), ("print", "plan"), ("print", "start")]
+        leaves += [("gcode", "inspect"), ("print", "plan"), ("print", "start"), ("print", "watch")]
         leaves += [(c,) for c in ("status", "doctor", "completion")]
         for leaf in leaves:
             with self.subTest(leaf=leaf), patch("kobra_lan.cli.Registry") as registry:

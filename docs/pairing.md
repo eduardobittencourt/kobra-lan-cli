@@ -89,9 +89,10 @@ be owned by the current user with mode 0700; files use 0600. Symlink components
 and existing destinations are rejected. The registry records destinations and
 owned filenames, never passwords or PEM contents.
 
-A bounded advisory lock serializes writers. Managed consumers hold a shared
-lease for their entire operation; deletion requires an exclusive lease. A busy
-store fails locally rather than interrupting an active consumer. Index writes
+A bounded advisory lock serializes writers. Deletion requires an exclusive
+lease. Most managed consumers hold a shared lease for their entire operation.
+`print watch` holds the lease through pinned session establishment and continues
+on that session after releasing it. A busy store fails locally. Index writes
 fsync a private temporary file, atomically replace the index and fsync its parent.
 A failure after replacement can mean the complete new index is already visible;
 inspect the inventory before deciding what to do next. Unknown registry versions
