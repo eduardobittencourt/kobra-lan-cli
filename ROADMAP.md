@@ -57,16 +57,20 @@ Exit evidence: a published artifact installs outside the checkout, exposes help/
 
 ## Milestone 3 — A complete everyday print cycle
 
-These capabilities are future work:
+The source CLI includes a read-only `print watch` for an already active job.
+It preserves verified progress and reports uncertainty when it cannot identify
+the same attempt. See [watch outcomes and evidence](docs/usage.md#watch-an-active-print).
 
-- Follow preparation and printing through completion, cancellation, failure or an unknown outcome after connection loss. An ACK or disappearing active project is insufficient proof of completion.
+Remaining work:
+
+- Qualify attempt identity and terminal signals where the printer reports them.
 - Separate job identity from file identity so intentional reprints can retain durable protection for each attempt. Preserve and migrate receipts/markers; do not use state deletion as the reprint mechanism.
 - Expose job history backed by receipts and observations, with incomplete records and actions by other clients represented accurately.
 - Add pause/resume/cancel only after validating state transitions and uncertainty recovery; never replay ambiguous commands blindly.
 - Validate stored-file deletion and its interaction with active jobs and receipts. Investigate download support separately.
 - Record a complete authorized physical print and inspect the part, keeping telemetry-confirmed completion distinct from operator-assessed quality.
 
-Candidate commands include `print watch|pause|resume|cancel`, `jobs list|info` and `files delete`. They are not current CLI commands. Filament inventory beyond submission preflight, discovery and other device controls also require separate work.
+Candidate commands include `print pause|resume|cancel`, `jobs list|info` and `files delete`. Filament inventory beyond submission preflight, discovery and other device controls also require separate work.
 
 ## Milestone 4 — Broader compatibility and stable releases
 

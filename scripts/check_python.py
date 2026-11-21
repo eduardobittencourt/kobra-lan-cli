@@ -20,7 +20,8 @@ ENTRY_POINTS_FILE = "entry_points.txt"
 RUNTIME_LOCK = ROOT / "requirements-runtime.txt"
 
 MODULES = {f"kobra_lan/{name}.py" for name in
-           ("__init__", "cli", "cli_output", "completions", "config", "mqtt", "printer", "start", "upload", "provisioning", "pairing", "profiles", "diagnostics")}
+           ("__init__", "cli", "cli_output", "completions", "config", "mqtt", "printer", "start", "upload",
+            "provisioning", "pairing", "profiles", "diagnostics", "watch")}
 DOCS = {
     "README.md", "LICENSE", "NOTICE.md", "CHANGELOG.md", "ROADMAP.md", "CONTRIBUTING.md",
     "AGENTS.md", "SECURITY.md", "CODE_OF_CONDUCT.md", "docs/README.md", "docs/pairing.md",
@@ -131,8 +132,17 @@ def main():
         assert "SYNTHETIC_PRIVATE" not in failure.stdout
         if mode:
             assert json.loads(failure.stdout)["error"]["code"] == "invalid_arguments"
+    empty_home = outside / "empty-home"
+    empty_home.mkdir()
+    probe_env = dict(env, HOME=str(empty_home))
+    help_text = subprocess.check_output([str(command), "print", "watch", "--help"],
+                                        cwd=outside, env=probe_env, text=True)
+    assert "--timeout SECONDS" in help_text
     for shell in ("bash", "zsh", "fish"):
-        assert "kobra-lan" in subprocess.check_output([str(command), "completion", shell], cwd=outside, env=env, text=True)
+        completion = subprocess.check_output([str(command), "completion", shell],
+                                             cwd=outside, env=probe_env, text=True)
+        assert all(word in completion for word in ("kobra-lan", "watch", "timeout"))
+    assert not list(empty_home.iterdir())
     print(f"Python archives and independent installation verified: {version}")
 
 

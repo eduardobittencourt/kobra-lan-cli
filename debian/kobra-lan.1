@@ -44,6 +44,10 @@ reviews a stored print without writes.
 .B print start
 requires those same inputs plus --plan-sha256 HASH --execute; it rebuilds the
 reviewed plan, requires a verified receipt and checks idle before one send.
+.B print watch [--timeout SECONDS]
+observes a job already active on Kobra X model 20030 / firmware 2.0.2.2 over
+one pinned MQTT session. The timeout accepts 1 to 259200 seconds and defaults
+to 86400. See usage.md for outcomes and qualification evidence.
 .B completion bash|zsh|fish
 generates offline shell scripts without configuration or device queries.
 See usage.md for user-level installation; startup files are not modified.
@@ -71,7 +75,9 @@ Removing an isolated config and only its unreferenced PEM directory does not
 revoke access on the printer. Never remove operational attempt markers.
 .SH EXIT STATUS
 0 indicates success; 2 indicates protocol/validation failure; 3 indicates
-configuration/network failure. Operations are never retried automatically.
+configuration/network failure. Interrupting print watch returns 130.
+Exit 0 for print watch means a result was returned, which can include an
+unknown print outcome. Operations are never retried automatically.
 .SH FILES
 Configuration and state belong to the invoking user. Removing or purging the
 package preserves them. Do not delete attempt markers to retry uncertain actions.

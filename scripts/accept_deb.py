@@ -62,8 +62,16 @@ def installed_probes(probe, version, home, work, before):
     result = json.loads(probe("--json", "--config", str(home / "missing.json"), "status", code=3))
     assert result["schema_version"] == 1 and result["error"]["code"] == "operation_failed"
     assert "Sha256:" in probe("gcode", "inspect", str(gcode))
+    empty_home = work / "empty-home"
+    empty_home.mkdir(exist_ok=True)
+    home_owner = home.stat()
+    os.chown(empty_home, home_owner.st_uid, home_owner.st_gid)
+    assert "watch" in probe("print", "--help", probe_home=empty_home)
+    assert "--timeout SECONDS" in probe("print", "watch", "--help", probe_home=empty_home)
     for shell in ("bash", "zsh", "fish"):
-        assert "kobra-lan" in probe("completion", shell)
+        completion = probe("completion", shell, probe_home=empty_home)
+        assert all(word in completion for word in ("kobra-lan", "watch", "timeout"))
+    assert not list(empty_home.iterdir())
     hostile = "https://example.test/?token=SYNTHETIC_PRIVATE"
     for mode in ([], ["--json"]):
         output = probe(*mode, "files", "upload", hostile, code=2)
@@ -138,11 +146,11 @@ def main():
         run("apt-get", "-y", *arguments, env=dict(os.environ, DEBIAN_FRONTEND="noninteractive"))
         assert snapshot(home) == before, f"Private data changed after {arguments}"
 
-    def probe(*arguments, code=0):
+    def probe(*arguments, code=0, probe_home=home):
         # Explicit installed path, empty environment, no checkout, development launcher or PYTHONPATH.
         """Run the installed command as the fixture user outside the checkout."""
         result = subprocess.run(["runuser", "-u", "kobra-acceptance", "--", "env", "-i",
-                                 f"HOME={home}", CLEAN_PATH, INSTALLED_COMMAND, *arguments],
+                                 f"HOME={probe_home}", CLEAN_PATH, INSTALLED_COMMAND, *arguments],
                                 cwd=work, text=True, capture_output=True)
         assert result.returncode == code, (arguments, result.returncode, result.stdout, result.stderr)
         return result.stdout
