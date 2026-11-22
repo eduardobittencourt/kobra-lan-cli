@@ -18,4 +18,4 @@
 ## 4. Integration and package verification
 
 - [x] 4.1 Run the full offline validation gates: `uv sync --locked`, `uv run --locked python -m unittest discover -s tests -v`, `uv run --locked ruff check kobra_lan scripts tests`, `sh -n kobra-lan`, and `openspec validate add-local-job-history --strict`.
-- [ ] 4.2 Because the installed CLI command tree and man page change, run the relevant Python archive (`scripts/check_python.py`) and Debian build/acceptance checks (`docs/releases.md`) in disposable clean environments and confirm installed `--help`, `jobs --help`, and generated bash/zsh/fish completions match source behavior with empty configuration.
+- [x] 4.2 Because the installed CLI command tree and man page change, run the relevant Python archive (`scripts/check_python.py`) and Debian build/acceptance checks (`docs/releases.md`) in disposable clean environments and confirm installed `--help`, `jobs --help`, and generated bash/zsh/fish completions match source behavior with empty configuration.
