@@ -57,6 +57,11 @@ cd kobra-lan-cli
 ./kobra-lan completion fish
 ```
 
+To deliberately reprint a stored file, find the latest local `attempt_id` with
+`print plan`, then review and explicitly execute a new plan with
+`--reprint-from PREVIOUS_ATTEMPT_ID` on both commands. See the
+[reprint workflow](docs/usage.md#deliberately-reprint-a-stored-file) for eligibility and safety checks.
+
 The canonical tree is `printer pair|list|info|use|remove`, `doctor`, `status`,
 `files list|info|upload`, `gcode inspect`, `print plan|start|watch`, and
 `completion bash|zsh|fish`. Group `--help` describes observation and execution.

@@ -47,8 +47,8 @@ from a filename or network acknowledgement.
 | `files info` | `filename` and available safe file details |
 | `gcode inspect` | `sha256`, `md5`, `size_bytes`, `remote_filename`, nullable `layer_count`, `slicer_version`, operation/qualification flags |
 | `files upload` | Manifest, verification/status flags, timestamp and `receipt_path` |
-| `print plan` | `file_sha256`, `device_digest`, model/firmware, canonical `payload`, `plan_sha256`, slot and experimental/qualification flags |
-| `print start` | Plan fields, `dry_run: false`, status/ack/observation evidence and `receipt_path` |
+| `print plan` | `file_sha256`, `device_digest`, model/firmware, canonical `payload`, `plan_sha256`, slot and qualification flags; latest local `attempt_id` and `start_status` when available; `previous_attempt_id` for a reprint review |
+| `print start` | Plan fields, `dry_run: false`, local `attempt_id`, `previous_attempt_id` for a reprint, status/ack/observation evidence and `receipt_path`; an uncertain error may return a subset of that evidence |
 | `print watch` | `outcome`, `reason`, and verified `phase`, `progress` (percent), `current_layer`, `total_layers` when available |
 
 Both formats preserve full review hashes, experimental qualification and uncertain
@@ -101,6 +101,32 @@ All three preparation options are required. The example does not claim to reprod
 
 To request execution later, use `print start` with the same explicit arguments plus `--execute --plan-sha256 REVIEWED_PLAN_HASH`. This is a physical action: run it only when printing is authorized and the printer is prepared. It requires a verified upload receipt from this CLI, rechecks the file/state/material, and writes a durable reservation before publishing **one** MQTT `print/start` command. It does not upload again. An ACK is not treated as proof of physical printing; the client subsequently queries the active project and distinguishes observed activity from an uncertain result. It never automatically repeats the command.
 
+### Deliberately reprint a stored file
+
+After confirming that the previous run has ended and the printer is prepared,
+run ordinary `print plan` with the original file, remote name and state directory.
+Copy the latest `attempt_id` (text: `Attempt id`) only if `start_status` is
+`start_observed_active`. These are local references, not firmware task IDs.
+An ordinary plan keeps the original hash semantics; review a separate reprint plan:
+
+```sh
+kobra-lan --printer bench print plan model.gcode --name model.gcode --slot 1 \
+  --auto-leveling on --vibration-compensation off --flow-calibration off \
+  --reprint-from PREVIOUS_ATTEMPT_ID
+kobra-lan --printer bench print start model.gcode --name model.gcode --slot 1 \
+  --auto-leveling on --vibration-compensation off --flow-calibration off \
+  --reprint-from PREVIOUS_ATTEMPT_ID --plan-sha256 REVIEWED_REPRINT_HASH --execute
+```
+
+Execute only with separate authorization for this run. The review binds the
+previous attempt, device, file and execution choices. The CLI reuses the same
+verified upload receipt, checks fresh idle telemetry and reserves a single
+successor with a new `attempt_id`. An idle printer does not establish that a
+previous print completed successfully. A missing or inconsistent receipt, a
+reservation without observed activity, or a bare ACK is not eligible. If a
+start is interrupted or uncertain, inspect status and keep the records intact;
+do not replay the review, change `--state-dir` or remove reservations to retry.
+
 ## Watch an active print
 
 ```sh
@@ -142,8 +168,8 @@ physical inspection.
 
 - Upload is currently qualified only for model 20030 / firmware 2.0.2.2, Next-generated G-code, and the Kobra X profile. It requires an idle printer with no active project.
 - Hashing and multipart construction use the same bytes in memory. No G-code translation, `print=true` flag, or HTTP redirects.
-- Exclusive reservations are persisted with fsync per device and file hash in `~/.local/share/kobra-lan/uploads/`. Upload and start use separate markers. A second attempt is blocked after success or timeout, including across processes and restarts.
-- After an ambiguous response, inspect status/files/receipts. Do not delete markers to retry blindly. A different state directory or program does not share this protection; intentionally printing the same part again requires operational review.
+- Exclusive reservations are persisted with fsync in `~/.local/share/kobra-lan/uploads/`. Upload and first start use separate device/file markers. A reprint adds an attempt-keyed successor without modifying the original. Each predecessor can be consumed at most once across processes and restarts.
+- Starts also hold a private per-device lease from before printer access until observation ends. After an ambiguous response, inspect status/files/receipts and preserve all markers. Different state directories, older binaries and other clients do not share the start lease.
 - Uploads sharing a device state directory hold a private device lock through
   listing, reservation, POST and verification. A concurrent contender fails
   before printer access, including for different hashes or profile names.

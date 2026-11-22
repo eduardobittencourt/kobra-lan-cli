@@ -68,9 +68,12 @@ def installed_probes(probe, version, home, work, before):
     os.chown(empty_home, home_owner.st_uid, home_owner.st_gid)
     assert "watch" in probe("print", "--help", probe_home=empty_home)
     assert "--timeout SECONDS" in probe("print", "watch", "--help", probe_home=empty_home)
+    for action in ("plan", "start"):
+        assert "--reprint-from PREVIOUS_ATTEMPT_ID" in probe("print", action, "--help", probe_home=empty_home)
     for shell in ("bash", "zsh", "fish"):
         completion = probe("completion", shell, probe_home=empty_home)
         assert all(word in completion for word in ("kobra-lan", "watch", "timeout"))
+        assert all(f"print {action}:--reprint-from" in completion for action in ("plan", "start"))
     assert not list(empty_home.iterdir())
     hostile = "https://example.test/?token=SYNTHETIC_PRIVATE"
     for mode in ([], ["--json"]):

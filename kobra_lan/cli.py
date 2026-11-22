@@ -9,7 +9,7 @@ from .config import ProtocolError
 from .mqtt import MQTT
 from .printer import snapshot, file_details, safe_file_details, list_files
 from .upload import describe, execute
-from .start import start
+from .start import start, valid_attempt_id
 from .pairing import PairingLocalError
 from .profiles import Registry, ProfileLocalError, validate_name
 from .watch import DEFAULT_TIMEOUT, MAX_TIMEOUT, WatchProgress, observe
@@ -111,6 +111,8 @@ def build_parser():
         p.add_argument("file", type=Path, help="Local copy of the previously uploaded G-code")
         p.add_argument("--name", required=True, help="Existing remote filename")
         p.add_argument("--slot", type=int, choices=range(1, 5), required=True)
+        p.add_argument("--reprint-from", metavar="PREVIOUS_ATTEMPT_ID",
+                       help="Reprint after observed activity; find the latest local attempt ID with print plan")
         for flag in ["auto-leveling", "vibration-compensation", "flow-calibration"]:
             p.add_argument("--" + flag, choices=["on", "off"], required=True)
         if command == "start":
@@ -142,6 +144,8 @@ def main(argv=None):
             _, manifest = describe(args.file, args.name)
             if manifest["sha256"] != args.sha256:
                 raise ProtocolError("File SHA-256 differs from reviewed manifest; use gcode inspect")
+        if getattr(args, "reprint_from", None) is not None and not valid_attempt_id(args.reprint_from):
+            raise ArgumentFailure("--reprint-from requires a full lowercase local attempt ID from print plan")
         if args.command == "print" and args.print_command == "start":
             if not re.fullmatch(r"[0-9a-fA-F]{64}", args.plan_sha256):
                 raise ArgumentFailure("Start requires a full --plan-sha256 from print plan and --execute")
@@ -203,7 +207,7 @@ def main(argv=None):
     except ProtocolError as error:
         status = 3 if getattr(error, "exit_code", 2) == 3 else 2
         code = "operation_failed" if status == 3 else "validation_failed"
-        emit(json_mode, watch.partial(code) if watch else None, code=code, message=str(error))
+        emit(json_mode, watch.partial(code) if watch else getattr(error, "result", None), code=code, message=str(error))
         return status
     except (PairingLocalError, ProfileLocalError) as error:
         emit(json_mode, getattr(error, "result", None), code="operation_failed", message=str(error))
@@ -232,7 +236,7 @@ def operate(args, config):
     elif args.command == "print":
         result = start(config, args.file, args.name, args.slot,
             args.auto_leveling == "on", args.vibration_compensation == "on", args.flow_calibration == "on",
-            args.state_dir, args.print_command == "start", getattr(args, "plan_sha256", None))
+            args.state_dir, args.print_command == "start", getattr(args, "plan_sha256", None), args.reprint_from)
     else:
         if not args.sha256:
             raise ProtocolError("--sha256 is required for an actual upload")

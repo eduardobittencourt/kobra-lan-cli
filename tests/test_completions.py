@@ -66,6 +66,10 @@ COMP_WORDS=(kobra-lan print wa); COMP_CWORD=2
 _kobra_lan; printf '%s\\n' "${COMPREPLY[@]}"
 COMP_WORDS=(kobra-lan print watch --time); COMP_CWORD=3
 _kobra_lan; printf '%s\\n' "${COMPREPLY[@]}"
+for sub in plan start; do
+  COMP_WORDS=(kobra-lan print "$sub" a.gcode --rep); COMP_CWORD=4
+  _kobra_lan; printf '%s:%s\\n' "$sub" "${COMPREPLY[@]}"
+done
 COMP_WORDS=(kobra-lan --j); COMP_CWORD=1
 _kobra_lan; printf '%s\\n' "${COMPREPLY[@]}"
 COMP_WORDS=(kobra-lan gcode inspect pypro); COMP_CWORD=3
@@ -74,7 +78,8 @@ _kobra_lan; printf '%s\\n' "${COMPREPLY[@]}"
         process = subprocess.run(['bash', '--noprofile', '--norc'], input=script, text=True, capture_output=True)
         self.assertEqual(process.returncode, 0, process.stderr)
         self.assertEqual(process.stderr, '')
-        for expected in ('list', 'info', 'upload', 'on', 'off', 'watch', '--timeout', '--json', 'pyproject.toml'):
+        for expected in ('list', 'info', 'upload', 'on', 'off', 'watch', '--timeout', '--json', 'pyproject.toml',
+                         'plan:--reprint-from', 'start:--reprint-from'):
             self.assertIn(expected, process.stdout.splitlines())
         self.assertIn('filename-mode:-o filenames', process.stdout.splitlines())
 
@@ -116,12 +121,16 @@ complete -C 'kobra-lan --json --printer bench files '
 complete -C 'kobra-lan print plan a.gcode --auto-leveling o'
 complete -C 'kobra-lan print wa'
 complete -C 'kobra-lan print watch --time'
+for sub in plan start
+  printf '%s:%s\\n' $sub (complete -C "kobra-lan print $sub a.gcode --rep")
+end
 complete -C 'kobra-lan --j'
 '''
         process = subprocess.run(['fish', '--no-config'], input=script, text=True, capture_output=True)
         self.assertEqual(process.returncode, 0, process.stderr)
         self.assertEqual(process.stderr, '')
-        for expected in ('list', 'info', 'upload', 'on', 'off', 'watch', '--timeout', '--json'):
+        for expected in ('list', 'info', 'upload', 'on', 'off', 'watch', '--timeout', '--json',
+                         'plan:--reprint-from', 'start:--reprint-from'):
             self.assertIn(expected, [line.split('\t')[0] for line in process.stdout.splitlines()])
 
     def test_zsh_sources_and_calls_completion_without_device_commands(self):
@@ -140,11 +149,16 @@ words=(kobra-lan print wa); CURRENT=3
 _kobra_lan
 words=(kobra-lan print watch --time); CURRENT=4
 _kobra_lan
+for sub in plan start; do
+  words=(kobra-lan print "$sub" a.gcode --rep); CURRENT=5
+  for candidate in $(_kobra_lan); do print -r -- "$sub:$candidate"; done
+done
 words=(kobra-lan --j); CURRENT=2
 _kobra_lan
 '''
         process = subprocess.run(['zsh', '-f'], input=script, text=True, capture_output=True)
         self.assertEqual(process.returncode, 0, process.stderr)
         self.assertEqual(process.stderr, '')
-        for expected in ('list', 'info', 'upload', 'on', 'off', 'watch', '--timeout', '--json'):
+        for expected in ('list', 'info', 'upload', 'on', 'off', 'watch', '--timeout', '--json',
+                         'plan:--reprint-from', 'start:--reprint-from'):
             self.assertIn(expected, process.stdout.splitlines())

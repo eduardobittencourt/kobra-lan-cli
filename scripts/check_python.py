@@ -138,10 +138,15 @@ def main():
     help_text = subprocess.check_output([str(command), "print", "watch", "--help"],
                                         cwd=outside, env=probe_env, text=True)
     assert "--timeout SECONDS" in help_text
+    for action in ("plan", "start"):
+        help_text = subprocess.check_output([str(command), "print", action, "--help"],
+                                            cwd=outside, env=probe_env, text=True)
+        assert "--reprint-from PREVIOUS_ATTEMPT_ID" in help_text
     for shell in ("bash", "zsh", "fish"):
         completion = subprocess.check_output([str(command), "completion", shell],
                                              cwd=outside, env=probe_env, text=True)
         assert all(word in completion for word in ("kobra-lan", "watch", "timeout"))
+        assert all(f"print {action}:--reprint-from" in completion for action in ("plan", "start"))
     assert not list(empty_home.iterdir())
     print(f"Python archives and independent installation verified: {version}")
 

@@ -60,12 +60,17 @@ Exit evidence: a published artifact installs outside the checkout, exposes help/
 The source CLI includes a read-only `print watch` for an already active job.
 It preserves verified progress and reports uncertainty when it cannot identify
 the same attempt. See [watch outcomes and evidence](docs/usage.md#watch-an-active-print).
+The source CLI also includes reviewed intentional reprints (`--reprint-from`)
+with durable local per-attempt identities while preserving legacy file-keyed
+markers and receipts; hardware qualification for reprints remains pending for an
+integrated test session with lifecycle controls. See
+[reprint workflow](docs/usage.md#deliberately-reprint-a-stored-file).
 
 Remaining work:
 
 - Qualify attempt identity and terminal signals where the printer reports them.
-- Separate job identity from file identity so intentional reprints can retain durable protection for each attempt. Preserve and migrate receipts/markers; do not use state deletion as the reprint mechanism.
-- Expose job history backed by receipts and observations, with incomplete records and actions by other clients represented accurately.
+- Qualify intentional reprints on the Kobra X in an integrated session alongside lifecycle controls, keeping observed activity distinct from terminal outcome.
+- Expose job history backed by receipts and observations, with incomplete records and actions by other clients represented accurately (direct LAN history was deferred after firmware 2.0.2.2 evidence yielded no attributable completed-run record).
 - Add pause/resume/cancel only after validating state transitions and uncertainty recovery; never replay ambiguous commands blindly.
 - Validate stored-file deletion and its interaction with active jobs and receipts. Investigate download support separately.
 - Record a complete authorized physical print and inspect the part, keeping telemetry-confirmed completion distinct from operator-assessed quality.
