@@ -2,7 +2,7 @@
 
 ## Context
 
-`status` obtains the active and last project through MQTT `info/query`. During the PR 11 capture, the active project used a placeholder `task_id` and `last_project` remained empty after the operator confirmed completion. The stored-file listing describes G-code files. Use the [PR 11 evidence](../archive/2026-11-21-add-print-watch/verification.md) as the baseline for current and last project behavior. See [the proposal](proposal.md) for the scope of the investigation.
+`status` obtains the active and last project through MQTT `info/query`. During the PR 11 capture, the active project used a placeholder `task_id` and `last_project` remained empty after the operator confirmed completion. The stored-file listing describes G-code files. Use the [PR 11 evidence](../2026-11-21-add-print-watch/verification.md) as the baseline for current and last project behavior. See [the proposal](proposal.md) for the scope of the investigation.
 
 ## Goals and Boundaries
 
@@ -14,7 +14,7 @@
 
 ### Establish the source before testing coverage
 
-Review the pinned references in [NOTICE.md](../../../NOTICE.md), public material, and, if needed, an available official app build. Trace how the history view gets its data and record evidence for LAN, cloud, or app cache. Record the version or revision of each source. An app screenshot or an offline screen can show that records exist, while a fresh direct query to the printer establishes LAN availability for that source.
+Review the pinned references in [NOTICE.md](../../../../NOTICE.md), public material, and, if needed, an available official app build. Trace how the history view gets its data and record evidence for LAN, cloud, or app cache. Record the version or revision of each source. An app screenshot or an offline screen can show that records exist, while a fresh direct query to the printer establishes LAN availability for that source.
 
 ### Test retrieval from a fresh session
 
