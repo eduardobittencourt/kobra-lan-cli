@@ -132,14 +132,15 @@ def reserve(directory, manifest, *, directory_fd=None):
     return directory / (manifest["sha256"] + ".json")
 
 
-def reserve_at(parent, manifest):
-    if not re.fullmatch(r'[a-f0-9]{64}', manifest["sha256"]):
+def reserve_at(parent, manifest, *, key=None, operation="upload"):
+    key = manifest["sha256"] if key is None else key
+    if not re.fullmatch(r'[a-f0-9]{64}', key):
         raise ProtocolError("Invalid attempt identity")
-    marker = manifest["sha256"] + ATTEMPT_SUFFIX
+    marker = key + ATTEMPT_SUFFIX
     try:
         fd = os.open(marker, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=parent)
     except FileExistsError:
-        raise ProtocolError("This file already has an upload attempt; inspect its receipt, do not resend") from None
+        raise ProtocolError(f"An {operation} attempt already exists; inspect its receipt, do not resend") from None
     with os.fdopen(fd, "w") as stream:
         stream.write(json.dumps(manifest) + "\n")
         stream.flush()
@@ -169,21 +170,25 @@ def execute(config, path, expected_sha256, state_dir, remote_name=None):
         return execute_locked(config, data, manifest, directory, directory_fd)
 
 
-@contextmanager
 def upload_lock(directory):
-    """Serialize cooperating uploads by device, retaining the lock inode after close."""
+    return device_lock(directory, "upload")
+
+
+@contextmanager
+def device_lock(directory, operation):
+    """Serialize cooperating callers by device, retaining the lock inode after close."""
     parent = open_directory(directory, create=True)
     try:
-        fd = os.open('.upload.lock', os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600, dir_fd=parent)
+        fd = os.open(f'.{operation}.lock', os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600, dir_fd=parent)
         try:
             saved = os.fstat(fd)
             if (not stat.S_ISREG(saved.st_mode) or saved.st_uid != os.geteuid()
                     or stat.S_IMODE(saved.st_mode) != 0o600 or saved.st_nlink != 1):
-                raise ProtocolError("Upload lock must be a private user-owned regular file")
+                raise ProtocolError(f"{operation.capitalize()} lock must be a private user-owned regular file")
             try:
                 fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError:
-                raise ProtocolError("Another upload is active for this device; no command was sent") from None
+                raise ProtocolError(f"Another {operation} is active for this device; no command was sent") from None
             yield parent
         finally:
             os.close(fd)
@@ -251,15 +256,16 @@ def verify_uploaded(client, manifest, size, receipt, receipt_path, directory_fd)
     atomic_json(receipt_path, receipt, directory_fd=directory_fd)
 
 
-def ensure_directory_bound(directory, directory_fd):
+def ensure_directory_bound(directory, directory_fd, operation="upload"):
     """Refuse a changed state location before sending and before reporting success."""
+    message = f"{operation.capitalize()} state location changed; no automatic retry"
     try:
         current = open_directory(directory)
     except OSError:
-        raise ProtocolError("Upload state location changed; no automatic retry") from None
+        raise ProtocolError(message) from None
     try:
         saved, observed = os.fstat(directory_fd), os.fstat(current)
         if (saved.st_dev, saved.st_ino) != (observed.st_dev, observed.st_ino):
-            raise ProtocolError("Upload state location changed; no automatic retry")
+            raise ProtocolError(message)
     finally:
         os.close(current)

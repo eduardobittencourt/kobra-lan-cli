@@ -356,7 +356,7 @@ class CLITests(StorageTests):
         gcode.write_bytes(START_GCODE)
         _, manifest = describe(gcode,'test.gcode')
         atomic_json(directory/(manifest['sha256']+'.json'),{**manifest,'status':'uploaded_verified_by_listing_and_metadata'})
-        starts = state/'starts'/device; starts.mkdir(parents=True)
+        starts = state/'starts'/device; starts.mkdir(parents=True, mode=0o700)
         (starts/(manifest['sha256']+'.attempt')).write_text('uncertain start')
         plan = build_plan(cfg,Client(cfg),gcode,'test.gcode',1,True,False,False)
         args = ['--state-dir',str(state),'print','start',str(gcode),'--name','test.gcode','--slot','1',

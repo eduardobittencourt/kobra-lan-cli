@@ -39,11 +39,16 @@ are read-only network observations.
 inspects local immutable bytes without configuration or network.
 .B files upload FILE [--name NAME] --sha256 HASH --execute
 uploads inspected bytes once; never starts a print and has no implicit dry run.
-.B print plan FILE --name NAME --slot N --auto-leveling on|off --vibration-compensation on|off --flow-calibration on|off
+.B print plan FILE --name NAME --slot N --auto-leveling on|off --vibration-compensation on|off --flow-calibration on|off [--reprint-from PREVIOUS_ATTEMPT_ID]
 reviews a stored print without writes.
 .B print start
 requires those same inputs plus --plan-sha256 HASH --execute; it rebuilds the
 reviewed plan, requires a verified receipt and checks idle before one send.
+To reprint a stored file, find the latest local attempt ID with ordinary
+print plan. If it has observed-active evidence and the prior run has ended,
+use --reprint-from PREVIOUS_ATTEMPT_ID on both print plan and print start,
+and use the separately reviewed reprint hash. A predecessor is consumed at
+most once. Never retry an uncertain start or remove its reservation.
 .B print watch [--timeout SECONDS]
 observes a job already active on Kobra X model 20030 / firmware 2.0.2.2 over
 one pinned MQTT session. The timeout accepts 1 to 259200 seconds and defaults
