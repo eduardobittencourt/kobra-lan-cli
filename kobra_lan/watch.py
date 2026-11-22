@@ -1,12 +1,18 @@
 """Read-only observation over one pinned printer session."""
 from contextlib import ExitStack
+import hashlib
+import os
+from pathlib import Path
 import re
 import time
+import uuid
 
 from .config import ProtocolError
 from .diagnostics import compatibility_issue
 from .mqtt import MQTT, MQTTClosed, MQTTFailure, MQTTIOFailure
 from .printer import payload_data
+from .profiles import open_directory
+from .upload import atomic_json_at
 
 DEFAULT_TIMEOUT = 86400
 MAX_TIMEOUT = 259200
@@ -57,8 +63,14 @@ class WatchProgress:
 
     def __init__(self):
         self.last = None
+        self.observed_at = None
+        self.device_digest = None
+        self.observation_id = None
         self.initial_filename = None
         self.initial_last_project = None
+
+    def bind_device(self, config):
+        self.device_digest = hashlib.sha256(config.printer_id.encode()).hexdigest()
 
     def result(self, outcome, reason):
         return {"outcome": outcome, "reason": reason, **(self.last or {})}
@@ -67,6 +79,23 @@ class WatchProgress:
         if self.last is not None:
             return self.result("unknown", reason)
         return None
+
+    def record(self, result, state_dir):
+        if result is None or self.last is None:
+            return result
+        if self.observation_id is None:
+            self.observation_id = "obs-" + uuid.uuid4().hex
+        observation_id = persist_observation(
+            state_dir,
+            self.device_digest,
+            self.observed_at,
+            self.initial_filename,
+            result,
+            observation_id=self.observation_id,
+        )
+        if observation_id is None:
+            return {**result, "observation_recorded": False}
+        return {**result, "observation_id": observation_id, "observation_recorded": True}
 
     def update(self, info):
         project = info.get("project")
@@ -83,6 +112,7 @@ class WatchProgress:
                 self.last = {"phase": "printing", **progress_fields(project)}
             else:
                 return self.result("unknown", "active_job_unverified")
+            self.observed_at = int(time.time())
             self.initial_filename = project_filename(project)
             self.initial_last_project = last_project_baseline(info.get("last_project"))
             return None
@@ -99,12 +129,53 @@ class WatchProgress:
         return self.result("unknown", "identity_unverified")
 
 
-def observe(registry, config, name, timeout, on_report):
+def persist_observation(state_dir, device_digest, observed_at, observed_filename, result, *, observation_id=None):
+    """Atomically store one sanitized private watch observation under state_dir."""
+    if (not state_dir or not isinstance(device_digest, str)
+            or re.fullmatch(r"[a-f0-9]{64}", device_digest) is None
+            or type(observed_at) is not int or not isinstance(result, dict)):
+        return None
+    if observation_id is None:
+        observation_id = "obs-" + uuid.uuid4().hex
+    elif not isinstance(observation_id, str) or re.fullmatch(r"obs-[a-f0-9]{32}", observation_id) is None:
+        return None
+    record = {
+        "version": 1,
+        "observation_id": observation_id,
+        "device_digest": device_digest,
+        "observed_at": observed_at,
+        "ended_at": int(time.time()),
+        "observed_filename": observed_filename,
+        "client_attribution": "unattributed",
+        "outcome": result["outcome"],
+        "reason": result["reason"],
+        "phase": result["phase"],
+    }
+    for field in ("progress", "current_layer", "total_layers"):
+        if field in result:
+            record[field] = result[field]
+    directory = Path(state_dir) / "observations" / device_digest[:16]
+    try:
+        directory_fd = open_directory(directory, create=True, require_private=True)
+    except (OSError, ValueError):
+        return None
+    try:
+        atomic_json_at(directory_fd, observation_id + ".json", record)
+    except (OSError, ValueError, ProtocolError):
+        return None
+    finally:
+        os.close(directory_fd)
+    return observation_id
+
+
+def observe(registry, config, name, timeout, on_report, *, on_target=None):
     """Deliver fresh qualified info to on_report until it returns a result or time expires."""
     deadline = time.monotonic() + timeout
     try:
         with ExitStack() as session:
             with registry.access(config, name) as (cfg, _):
+                if on_target is not None:
+                    on_target(cfg)
                 client = session.enter_context(MQTT(cfg, deadline=deadline))
 
             while time.monotonic() < deadline:

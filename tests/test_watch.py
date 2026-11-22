@@ -3,7 +3,9 @@ from contextlib import contextmanager, redirect_stderr, redirect_stdout
 import hashlib
 import io
 import json
+import os
 from pathlib import Path
+import stat
 import tempfile
 import unittest
 from unittest.mock import MagicMock, Mock, patch
@@ -295,6 +297,8 @@ class WatchTransportTests(unittest.TestCase):
 class WatchCliTests(unittest.TestCase):
     def setUp(self):
         root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.root = root
+        self.state_dir = root / "state"
         self.registry = Registry(root / "private")
         with self.registry.lock():
             for name, device in (("default", "SyntheticDefault"), ("bench", "SyntheticBench")):
@@ -310,10 +314,16 @@ class WatchCliTests(unittest.TestCase):
         self.mqtt = self.enterContext(patch("kobra_lan.watch.MQTT", return_value=self.session))
         self.enterContext(patch("kobra_lan.watch.time.sleep"))
 
-    def invoke(self, args, expected):
+    def invoke(self, args, expected, *, use_state_dir=True):
         out, err = io.StringIO(), io.StringIO()
+        argv = list(args)
+        if use_state_dir and "--state-dir" not in argv:
+            if argv and argv[0] == "--json":
+                argv = ["--json", "--state-dir", str(self.state_dir), *argv[1:]]
+            else:
+                argv = ["--state-dir", str(self.state_dir), *argv]
         with redirect_stdout(out), redirect_stderr(err):
-            self.assertEqual(main(args), expected)
+            self.assertEqual(main(argv), expected)
         self.assertEqual(err.getvalue(), "")
         return out.getvalue()
 
@@ -328,14 +338,17 @@ class WatchCliTests(unittest.TestCase):
                 self.client.query.return_value = {"data": {**INFO, "deviceId": device, "state": "free"}}
                 outcome = json.loads(self.invoke(["--json", *flags, "print", "watch"], 0))
                 self.assertEqual(outcome["result"]["outcome"], "no_active_job")
+                self.assertNotIn("observation_id", outcome["result"])
+                self.assertNotIn("observation_recorded", outcome["result"])
                 self.assertEqual(self.mqtt.call_args.args[0].printer_id, device)
         self.assertEqual(self.mqtt.call_count, len(cases))
+        self.assertFalse(self.state_dir.exists())
 
     def test_invalid_timeout_is_safe_and_precedes_target_selection(self):
         for timeout in ("0", "-1", "259201", "1.0", "1_0", "synthetic-private"):
             for fmt in ([], ["--json"]):
                 with self.subTest(timeout=timeout, fmt=fmt), patch("kobra_lan.cli.Registry") as registry:
-                    rendered = self.invoke([*fmt, "print", "watch", "--timeout", timeout], 2)
+                    rendered = self.invoke([*fmt, "print", "watch", "--timeout", timeout], 2, use_state_dir=False)
                     registry.assert_not_called()
                     self.assertNotIn("synthetic-private", rendered)
                     if fmt:
@@ -351,7 +364,8 @@ class WatchCliTests(unittest.TestCase):
 
         self.client.query.return_value = {"data": {**PRINTING, "deviceId": "SyntheticDefault"}}
         with patch("kobra_lan.watch.time.monotonic", side_effect=lambda: now), \
-                patch("kobra_lan.watch.time.sleep", side_effect=sleep):
+                patch("kobra_lan.watch.time.sleep", side_effect=sleep), \
+                patch("kobra_lan.watch.time.time", side_effect=[1700000000, 1700000300]):
             rendered = self.invoke(["--json", "print", "watch", "--timeout", "1"], 0)
         envelope = json.loads(rendered)
         self.assertEqual(len(rendered.splitlines()), 1)
@@ -360,8 +374,34 @@ class WatchCliTests(unittest.TestCase):
         self.assertEqual(envelope["result"]["outcome"], "unknown")
         self.assertEqual(envelope["result"]["reason"], "deadline_expired")
         self.assertEqual(envelope["result"]["current_layer"], 8)
+        self.assertTrue(envelope["result"]["observation_recorded"])
+        obs_id = envelope["result"]["observation_id"]
+        self.assertRegex(obs_id, r"^obs-[a-f0-9]{32}$")
+        self.assertNotIn("sample.gcode", rendered)
+        digest = hashlib.sha256(b"SyntheticDefault").hexdigest()
+        obs_dir = self.state_dir / "observations" / digest[:16]
+        obs_file = obs_dir / f"{obs_id}.json"
+        self.assertEqual(stat.S_IMODE(obs_dir.stat().st_mode), 0o700)
+        self.assertEqual(stat.S_IMODE(obs_file.stat().st_mode), 0o600)
+        saved = json.loads(obs_file.read_text())
+        self.assertEqual(saved, {
+            "version": 1,
+            "observation_id": obs_id,
+            "device_digest": digest,
+            "observed_at": 1700000000,
+            "ended_at": 1700000300,
+            "observed_filename": "sample.gcode",
+            "client_attribution": "unattributed",
+            "outcome": "unknown",
+            "reason": "deadline_expired",
+            "phase": "printing",
+            "progress": 12,
+            "current_layer": 8,
+            "total_layers": 100,
+        })
 
     def test_failures_include_safe_partial_results_in_both_formats(self):
+        digest = hashlib.sha256(b"SyntheticDefault").hexdigest()
         for error, exit_code, code in (
             (ProtocolError("Synthetic protocol refusal"), 2, "validation_failed"),
             (OSError("private network detail"), 3, "operation_failed"),
@@ -379,7 +419,180 @@ class WatchCliTests(unittest.TestCase):
                         self.assertEqual(envelope["error"]["code"], code)
                         self.assertEqual(envelope["result"]["outcome"], "unknown")
                         self.assertEqual(envelope["result"]["progress"], 12)
+                        self.assertTrue(envelope["result"]["observation_recorded"])
+                        obs_id = envelope["result"]["observation_id"]
+                        self.assertRegex(obs_id, r"^obs-[a-f0-9]{32}$")
+                        saved = json.loads((self.state_dir / "observations" / digest[:16] / f"{obs_id}.json").read_text())
+                        self.assertEqual(saved["reason"], code)
+                        self.assertEqual(saved["client_attribution"], "unattributed")
+                        self.assertEqual(saved["observed_filename"], "sample.gcode")
                     else:
                         self.assertIn("Error (" + code + ")", rendered)
                         self.assertIn("Outcome: unknown", rendered)
                         self.assertIn("Progress: 12", rendered)
+                        self.assertIn("Observation recorded: yes", rendered)
+                        self.assertRegex(rendered, r"Observation id: obs-[a-f0-9]{32}")
+
+    def test_active_job_exits_persist_sanitized_records_without_touching_existing_state(self):
+        digest = hashlib.sha256(b"SyntheticDefault").hexdigest()
+        upload_dir = self.state_dir / digest[:16]
+        starts_dir = self.state_dir / "starts" / digest[:16]
+        upload_dir.mkdir(parents=True, mode=0o700)
+        starts_dir.mkdir(parents=True, mode=0o700)
+        existing_files = [
+            upload_dir / ("a" * 64 + ".attempt"),
+            upload_dir / ("a" * 64 + ".json"),
+            starts_dir / ("a" * 64 + ".attempt"),
+            starts_dir / ("a" * 64 + ".json"),
+        ]
+        for path in existing_files:
+            path.write_bytes(b'{"synthetic":true}\n')
+            path.chmod(0o600)
+        preserved = {
+            path: (stat.S_IMODE(path.stat().st_mode), path.read_bytes())
+            for path in [*existing_files, *(p for p in (self.root / "private").rglob("*") if p.is_file())]
+        }
+        hostile_active = {
+            **PRINTING,
+            "deviceId": "SyntheticDefault",
+            "urls": {"fileUploadurl": "http://192.0.2.10:18910/gcode_upload?s=SYNTHETIC_TOKEN"},
+            "secret": "-----BEGIN PRIVATE KEY-----synthetic",
+            "project": {
+                **PRINTING["project"],
+                "filename": "https://example.test/?token=SYNTHETIC_SECRET",
+                "raw_extra": "SYNTHETIC_RAW_TELEMETRY",
+            },
+        }
+        cases = (
+            ("job_disappeared", {**INFO, "deviceId": "SyntheticDefault", "state": "free", "project": None}),
+            ("job_replaced", {**PRINTING, "deviceId": "SyntheticDefault",
+                              "project": {**PRINTING["project"], "filename": "other.gcode"}}),
+            ("last_project_unattributed", {
+                **INFO, "deviceId": "SyntheticDefault", "state": "free", "project": None,
+                "last_project": {**PRINTING["project"], "state": "finished", "progress": 100},
+            }),
+            ("identity_unverified", {**PRINTING, "deviceId": "SyntheticDefault"}),
+        )
+        for reason, second_report in cases:
+            with self.subTest(reason=reason):
+                first_report = hostile_active if reason == "job_disappeared" else {**PRINTING, "deviceId": "SyntheticDefault"}
+                self.client.query.side_effect = [{"data": first_report}, {"data": second_report}]
+                rendered = self.invoke(["--json", "print", "watch"], 0)
+                self.assertNotIn("sample.gcode", rendered)
+                self.assertNotIn("SYNTHETIC_TOKEN", rendered)
+                self.assertNotIn("SYNTHETIC_SECRET", rendered)
+                self.assertNotIn("SYNTHETIC_RAW_TELEMETRY", rendered)
+                envelope = json.loads(rendered)
+                self.assertEqual(envelope["result"]["reason"], reason)
+                self.assertTrue(envelope["result"]["observation_recorded"])
+                obs_id = envelope["result"]["observation_id"]
+                obs_path = self.state_dir / "observations" / digest[:16] / f"{obs_id}.json"
+                raw_text = obs_path.read_text()
+                self.assertEqual(stat.S_IMODE(obs_path.stat().st_mode), 0o600)
+                for forbidden in ("SYNTHETIC_TOKEN", "SYNTHETIC_SECRET", "SYNTHETIC_RAW_TELEMETRY", "BEGIN PRIVATE KEY"):
+                    self.assertNotIn(forbidden, raw_text)
+                saved = json.loads(raw_text)
+                self.assertEqual(saved["client_attribution"], "unattributed")
+                self.assertEqual(saved["reason"], reason)
+                if reason == "job_disappeared":
+                    self.assertIsNone(saved["observed_filename"])
+                else:
+                    self.assertEqual(saved["observed_filename"], "sample.gcode")
+        after = {
+            path: (stat.S_IMODE(path.stat().st_mode), path.read_bytes())
+            for path in preserved
+        }
+        self.assertEqual(preserved, after)
+
+    def test_idle_and_pre_observation_failures_write_nothing(self):
+        cases = (
+            ([{"data": {**INFO, "deviceId": "SyntheticDefault", "state": "free", "project": None}}], 0),
+            ([{"data": {**PRINTING, "deviceId": "SyntheticDefault", "project": {"state": "unrecognized"}}}], 0),
+            ([{"data": {**INFO, "deviceId": "SyntheticDefault", "version": "2.0.2.3"}}], 2),
+            ([OSError("synthetic connect error")], 3),
+            ([KeyboardInterrupt()], 130),
+        )
+        for responses, expected in cases:
+            with self.subTest(expected=expected, responses=responses):
+                self.client.query.side_effect = list(responses)
+                rendered = self.invoke(["--json", "print", "watch"], expected)
+                envelope = json.loads(rendered)
+                if "result" in envelope:
+                    self.assertNotIn("observation_id", envelope["result"])
+                    self.assertNotIn("observation_recorded", envelope["result"])
+                self.assertFalse(self.state_dir.exists())
+
+    def test_unsafe_observation_directory_preserves_watch_result(self):
+        digest = hashlib.sha256(b"SyntheticDefault").hexdigest()
+        obs_parent = self.state_dir / "observations"
+        obs_parent.mkdir(parents=True, mode=0o700)
+        device_dir = obs_parent / digest[:16]
+        decoy = self.root / "decoy"
+        decoy.mkdir(mode=0o700)
+
+        # Case 1: symlinked device observation directory
+        os.symlink(decoy, device_dir)
+        self.client.query.side_effect = [
+            {"data": {**PRINTING, "deviceId": "SyntheticDefault"}},
+            {"data": {**INFO, "deviceId": "SyntheticDefault", "state": "free", "project": None}},
+        ]
+        rendered = self.invoke(["--json", "print", "watch"], 0)
+        envelope = json.loads(rendered)
+        self.assertTrue(envelope["ok"])
+        self.assertEqual(envelope["result"]["outcome"], "unknown")
+        self.assertEqual(envelope["result"]["reason"], "job_disappeared")
+        self.assertFalse(envelope["result"]["observation_recorded"])
+        self.assertNotIn("observation_id", envelope["result"])
+        self.assertTrue(device_dir.is_symlink())
+        self.assertEqual(list(decoy.iterdir()), [])
+        device_dir.unlink()
+
+        # Case 2: non-private (0755) device observation directory across normal stop and interrupt
+        device_dir.mkdir(mode=0o755)
+        device_dir.chmod(0o755)
+        for second, expected_exit, expected_reason in (
+            ({"data": {**INFO, "deviceId": "SyntheticDefault", "state": "free", "project": None}}, 0, "job_disappeared"),
+            (KeyboardInterrupt(), 130, "interrupted"),
+        ):
+            with self.subTest(expected_exit=expected_exit):
+                self.client.query.side_effect = [{"data": {**PRINTING, "deviceId": "SyntheticDefault"}}, second]
+                rendered = self.invoke(["--json", "print", "watch"], expected_exit)
+                envelope = json.loads(rendered)
+                self.assertEqual(envelope["result"]["outcome"], "unknown")
+                self.assertEqual(envelope["result"]["reason"], expected_reason)
+                self.assertFalse(envelope["result"]["observation_recorded"])
+                self.assertNotIn("observation_id", envelope["result"])
+                self.assertEqual(stat.S_IMODE(device_dir.stat().st_mode), 0o755)
+                self.assertEqual(list(device_dir.iterdir()), [])
+
+    def test_interrupt_after_initial_record_reuses_single_observation_id(self):
+        digest = hashlib.sha256(b"SyntheticDefault").hexdigest()
+        self.client.query.side_effect = [
+            {"data": {**PRINTING, "deviceId": "SyntheticDefault"}},
+            {"data": {**INFO, "deviceId": "SyntheticDefault", "state": "free", "project": None}},
+        ]
+        from kobra_lan import cli as cli_mod
+
+        real_emit = cli_mod.emit
+        calls = 0
+
+        def interrupt_first_emit(*args, **kwargs):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise KeyboardInterrupt()
+            return real_emit(*args, **kwargs)
+
+        with patch("kobra_lan.cli.emit", side_effect=interrupt_first_emit):
+            rendered = self.invoke(["--json", "print", "watch"], 130)
+        envelope = json.loads(rendered)
+        self.assertFalse(envelope["ok"])
+        self.assertEqual(envelope["error"]["code"], "interrupted")
+        self.assertTrue(envelope["result"]["observation_recorded"])
+        obs_id = envelope["result"]["observation_id"]
+        obs_dir = self.state_dir / "observations" / digest[:16]
+        files = list(obs_dir.glob("obs-*.json"))
+        self.assertEqual(files, [obs_dir / f"{obs_id}.json"])
+        saved = json.loads(files[0].read_text())
+        self.assertEqual(saved["observation_id"], obs_id)
+        self.assertEqual(saved["reason"], "interrupted")
