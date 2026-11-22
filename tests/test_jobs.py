@@ -399,18 +399,27 @@ class JobsStoreTests(unittest.TestCase):
             self.state_dir, self.device_digest, 1700000300, "good.gcode",
             {"outcome": "unknown", "reason": "deadline_expired", "phase": "printing", "progress": 10},
         )
-        # Wrong-type unhashable fields (list/dict) must not raise TypeError
-        bad_types_obs = "obs-" + "1" * 32
-        atomic_json(obs_dir / f"{bad_types_obs}.json", {
-            "version": 1, "observation_id": bad_types_obs, "device_digest": self.device_digest,
+        # Wrong-type unhashable fields (list/dict) must not raise TypeError; test each enum independently
+        base_obs = {
+            "version": 1, "device_digest": self.device_digest,
             "observed_at": 1700000200, "ended_at": 1700000210, "observed_filename": "bad.gcode",
-            "client_attribution": "unattributed", "outcome": ["unknown"], "reason": [], "phase": {},
-        })
+            "client_attribution": "unattributed", "outcome": "unknown", "reason": "deadline_expired",
+            "phase": "printing",
+        }
+        bad_enum_ids = {}
+        for idx, (field, bad_value) in enumerate((
+            ("outcome", ["unknown"]),
+            ("reason", []),
+            ("phase", {}),
+        ), start=1):
+            obs_id = f"obs-{str(idx) * 32}"
+            bad_enum_ids[field] = obs_id
+            atomic_json(obs_dir / f"{obs_id}.json", {**base_obs, "observation_id": obs_id, field: bad_value})
         # Malformed local observation missing device_digest stays inspectable as invalid_observation
-        missing_dev_obs = "obs-" + "2" * 32
+        missing_dev_obs = "obs-" + "4" * 32
         atomic_json(obs_dir / f"{missing_dev_obs}.json", {"version": 1, "observation_id": missing_dev_obs})
         # Foreign device observation copied into this device's directory
-        foreign_obs = "obs-" + "3" * 32
+        foreign_obs = "obs-" + "5" * 32
         atomic_json(obs_dir / f"{foreign_obs}.json", {
             "version": 1, "observation_id": foreign_obs, "device_digest": "e" * 64,
             "observed_at": 1700000250, "ended_at": 1700000260, "observed_filename": "foreign.gcode",
@@ -421,15 +430,17 @@ class JobsStoreTests(unittest.TestCase):
         listed = list_jobs(self.cfg, self.state_dir, kind="observation")
         by_id = {item["record_id"]: item for item in listed["jobs"]}
         self.assertEqual(by_id[valid_obs]["completeness"], "complete")
-        self.assertEqual(by_id[bad_types_obs]["completeness"], "incomplete")
-        self.assertEqual(by_id[bad_types_obs]["issues"], ["invalid_observation"])
+        for field, obs_id in bad_enum_ids.items():
+            with self.subTest(field=field):
+                self.assertEqual(by_id[obs_id]["completeness"], "incomplete")
+                self.assertEqual(by_id[obs_id]["issues"], ["invalid_observation"])
+                self.assertEqual(job_info(self.cfg, self.state_dir, obs_id)["issues"], ["invalid_observation"])
         self.assertEqual(by_id[missing_dev_obs]["completeness"], "incomplete")
         self.assertEqual(by_id[missing_dev_obs]["issues"], ["invalid_observation"])
         self.assertEqual(by_id[foreign_obs]["completeness"], "incomplete")
         self.assertEqual(by_id[foreign_obs]["issues"], ["device_mismatch"])
 
         self.assertEqual(job_info(self.cfg, self.state_dir, valid_obs)["observed_filename"], "good.gcode")
-        self.assertEqual(job_info(self.cfg, self.state_dir, bad_types_obs)["issues"], ["invalid_observation"])
         self.assertEqual(job_info(self.cfg, self.state_dir, missing_dev_obs)["issues"], ["invalid_observation"])
         with self.assertRaises(ProtocolError):
             job_info(self.cfg, self.state_dir, foreign_obs)
