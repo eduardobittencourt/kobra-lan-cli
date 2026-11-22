@@ -65,6 +65,7 @@ class WatchProgress:
         self.last = None
         self.observed_at = None
         self.device_digest = None
+        self.observation_id = None
         self.initial_filename = None
         self.initial_last_project = None
 
@@ -82,8 +83,15 @@ class WatchProgress:
     def record(self, result, state_dir):
         if result is None or self.last is None:
             return result
+        if self.observation_id is None:
+            self.observation_id = "obs-" + uuid.uuid4().hex
         observation_id = persist_observation(
-            state_dir, self.device_digest, self.observed_at, self.initial_filename, result
+            state_dir,
+            self.device_digest,
+            self.observed_at,
+            self.initial_filename,
+            result,
+            observation_id=self.observation_id,
         )
         if observation_id is None:
             return {**result, "observation_recorded": False}
@@ -121,13 +129,16 @@ class WatchProgress:
         return self.result("unknown", "identity_unverified")
 
 
-def persist_observation(state_dir, device_digest, observed_at, observed_filename, result):
+def persist_observation(state_dir, device_digest, observed_at, observed_filename, result, *, observation_id=None):
     """Atomically store one sanitized private watch observation under state_dir."""
     if (not state_dir or not isinstance(device_digest, str)
             or re.fullmatch(r"[a-f0-9]{64}", device_digest) is None
             or type(observed_at) is not int or not isinstance(result, dict)):
         return None
-    observation_id = "obs-" + uuid.uuid4().hex
+    if observation_id is None:
+        observation_id = "obs-" + uuid.uuid4().hex
+    elif not isinstance(observation_id, str) or re.fullmatch(r"obs-[a-f0-9]{32}", observation_id) is None:
+        return None
     record = {
         "version": 1,
         "observation_id": observation_id,

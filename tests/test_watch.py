@@ -564,3 +564,35 @@ class WatchCliTests(unittest.TestCase):
                 self.assertNotIn("observation_id", envelope["result"])
                 self.assertEqual(stat.S_IMODE(device_dir.stat().st_mode), 0o755)
                 self.assertEqual(list(device_dir.iterdir()), [])
+
+    def test_interrupt_after_initial_record_reuses_single_observation_id(self):
+        digest = hashlib.sha256(b"SyntheticDefault").hexdigest()
+        self.client.query.side_effect = [
+            {"data": {**PRINTING, "deviceId": "SyntheticDefault"}},
+            {"data": {**INFO, "deviceId": "SyntheticDefault", "state": "free", "project": None}},
+        ]
+        from kobra_lan import cli as cli_mod
+
+        real_emit = cli_mod.emit
+        calls = 0
+
+        def interrupt_first_emit(*args, **kwargs):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise KeyboardInterrupt()
+            return real_emit(*args, **kwargs)
+
+        with patch("kobra_lan.cli.emit", side_effect=interrupt_first_emit):
+            rendered = self.invoke(["--json", "print", "watch"], 130)
+        envelope = json.loads(rendered)
+        self.assertFalse(envelope["ok"])
+        self.assertEqual(envelope["error"]["code"], "interrupted")
+        self.assertTrue(envelope["result"]["observation_recorded"])
+        obs_id = envelope["result"]["observation_id"]
+        obs_dir = self.state_dir / "observations" / digest[:16]
+        files = list(obs_dir.glob("obs-*.json"))
+        self.assertEqual(files, [obs_dir / f"{obs_id}.json"])
+        saved = json.loads(files[0].read_text())
+        self.assertEqual(saved["observation_id"], obs_id)
+        self.assertEqual(saved["reason"], "interrupted")

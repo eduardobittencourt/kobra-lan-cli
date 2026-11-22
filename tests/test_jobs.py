@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import stat
 import tempfile
+import unicodedata
 import unittest
 from unittest.mock import patch
 
@@ -367,6 +368,72 @@ class JobsStoreTests(unittest.TestCase):
         self.assertEqual(corrupt_detail["storage_key"], corrupt_key)
         self.assertEqual(self._snapshot(), before)
 
+    def test_corrupt_successor_slot_blocks_root_reprint_eligibility(self):
+        starts_dir = self._private_dir(self.state_dir / "starts" / self.device16)
+        blocked_sha = "a" * 64
+        self._write_upload(blocked_sha, filename="blocked.gcode")
+        blocked_root, _, _ = self._write_start(blocked_sha, filename="blocked.gcode", timestamp=1700000100)
+        succ_key = attempt_id(self.device_digest, blocked_sha, blocked_root)
+        corrupt_succ = starts_dir / f"{succ_key}.attempt"
+        corrupt_succ.write_text("{corrupt")
+        corrupt_succ.chmod(0o600)
+
+        free_sha = "b" * 64
+        self._write_upload(free_sha, filename="free.gcode")
+        free_root, _, _ = self._write_start(free_sha, filename="free.gcode", timestamp=1700000200)
+
+        listed = list_jobs(self.cfg, self.state_dir, kind="start")
+        by_id = {item["record_id"]: item for item in listed["jobs"]}
+        self.assertEqual(by_id[blocked_root]["completeness"], "complete")
+        self.assertEqual(by_id[blocked_root]["reprint_eligibility"], "superseded")
+        self.assertEqual(by_id[free_root]["reprint_eligibility"], "eligible_for_plan")
+        unreadable_ref = f"unreadable-{succ_key}"
+        self.assertIn(unreadable_ref, by_id)
+        self.assertEqual(by_id[unreadable_ref]["issues"], ["unreadable_marker", "missing_receipt"])
+        self.assertEqual(job_info(self.cfg, self.state_dir, unreadable_ref)["storage_key"], succ_key)
+        self.assertEqual(job_info(self.cfg, self.state_dir, blocked_root)["reprint_eligibility"], "superseded")
+
+    def test_wrong_type_and_foreign_observations_degrade_safely(self):
+        obs_dir = self._private_dir(self.state_dir / "observations" / self.device16)
+        valid_obs = persist_observation(
+            self.state_dir, self.device_digest, 1700000300, "good.gcode",
+            {"outcome": "unknown", "reason": "deadline_expired", "phase": "printing", "progress": 10},
+        )
+        # Wrong-type unhashable fields (list/dict) must not raise TypeError
+        bad_types_obs = "obs-" + "1" * 32
+        atomic_json(obs_dir / f"{bad_types_obs}.json", {
+            "version": 1, "observation_id": bad_types_obs, "device_digest": self.device_digest,
+            "observed_at": 1700000200, "ended_at": 1700000210, "observed_filename": "bad.gcode",
+            "client_attribution": "unattributed", "outcome": ["unknown"], "reason": [], "phase": {},
+        })
+        # Malformed local observation missing device_digest stays inspectable as invalid_observation
+        missing_dev_obs = "obs-" + "2" * 32
+        atomic_json(obs_dir / f"{missing_dev_obs}.json", {"version": 1, "observation_id": missing_dev_obs})
+        # Foreign device observation copied into this device's directory
+        foreign_obs = "obs-" + "3" * 32
+        atomic_json(obs_dir / f"{foreign_obs}.json", {
+            "version": 1, "observation_id": foreign_obs, "device_digest": "e" * 64,
+            "observed_at": 1700000250, "ended_at": 1700000260, "observed_filename": "foreign.gcode",
+            "client_attribution": "unattributed", "outcome": "unknown", "reason": "job_disappeared",
+            "phase": "printing",
+        })
+
+        listed = list_jobs(self.cfg, self.state_dir, kind="observation")
+        by_id = {item["record_id"]: item for item in listed["jobs"]}
+        self.assertEqual(by_id[valid_obs]["completeness"], "complete")
+        self.assertEqual(by_id[bad_types_obs]["completeness"], "incomplete")
+        self.assertEqual(by_id[bad_types_obs]["issues"], ["invalid_observation"])
+        self.assertEqual(by_id[missing_dev_obs]["completeness"], "incomplete")
+        self.assertEqual(by_id[missing_dev_obs]["issues"], ["invalid_observation"])
+        self.assertEqual(by_id[foreign_obs]["completeness"], "incomplete")
+        self.assertEqual(by_id[foreign_obs]["issues"], ["device_mismatch"])
+
+        self.assertEqual(job_info(self.cfg, self.state_dir, valid_obs)["observed_filename"], "good.gcode")
+        self.assertEqual(job_info(self.cfg, self.state_dir, bad_types_obs)["issues"], ["invalid_observation"])
+        self.assertEqual(job_info(self.cfg, self.state_dir, missing_dev_obs)["issues"], ["invalid_observation"])
+        with self.assertRaises(ProtocolError):
+            job_info(self.cfg, self.state_dir, foreign_obs)
+
     def test_observations_filtering_pagination_and_unattributed_correlation(self):
         sha = "a" * 64
         self._write_upload(sha, filename="sample.gcode", timestamp=1700000000)
@@ -503,17 +570,36 @@ class JobsStoreTests(unittest.TestCase):
         self.assertTrue(starts_dir.is_symlink())
 
     def test_cross_profile_consistency_and_sanitization(self):
-        sha = "c" * 64
-        self._write_upload(sha, filename="clean.gcode")
-        att_id, _, _ = self._write_start(
-            sha,
+        def walk_strings(value):
+            if isinstance(value, str):
+                yield value
+            elif isinstance(value, dict):
+                for key, item in value.items():
+                    yield from walk_strings(key)
+                    yield from walk_strings(item)
+            elif isinstance(value, list):
+                for item in value:
+                    yield from walk_strings(item)
+
+        # Control-only fixture (no URL) verifies terminal-control sanitization independently
+        ctrl_sha = "c" * 64
+        self._write_upload(ctrl_sha, filename="clean.gcode")
+        ctrl_id, _, _ = self._write_start(
+            ctrl_sha,
             filename="clean.gcode",
             timestamp=1700000100,
-            receipt_overrides={
-                "model": "Anycubic Kobra X\x1b[31m https://example.test/?token=SECRET",
-            },
+            receipt_overrides={"model": "Anycubic\x1b[31m Kobra X\x07"},
         )
-        # Hostile observation file with URL filename is rejected as invalid_observation
+        # Separate URL/credential fixture verifies secret redaction
+        url_sha = "d" * 64
+        self._write_upload(url_sha, filename="url.gcode")
+        url_id, _, _ = self._write_start(
+            url_sha,
+            filename="url.gcode",
+            timestamp=1700000150,
+            receipt_overrides={"model": "https://example.test/?token=SECRET"},
+        )
+        # Hostile observation file with URL + ESC filename is rejected as invalid_observation
         obs_dir = self._private_dir(self.state_dir / "observations" / self.device16)
         hostile_obs = "obs-" + "d" * 32
         atomic_json(obs_dir / f"{hostile_obs}.json", {
@@ -530,14 +616,19 @@ class JobsStoreTests(unittest.TestCase):
         second = list_jobs(other_profile_cfg, self.state_dir)
         self.assertEqual(first, second)
 
-        detail = job_info(self.cfg, self.state_dir, att_id)
-        rendered = json.dumps(detail) + json.dumps(first)
-        self.assertNotIn("SECRET", rendered)
-        self.assertNotIn("\x1b", rendered)
+        ctrl_detail = job_info(self.cfg, self.state_dir, ctrl_id)
+        self.assertIsNotNone(ctrl_detail["model"])
+        self.assertNotIn("\x1b", ctrl_detail["model"])
+        self.assertNotIn("\x07", ctrl_detail["model"])
+        url_detail = job_info(self.cfg, self.state_dir, url_id)
+        self.assertIsNone(url_detail["model"])
         obs_detail = job_info(self.cfg, self.state_dir, hostile_obs)
         self.assertEqual(obs_detail["completeness"], "incomplete")
         self.assertEqual(obs_detail["issues"], ["invalid_observation"])
-        self.assertNotIn("SYNTHETIC_SECRET", json.dumps(obs_detail))
+        for payload in (first, ctrl_detail, url_detail, obs_detail):
+            for text in walk_strings(payload):
+                self.assertNotIn("SECRET", text)
+                self.assertFalse(any(unicodedata.category(c).startswith("C") for c in text), repr(text))
 
 
 class JobsCliTests(unittest.TestCase):

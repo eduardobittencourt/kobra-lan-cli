@@ -423,6 +423,7 @@ def _scan_starts(starts_fd, uploads_fd, device_digest):
         records.append(_reconstruct_start_entry(storage_key, marker, receipt, device_digest))
 
     attempts_by_id = {rec["attempt_id"]: rec for rec in records if rec["attempt_id"] is not None}
+    occupied_keys = {rec["storage_key"] for rec in records}
 
     # Link predecessor -> successor edges for matching file_sha256.
     for rec in attempts_by_id.values():
@@ -463,9 +464,14 @@ def _scan_starts(starts_fd, uploads_fd, device_digest):
     for rec in records:
         provenance = _read_upload_provenance(uploads_fd, upload_cache, rec["file_sha256"], rec["filename"])
         rec["upload_provenance"] = provenance
+        successor_occupied = (
+            rec["attempt_id"] is not None
+            and rec["file_sha256"] is not None
+            and attempt_id(device_digest, rec["file_sha256"], rec["attempt_id"]) in occupied_keys
+        )
         if rec["attempt_id"] is None:
             rec["reprint_eligibility"] = "blocked_incomplete"
-        elif rec["completeness"] == "complete" and rec["next_attempt_id"] is not None:
+        elif rec["completeness"] == "complete" and (rec["next_attempt_id"] is not None or successor_occupied):
             rec["reprint_eligibility"] = "superseded"
         elif rec["completeness"] != "complete" or not ancestors_active.get(rec["attempt_id"], False):
             rec["reprint_eligibility"] = "blocked_incomplete"
@@ -503,8 +509,11 @@ def _incomplete_observation(obs_id, device_digest, issue):
 def _validate_observation(obs_id, data, device_digest):
     if not isinstance(data, dict):
         return _incomplete_observation(obs_id, device_digest, "unreadable_observation")
-    if data.get("device_digest") != device_digest:
+    raw_device = data.get("device_digest")
+    if valid_attempt_id(raw_device) and raw_device != device_digest:
         return _incomplete_observation(obs_id, device_digest, "device_mismatch")
+    if raw_device != device_digest:
+        return _incomplete_observation(obs_id, device_digest, "invalid_observation")
     observed_at = _safe_timestamp(data.get("observed_at"))
     ended_at = _safe_timestamp(data.get("ended_at"))
     raw_filename = data.get("observed_filename")
@@ -514,13 +523,16 @@ def _validate_observation(obs_id, data, device_digest):
         observed_filename = _safe_filename(raw_filename)
         if observed_filename != raw_filename:
             return _incomplete_observation(obs_id, device_digest, "invalid_observation")
+    outcome = data.get("outcome")
+    reason = data.get("reason")
+    phase = data.get("phase")
     if (type(data.get("version")) is not int or data["version"] != 1
             or data.get("observation_id") != obs_id
             or observed_at is None or ended_at is None
             or data.get("client_attribution") != "unattributed"
-            or data.get("outcome") not in OBSERVATION_OUTCOMES
-            or data.get("reason") not in OBSERVATION_REASONS
-            or data.get("phase") not in OBSERVATION_PHASES):
+            or not isinstance(outcome, str) or outcome not in OBSERVATION_OUTCOMES
+            or not isinstance(reason, str) or reason not in OBSERVATION_REASONS
+            or not isinstance(phase, str) or phase not in OBSERVATION_PHASES):
         return _incomplete_observation(obs_id, device_digest, "invalid_observation")
     scalars = {}
     if "progress" in data:
@@ -696,6 +708,8 @@ def job_info(config, state_dir, record_id):
             observations = _scan_observations(obs_fd, device_digest)
             for obs in observations:
                 if obs["record_id"] == record_id:
+                    if "device_mismatch" in obs["issues"]:
+                        raise ProtocolError("Unknown local job record for the selected printer")
                     return {**obs, "coverage": dict(COVERAGE)}
             raise ProtocolError("Unknown local job record for the selected printer")
         starts = _scan_starts(starts_fd, uploads_fd, device_digest)

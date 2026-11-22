@@ -106,12 +106,14 @@ To request execution later, use `print start` with the same explicit arguments p
 ### Deliberately reprint a stored file
 
 After confirming that the previous run has ended and the printer is prepared,
-run ordinary `print plan` (with the original file, remote name and state
-directory) or offline `jobs list --kind start` / `jobs info <attempt-id>` to
-locate the latest eligible local `attempt_id` (text: `Attempt id`). Copy it
-only if `start_status` is `start_observed_active` (and `reprint_eligibility` is
-`eligible_for_plan`). These are local references, not firmware task IDs.
-An ordinary plan keeps the original hash semantics; review a separate reprint plan:
+locate the latest local `attempt_id` (text: `Attempt id`) using either ordinary
+`print plan` (with the original file, remote name and state directory) or
+offline `jobs list --kind start` / `jobs info <attempt-id>`. Copy it only if
+ordinary `print plan` reports `start_status: start_observed_active`, or if
+`jobs` reports `reprint_eligibility: eligible_for_plan`. These are local
+references, not firmware task IDs. Ordinary `print plan` keeps the original hash
+semantics; whichever command you used to find the ID, review a separate reprint
+plan with `print plan --reprint-from`:
 
 ```sh
 kobra-lan --printer bench print plan model.gcode --name model.gcode --slot 1 \
