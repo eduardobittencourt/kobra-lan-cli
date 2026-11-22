@@ -12,7 +12,7 @@ public source snapshots and the project's existing sanitized capture.
 | `Nino6689/anycubic-lan`, `361aadae0cb0784ff11cafcc68226a21659346eb` | The [Kobra S1 firmware 2.7.2.7 evidence](https://github.com/Nino6689/anycubic-lan/blob/361aadae0cb0784ff11cafcc68226a21659346eb/docs/PROTOCOL.md#L525-L570) describes storage listing and a single `info.last_project` after a run. Its `task_id` was a placeholder. This is a model-specific indication that a last-job snapshot can exist on LAN. |
 | `Nino6689/anycubic-cloud-api`, `f41ab06c5530a4bdc0a05dbdeaa45b60fc6ce7a8` | [The endpoint table](https://github.com/Nino6689/anycubic-cloud-api/blob/f41ab06c5530a4bdc0a05dbdeaa45b60fc6ce7a8/src/anycubic_cloud_api/const/api_endpoints.py#L71-L74) declares `GET /v2/project/printHistory` and [a private helper](https://github.com/Nino6689/anycubic-cloud-api/blob/f41ab06c5530a4bdc0a05dbdeaa45b60fc6ce7a8/src/anycubic_cloud_api/api/functions.py#L381-L383) calls it using the library's [cloud domain](https://github.com/Nino6689/anycubic-cloud-api/blob/f41ab06c5530a4bdc0a05dbdeaa45b60fc6ce7a8/src/anycubic_cloud_api/const/const.py#L3). This is static third-party source evidence. Response contents and the official app's use of the endpoint are unverified. |
 
-The [PR 11 capture](../archive/2026-11-21-add-print-watch/verification.md#kobra-x-model-20030--firmware-2022)
+The [PR 11 capture](../2026-11-21-add-print-watch/verification.md#kobra-x-model-20030--firmware-2022)
 provides the target-firmware baseline for current and last project telemetry.
 The reviewed references leave open whether this Kobra X firmware has a
 separate LAN query for past executions or returns usable `last_project`
@@ -60,7 +60,7 @@ configured model was 20030.
 | 85 s | `info/query` | Top-level state `busy`; active state `nozzle_purging`, with the same placeholder and counters shown above. The last project again had empty state, integer `task_id=0`, no filename and zero counters. The value 44 is a preparation progress sample. |
 
 The current print's completion fell outside this capture. The earlier
-[PR 11 capture](../archive/2026-11-21-add-print-watch/verification.md)
+[PR 11 capture](../2026-11-21-add-print-watch/verification.md)
 observed idle after a run the operator later confirmed had finished
 normally. In that capture the last project still had empty identity and
 state and zero counters. No public reference or traced app path identified
@@ -96,7 +96,7 @@ comparison covered the status, current-print and storage queries above.
 Defer a direct LAN history command for Kobra X firmware 2.0.2.2.
 [The live reads](#fresh-lan-sessions) establish preparation, a
 current-print reply and file storage metadata. Those reads and
-[the earlier completed-run capture](../archive/2026-11-21-add-print-watch/verification.md)
+[the earlier completed-run capture](../2026-11-21-add-print-watch/verification.md)
 yielded no identifiable completed execution, so the evidence does not
 qualify even a last-job result for this target.
 [The Android trace](#android-app-history-source) establishes a cloud

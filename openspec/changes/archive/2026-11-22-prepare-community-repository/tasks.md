@@ -44,7 +44,7 @@
 
 As análises reais de CodeQL e a importação dos relatórios Sonar no commit
 `8dab9f95429c804587179b9fe2f785a35a864573` estão vinculadas no
-[guia público de manutenção](../../../docs/maintenance.md#recorded-internal-validation).
+[guia público de manutenção](../../../../docs/maintenance.md#recorded-internal-validation).
 O scanner e o Quality Gate passaram; não houve redução do gate ou novas aceitações.
 
 A tarefa 2.4 foi reconfirmada no commit `fef7206` pelo run Tests 41561551442:
