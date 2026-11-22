@@ -49,7 +49,9 @@ from a filename or network acknowledgement.
 | `files upload` | Manifest, verification/status flags, timestamp and `receipt_path` |
 | `print plan` | `file_sha256`, `device_digest`, model/firmware, canonical `payload`, `plan_sha256`, slot and qualification flags; latest local `attempt_id` and `start_status` when available; `previous_attempt_id` for a reprint review |
 | `print start` | Plan fields, `dry_run: false`, local `attempt_id`, `previous_attempt_id` for a reprint, status/ack/observation evidence and `receipt_path`; an uncertain error may return a subset of that evidence |
-| `print watch` | `outcome`, `reason`, and verified `phase`, `progress` (percent), `current_layer`, `total_layers` when available |
+| `print watch` | `outcome`, `reason`, verified `phase`, `progress` (percent), `current_layer`, `total_layers` when available, plus `observation_recorded` and `observation_id` when an active job was observed |
+| `jobs list` | `device_digest`, `kind`, `limit`, `total_count`, `returned_count`, `incomplete_count`, `truncated`, newest-first `jobs` summaries, and local-only `coverage` metadata |
+| `jobs info` | Detailed start attempt (chain links, hashes, settings, `start_status`, `terminal_outcome: "unknown"`, `reprint_eligibility`, `upload_provenance`, `issues`, `unattributed_matching_observations`), saved watch observation, or `unreadable-<storage-key>` record, plus `coverage` metadata |
 
 Both formats preserve full review hashes, experimental qualification and uncertain
 outcomes. Upload metadata confirmation does not prove remote byte equality;
@@ -104,9 +106,11 @@ To request execution later, use `print start` with the same explicit arguments p
 ### Deliberately reprint a stored file
 
 After confirming that the previous run has ended and the printer is prepared,
-run ordinary `print plan` with the original file, remote name and state directory.
-Copy the latest `attempt_id` (text: `Attempt id`) only if `start_status` is
-`start_observed_active`. These are local references, not firmware task IDs.
+run ordinary `print plan` (with the original file, remote name and state
+directory) or offline `jobs list --kind start` / `jobs info <attempt-id>` to
+locate the latest eligible local `attempt_id` (text: `Attempt id`). Copy it
+only if `start_status` is `start_observed_active` (and `reprint_eligibility` is
+`eligible_for_plan`). These are local references, not firmware task IDs.
 An ordinary plan keeps the original hash semantics; review a separate reprint plan:
 
 ```sh
@@ -163,6 +167,77 @@ interrupt. A failure after observing a job includes the last verified progress
 as a partial result. Clock skew between the printer and the host can cause a
 report to fail the freshness check and time out. Part quality requires separate
 physical inspection.
+
+Once `print watch` establishes a verified active phase, it atomically saves one
+sanitized private (`0600`) observation record (`obs-<32hex>.json`) under
+`<state-dir>/observations/<device-prefix>/` (`0700`, walked without following
+symlinks) before exiting, including on deadline expiration, post-observation
+failure, or interruption. The saved record stores `client_attribution: "unattributed"`,
+timestamps, validated `observed_filename` when available, outcome, reason, and
+verified scalar progress without raw telemetry, credentials, or token URLs.
+Stdout reports `observation_recorded` and `observation_id` without exposing
+`observed_filename`. Idle runs (`no_active_job`) and pre-observation failures
+create no directories or files. Existing profiles, credentials, upload/start
+receipts, and `.attempt` markers are never modified. If the observation
+directory is a symlink, has non-private permissions, or cannot be written,
+`print watch` preserves its outcome and exit status, reports
+`observation_recorded: false` (without `observation_id`), and neither follows
+symlinks nor alters permissions.
+
+## Inspect local job history
+
+```sh
+kobra-lan --printer bench jobs list
+kobra-lan --printer bench jobs list --kind start --limit 20
+kobra-lan --printer bench jobs list --kind observation --limit 10
+kobra-lan --json --printer bench jobs info RECORD_ID
+```
+
+`jobs list` and `jobs info` are strictly offline and read-only: they resolve the
+selected printer via `--printer`, `--config`, or the saved default solely to
+derive its `device_digest`, read existing state under `--state-dir`, and never
+contact a printer or modify files or permissions. Different profiles targeting
+the same `printer_id` and `--state-dir` see identical local history.
+
+- **Local-only coverage:** Firmware `2.0.2.2` exposes no attributable
+  completed-run history over LAN. Every `jobs list` and `jobs info` result
+  includes explicit `coverage` metadata (`scope: "local_state_only"`,
+  `direct_printer_history_available: false`,
+  `other_client_actions: "only_when_watched_unattributed"`,
+  `terminal_outcomes_verified: false`). Prints started by other clients appear
+  only when observed with `print watch` and are always marked
+  `client_attribution: "unattributed"`.
+- **Start attempts and reprint chains:** Both legacy file-keyed and current
+  attempt-keyed start records under `<state-dir>/starts/<device-prefix>/` are
+  reconstructed in place without modifying bytes or permissions, deriving the
+  same deterministic `attempt_id` used by `print plan` and `--reprint-from`.
+  `jobs info <attempt-id>` reports `previous_attempt_id`/`next_attempt_id`,
+  plan/file hashes, slot/material/preparation settings, `start_status`,
+  `reprint_eligibility` (`eligible_for_plan`, `superseded`,
+  `blocked_not_observed_active`, `blocked_incomplete`, or
+  `blocked_missing_upload_provenance`), correlated upload provenance
+  (`remote_byte_hash_verified: false`), and `unattributed_matching_observations`
+  (same-filename watch observations at or after the start timestamp, explicitly
+  labeled `attribution: "unattributed_filename_match"`). Start attempts always
+  keep `terminal_outcome: "unknown"`.
+- **Incomplete and unreadable records:** Marker-only reservations, receipt-only
+  files, mismatched pairs, unverified active evidence, orphan successors, and
+  unreadable/corrupt/non-private/symlinked files remain visible with
+  `completeness: "incomplete"`, safe issue codes, and
+  `reprint_eligibility: "blocked_incomplete"`. When neither marker nor receipt
+  establishes a valid `attempt_id` for the selected device, the record is
+  exposed as `unreadable-<storage-key>`.
+- **Record IDs and safety:** `jobs list` supports `--kind all|start|observation`
+  (default `all`) and `--limit` from `1` to `500` (default `50`), ordered newest
+  first with summary counts (`total_count`, `returned_count`,
+  `incomplete_count`, `truncated`). `jobs info` accepts a 64-hex `attempt_id`,
+  an `obs-<32hex>` `observation_id`, or an `unreadable-<64hex>` reference.
+  Malformed arguments fail with exit 2 before target selection without echoing
+  untrusted values; unknown or cross-device IDs exit 2. Existing device state
+  directories (`<state-dir>/<device>`, `starts/<device>`,
+  `observations/<device>`) are walked without following symlinks and must be
+  user-owned mode `0700`; symlinked or permissive device directories fail with
+  exit 3 without altering permissions.
 
 ## Guarantees and limitations
 

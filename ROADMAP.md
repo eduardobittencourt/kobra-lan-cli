@@ -58,24 +58,29 @@ Exit evidence: a published artifact installs outside the checkout, exposes help/
 ## Milestone 3 — A complete everyday print cycle
 
 The source CLI includes a read-only `print watch` for an already active job.
-It preserves verified progress and reports uncertainty when it cannot identify
-the same attempt. See [watch outcomes and evidence](docs/usage.md#watch-an-active-print).
+It preserves verified progress, saves a sanitized local observation under
+`--state-dir` once an active job is observed, and reports uncertainty when it
+cannot identify the same attempt. See
+[watch outcomes and evidence](docs/usage.md#watch-an-active-print).
 The source CLI also includes reviewed intentional reprints (`--reprint-from`)
 with durable local per-attempt identities while preserving legacy file-keyed
-markers and receipts; hardware qualification for reprints remains pending for an
+markers and receipts, plus offline read-only `jobs list|info` over local start
+receipts/markers, upload provenance, and saved watch observations with explicit
+local-only coverage, unattributed other-client observations, and incomplete
+record visibility; hardware qualification for reprints remains pending for an
 integrated test session with lifecycle controls. See
-[reprint workflow](docs/usage.md#deliberately-reprint-a-stored-file).
+[reprint workflow](docs/usage.md#deliberately-reprint-a-stored-file) and
+[local job history](docs/usage.md#inspect-local-job-history).
 
 Remaining work:
 
 - Qualify attempt identity and terminal signals where the printer reports them.
 - Qualify intentional reprints on the Kobra X in an integrated session alongside lifecycle controls, keeping observed activity distinct from terminal outcome.
-- Expose job history backed by receipts and observations, with incomplete records and actions by other clients represented accurately (direct LAN history was deferred after firmware 2.0.2.2 evidence yielded no attributable completed-run record).
 - Add pause/resume/cancel only after validating state transitions and uncertainty recovery; never replay ambiguous commands blindly.
 - Validate stored-file deletion and its interaction with active jobs and receipts. Investigate download support separately.
 - Record a complete authorized physical print and inspect the part, keeping telemetry-confirmed completion distinct from operator-assessed quality.
 
-Candidate commands include `print pause|resume|cancel`, `jobs list|info` and `files delete`. Filament inventory beyond submission preflight, discovery and other device controls also require separate work.
+Candidate commands include `print pause|resume|cancel` and `files delete`. Filament inventory beyond submission preflight, discovery and other device controls also require separate work.
 
 ## Milestone 4 — Broader compatibility and stable releases
 

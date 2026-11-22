@@ -12,6 +12,7 @@ class CommandTreeTests(unittest.TestCase):
         leaves = [("printer", c) for c in ("pair", "list", "info", "use", "remove")]
         leaves += [("files", c) for c in ("list", "info", "upload")]
         leaves += [("gcode", "inspect"), ("print", "plan"), ("print", "start"), ("print", "watch")]
+        leaves += [("jobs", "list"), ("jobs", "info")]
         leaves += [(c,) for c in ("status", "doctor", "completion")]
         for leaf in leaves:
             with self.subTest(leaf=leaf), patch("kobra_lan.cli.Registry") as registry:
@@ -22,7 +23,7 @@ class CommandTreeTests(unittest.TestCase):
 
     def test_removed_commands_and_missing_groups_fail_before_access(self):
         for argv in (["file", "x"], ["upload", "x"], ["inspect", "x"], ["start", "x"],
-                     ["files"], ["printer"], ["gcode"], ["print"],
+                     ["files"], ["printer"], ["gcode"], ["print"], ["jobs"],
                      ["status", "--printer", "bench"], ["--print", "bench", "status"]):
             with self.subTest(argv=argv), patch("kobra_lan.cli.Registry") as registry:
                 with contextlib.redirect_stdout(io.StringIO()):
@@ -114,7 +115,12 @@ class SafeArgumentTests(unittest.TestCase):
                  ["files", "upload", secret, "--execute", "--sha256", secret],
                  ["print", "start", secret, "--name", "a.gcode", "--slot", "1",
                   "--auto-leveling", "on", "--vibration-compensation", "off",
-                  "--flow-calibration", "off", "--execute", "--plan-sha256", secret]]
+                  "--flow-calibration", "off", "--execute", "--plan-sha256", secret],
+                 ["jobs", "list", "--kind", secret],
+                 ["jobs", "list", "--limit", secret],
+                 ["jobs", "list", "--limit", "0"],
+                 ["jobs", "list", "--limit", "501"],
+                 ["jobs", "info", secret]]
         for mode in ([], ["--json"]):
             for case in cases:
                 with self.subTest(case=case, mode=mode), patch("kobra_lan.cli.Registry") as registry:

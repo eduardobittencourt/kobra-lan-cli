@@ -44,15 +44,28 @@ reviews a stored print without writes.
 .B print start
 requires those same inputs plus --plan-sha256 HASH --execute; it rebuilds the
 reviewed plan, requires a verified receipt and checks idle before one send.
-To reprint a stored file, find the latest local attempt ID with ordinary
-print plan. If it has observed-active evidence and the prior run has ended,
+To reprint a stored file, find the latest eligible local attempt ID with
+ordinary print plan or offline jobs list. If it has observed-active evidence and the prior run has ended,
 use --reprint-from PREVIOUS_ATTEMPT_ID on both print plan and print start,
 and use the separately reviewed reprint hash. A predecessor is consumed at
 most once. Never retry an uncertain start or remove its reservation.
 .B print watch [--timeout SECONDS]
 observes a job already active on Kobra X model 20030 / firmware 2.0.2.2 over
 one pinned MQTT session. The timeout accepts 1 to 259200 seconds and defaults
-to 86400. See usage.md for outcomes and qualification evidence.
+to 86400. Once an active job is observed, it atomically saves one sanitized
+private observation record under --state-dir/observations/<device-prefix>/
+without altering existing receipts or markers. See usage.md for outcomes and
+qualification evidence.
+.B jobs list [--kind all|start|observation] [--limit N]
+and
+.B jobs info RECORD_ID
+inspect local device-scoped job history offline without network access or state
+writes. They reconstruct legacy and current start receipts/markers, correlate
+upload provenance, surface incomplete or unreadable records (using
+unreadable-<storage-key> when no attempt_id can be parsed), and list saved
+unattributed watch observations. Limit accepts 1 to 500 (default 50). Firmware
+2.0.2.2 provides no direct LAN history; unwatched prints started by other
+clients are absent and start receipts never prove completion.
 .B completion bash|zsh|fish
 generates offline shell scripts without configuration or device queries.
 See usage.md for user-level installation; startup files are not modified.

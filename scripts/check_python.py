@@ -20,7 +20,7 @@ ENTRY_POINTS_FILE = "entry_points.txt"
 RUNTIME_LOCK = ROOT / "requirements-runtime.txt"
 
 MODULES = {f"kobra_lan/{name}.py" for name in
-           ("__init__", "cli", "cli_output", "completions", "config", "mqtt", "printer", "start", "upload",
+           ("__init__", "cli", "cli_output", "completions", "config", "jobs", "mqtt", "printer", "start", "upload",
             "provisioning", "pairing", "profiles", "diagnostics", "watch")}
 DOCS = {
     "README.md", "LICENSE", "NOTICE.md", "CHANGELOG.md", "ROADMAP.md", "CONTRIBUTING.md",
@@ -142,11 +142,21 @@ def main():
         help_text = subprocess.check_output([str(command), "print", action, "--help"],
                                             cwd=outside, env=probe_env, text=True)
         assert "--reprint-from PREVIOUS_ATTEMPT_ID" in help_text
+    jobs_help = subprocess.check_output([str(command), "jobs", "--help"],
+                                        cwd=outside, env=probe_env, text=True)
+    assert "list" in jobs_help and "info" in jobs_help
+    jobs_list_help = subprocess.check_output([str(command), "jobs", "list", "--help"],
+                                             cwd=outside, env=probe_env, text=True)
+    assert "--kind" in jobs_list_help and "--limit" in jobs_list_help
+    jobs_info_help = subprocess.check_output([str(command), "jobs", "info", "--help"],
+                                             cwd=outside, env=probe_env, text=True)
+    assert "RECORD_ID" in jobs_info_help
     for shell in ("bash", "zsh", "fish"):
         completion = subprocess.check_output([str(command), "completion", shell],
                                              cwd=outside, env=probe_env, text=True)
-        assert all(word in completion for word in ("kobra-lan", "watch", "timeout"))
+        assert all(word in completion for word in ("kobra-lan", "watch", "timeout", "jobs", "observation", "limit"))
         assert all(f"print {action}:--reprint-from" in completion for action in ("plan", "start"))
+        assert "jobs list:--kind" in completion and "jobs list:--limit" in completion
     assert not list(empty_home.iterdir())
     print(f"Python archives and independent installation verified: {version}")
 

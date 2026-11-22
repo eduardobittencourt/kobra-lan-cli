@@ -70,10 +70,16 @@ def installed_probes(probe, version, home, work, before):
     assert "--timeout SECONDS" in probe("print", "watch", "--help", probe_home=empty_home)
     for action in ("plan", "start"):
         assert "--reprint-from PREVIOUS_ATTEMPT_ID" in probe("print", action, "--help", probe_home=empty_home)
+    jobs_help = probe("jobs", "--help", probe_home=empty_home)
+    assert "list" in jobs_help and "info" in jobs_help
+    jobs_list_help = probe("jobs", "list", "--help", probe_home=empty_home)
+    assert "--kind" in jobs_list_help and "--limit" in jobs_list_help
+    assert "RECORD_ID" in probe("jobs", "info", "--help", probe_home=empty_home)
     for shell in ("bash", "zsh", "fish"):
         completion = probe("completion", shell, probe_home=empty_home)
-        assert all(word in completion for word in ("kobra-lan", "watch", "timeout"))
+        assert all(word in completion for word in ("kobra-lan", "watch", "timeout", "jobs", "observation", "limit"))
         assert all(f"print {action}:--reprint-from" in completion for action in ("plan", "start"))
+        assert "jobs list:--kind" in completion and "jobs list:--limit" in completion
     assert not list(empty_home.iterdir())
     hostile = "https://example.test/?token=SYNTHETIC_PRIVATE"
     for mode in ([], ["--json"]):

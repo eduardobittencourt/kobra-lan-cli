@@ -66,6 +66,12 @@ COMP_WORDS=(kobra-lan print wa); COMP_CWORD=2
 _kobra_lan; printf '%s\\n' "${COMPREPLY[@]}"
 COMP_WORDS=(kobra-lan print watch --time); COMP_CWORD=3
 _kobra_lan; printf '%s\\n' "${COMPREPLY[@]}"
+COMP_WORDS=(kobra-lan jobs ''); COMP_CWORD=2
+_kobra_lan; printf 'jobs:%s\\n' "${COMPREPLY[@]}"
+COMP_WORDS=(kobra-lan jobs list --kind ''); COMP_CWORD=4
+_kobra_lan; printf 'kind:%s\\n' "${COMPREPLY[@]}"
+COMP_WORDS=(kobra-lan jobs list --lim); COMP_CWORD=3
+_kobra_lan; printf '%s\\n' "${COMPREPLY[@]}"
 for sub in plan start; do
   COMP_WORDS=(kobra-lan print "$sub" a.gcode --rep); COMP_CWORD=4
   _kobra_lan; printf '%s:%s\\n' "$sub" "${COMPREPLY[@]}"
@@ -79,7 +85,8 @@ _kobra_lan; printf '%s\\n' "${COMPREPLY[@]}"
         self.assertEqual(process.returncode, 0, process.stderr)
         self.assertEqual(process.stderr, '')
         for expected in ('list', 'info', 'upload', 'on', 'off', 'watch', '--timeout', '--json', 'pyproject.toml',
-                         'plan:--reprint-from', 'start:--reprint-from'):
+                         'plan:--reprint-from', 'start:--reprint-from',
+                         'jobs:list', 'jobs:info', 'kind:all', 'kind:start', 'kind:observation', '--limit'):
             self.assertIn(expected, process.stdout.splitlines())
         self.assertIn('filename-mode:-o filenames', process.stdout.splitlines())
 
@@ -121,6 +128,13 @@ complete -C 'kobra-lan --json --printer bench files '
 complete -C 'kobra-lan print plan a.gcode --auto-leveling o'
 complete -C 'kobra-lan print wa'
 complete -C 'kobra-lan print watch --time'
+for item in (complete -C 'kobra-lan jobs ')
+  printf 'jobs:%s\\n' $item
+end
+for item in (complete -C 'kobra-lan jobs list --kind ')
+  printf 'kind:%s\\n' $item
+end
+complete -C 'kobra-lan jobs list --lim'
 for sub in plan start
   printf '%s:%s\\n' $sub (complete -C "kobra-lan print $sub a.gcode --rep")
 end
@@ -130,7 +144,8 @@ complete -C 'kobra-lan --j'
         self.assertEqual(process.returncode, 0, process.stderr)
         self.assertEqual(process.stderr, '')
         for expected in ('list', 'info', 'upload', 'on', 'off', 'watch', '--timeout', '--json',
-                         'plan:--reprint-from', 'start:--reprint-from'):
+                         'plan:--reprint-from', 'start:--reprint-from',
+                         'jobs:list', 'jobs:info', 'kind:all', 'kind:start', 'kind:observation', '--limit'):
             self.assertIn(expected, [line.split('\t')[0] for line in process.stdout.splitlines()])
 
     def test_zsh_sources_and_calls_completion_without_device_commands(self):
@@ -149,6 +164,12 @@ words=(kobra-lan print wa); CURRENT=3
 _kobra_lan
 words=(kobra-lan print watch --time); CURRENT=4
 _kobra_lan
+words=(kobra-lan jobs ''); CURRENT=3
+for candidate in $(_kobra_lan); do print -r -- "jobs:$candidate"; done
+words=(kobra-lan jobs list --kind ''); CURRENT=5
+for candidate in $(_kobra_lan); do print -r -- "kind:$candidate"; done
+words=(kobra-lan jobs list --lim); CURRENT=4
+_kobra_lan
 for sub in plan start; do
   words=(kobra-lan print "$sub" a.gcode --rep); CURRENT=5
   for candidate in $(_kobra_lan); do print -r -- "$sub:$candidate"; done
@@ -160,5 +181,6 @@ _kobra_lan
         self.assertEqual(process.returncode, 0, process.stderr)
         self.assertEqual(process.stderr, '')
         for expected in ('list', 'info', 'upload', 'on', 'off', 'watch', '--timeout', '--json',
-                         'plan:--reprint-from', 'start:--reprint-from'):
+                         'plan:--reprint-from', 'start:--reprint-from',
+                         'jobs:list', 'jobs:info', 'kind:all', 'kind:start', 'kind:observation', '--limit'):
             self.assertIn(expected, process.stdout.splitlines())

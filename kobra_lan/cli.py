@@ -6,6 +6,7 @@ from pathlib import Path
 from . import __version__
 from .cli_output import emit
 from .config import ProtocolError
+from .jobs import DEFAULT_LIMIT, KINDS, MAX_LIMIT, job_info, list_jobs, valid_record_id
 from .mqtt import MQTT
 from .printer import snapshot, file_details, safe_file_details, list_files
 from .upload import describe, execute
@@ -30,6 +31,8 @@ class Parser(argparse.ArgumentParser):
             "kobra-lan files upload": "; review first with kobra-lan gcode inspect",
             "kobra-lan print start": "; review first with kobra-lan print plan",
             "kobra-lan print watch": f"; --timeout accepts whole seconds from 1 to {MAX_TIMEOUT}",
+            "kobra-lan jobs list": f"; --kind accepts all, start, or observation and --limit accepts 1 to {MAX_LIMIT}",
+            "kobra-lan jobs info": "; supply a local attempt_id, obs-<32hex>, or unreadable-<64hex> record ID",
         }.get(self.prog, "")
         raise ArgumentFailure("Invalid arguments; use " + self.prog + " --help for supported commands and required options" + guidance)
 
@@ -59,6 +62,14 @@ def watch_timeout(value):
         if 1 <= seconds <= MAX_TIMEOUT:
             return seconds
     raise argparse.ArgumentTypeError("Invalid observation timeout")
+
+
+def jobs_limit(value):
+    if value.isascii() and value.isdecimal():
+        limit = int(value)
+        if 1 <= limit <= MAX_LIMIT:
+            return limit
+    raise argparse.ArgumentTypeError("Invalid history limit")
 
 
 def build_parser():
@@ -112,7 +123,7 @@ def build_parser():
         p.add_argument("--name", required=True, help="Existing remote filename")
         p.add_argument("--slot", type=int, choices=range(1, 5), required=True)
         p.add_argument("--reprint-from", metavar="PREVIOUS_ATTEMPT_ID",
-                       help="Reprint after observed activity; find the latest local attempt ID with print plan")
+                       help="Reprint after observed activity; find the latest local attempt ID with print plan or jobs list")
         for flag in ["auto-leveling", "vibration-compensation", "flow-calibration"]:
             p.add_argument("--" + flag, choices=["on", "off"], required=True)
         if command == "start":
@@ -123,6 +134,22 @@ def build_parser():
                                         "Reports an unknown outcome when telemetry cannot establish it.")
     p.add_argument("--timeout", type=watch_timeout, default=DEFAULT_TIMEOUT, metavar="SECONDS",
                    help=f"Observation deadline in seconds (1 to {MAX_TIMEOUT}, default {DEFAULT_TIMEOUT})")
+    p = sub.add_parser("jobs", help="Inspect local job history; no network or state writes",
+                       description="Offline read-only inspection of local start receipts/markers and saved watch "
+                                   "observations. Does not query the printer; unwatched other-client prints are absent.")
+    jobs = p.add_subparsers(dest="jobs_command", required=True)
+    p = jobs.add_parser("list", help="List local start attempts and saved watch observations",
+                        description="Offline device-scoped local job history ordered newest first. "
+                                    "Locate eligible attempt_id values for print plan --reprint-from.")
+    p.add_argument("--kind", choices=list(KINDS), default="all",
+                   help="Record kind filter (default: all)")
+    p.add_argument("--limit", type=jobs_limit, default=DEFAULT_LIMIT, metavar="N",
+                   help=f"Maximum records to return (1 to {MAX_LIMIT}, default {DEFAULT_LIMIT})")
+    p = jobs.add_parser("info", help="Inspect one local start attempt, watch observation, or unreadable record",
+                        description="Offline device-scoped detail view for a local attempt_id, obs-<32hex> "
+                                    "observation_id, or unreadable-<64hex> record reference.")
+    p.add_argument("record_id", metavar="RECORD_ID",
+                   help="Local 64-hex attempt_id, obs-<32hex> observation_id, or unreadable-<64hex> reference")
     p = sub.add_parser("completion", help="Generate offline shell completion; no access or state")
     p.add_argument("shell", choices=["bash", "zsh", "fish"])
     return parser
@@ -134,9 +161,11 @@ def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
     json_mode = root_json(argv)
     watch = None
+    state_dir = None
     try:
         args = parser.parse_args(argv)
         json_mode = args.json
+        state_dir = args.state_dir
         if args.command == "files" and args.files_command == "upload":
             if not re.fullmatch(r"[0-9a-fA-F]{64}", args.sha256):
                 raise ArgumentFailure("Upload requires a full --sha256 from gcode inspect and --execute")
@@ -152,6 +181,11 @@ def main(argv=None):
             args.plan_sha256 = args.plan_sha256.lower()
         if args.command == "print" and args.print_command == "watch":
             watch = WatchProgress()
+        if args.command == "jobs" and args.jobs_command == "info":
+            if not valid_record_id(args.record_id):
+                raise ArgumentFailure(
+                    "jobs info requires a valid local attempt_id, obs-<32hex>, or unreadable-<64hex> record ID"
+                )
         if args.command == "completion":
             from .completions import generate
             print(generate(parser, args.shell), end="")
@@ -193,9 +227,11 @@ def main(argv=None):
             _, result = describe(args.file, args.name)
             result["dry_run"] = True
         elif watch is not None:
-            result = observe(registry, args.config, args.selected_printer, args.timeout, watch.update)
+            result = observe(registry, args.config, args.selected_printer, args.timeout,
+                             watch.update, on_target=watch.bind_device)
             if result is None:
                 result = watch.result("unknown", "deadline_expired")
+            result = watch.record(result, args.state_dir)
         else:
             with registry.access(args.config, args.selected_printer) as (config, source):
                 result = operate(args, config)
@@ -207,19 +243,22 @@ def main(argv=None):
     except ProtocolError as error:
         status = 3 if getattr(error, "exit_code", 2) == 3 else 2
         code = "operation_failed" if status == 3 else "validation_failed"
-        emit(json_mode, watch.partial(code) if watch else getattr(error, "result", None), code=code, message=str(error))
+        partial = watch.record(watch.partial(code), state_dir) if watch else getattr(error, "result", None)
+        emit(json_mode, partial, code=code, message=str(error))
         return status
     except (PairingLocalError, ProfileLocalError) as error:
         emit(json_mode, getattr(error, "result", None), code="operation_failed", message=str(error))
         return 3
     except (ImportError, OSError, ValueError, TypeError, KeyError):
-        emit(json_mode, watch.partial("operation_failed") if watch else None,
+        partial = watch.record(watch.partial("operation_failed"), state_dir) if watch else None
+        emit(json_mode, partial,
              code="operation_failed", message="Local configuration or network operation failed; no automatic retry")
         return 3
     except KeyboardInterrupt:
         if watch is None:
             raise
-        emit(json_mode, watch.partial("interrupted"), code="interrupted", message="Print observation interrupted")
+        emit(json_mode, watch.record(watch.partial("interrupted"), state_dir),
+             code="interrupted", message="Print observation interrupted")
         return 130
 
 
@@ -237,6 +276,11 @@ def operate(args, config):
         result = start(config, args.file, args.name, args.slot,
             args.auto_leveling == "on", args.vibration_compensation == "on", args.flow_calibration == "on",
             args.state_dir, args.print_command == "start", getattr(args, "plan_sha256", None), args.reprint_from)
+    elif args.command == "jobs":
+        if args.jobs_command == "list":
+            result = list_jobs(config, args.state_dir, kind=args.kind, limit=args.limit)
+        else:
+            result = job_info(config, args.state_dir, args.record_id)
     else:
         if not args.sha256:
             raise ProtocolError("--sha256 is required for an actual upload")
