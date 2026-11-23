@@ -192,6 +192,8 @@ class SafeArgumentTests(unittest.TestCase):
              "operation_failed", "control_uncertain_no_retry"),
             (["print", "cancel", "--execute"], None, ControlUncertain(uncertain_io, exit_code=2), 2,
              "validation_failed", "control_uncertain_no_retry"),
+            (["print", "cancel", "--execute"], None, ControlUncertain(uncertain_io, exit_code=130), 130,
+             "interrupted", "control_uncertain_no_retry"),
         )
         for argv, ret, exc, expected_exit, expected_code, expected_status in cases:
             for mode in ([], ["--json"]):

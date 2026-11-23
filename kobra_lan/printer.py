@@ -2,7 +2,7 @@ import http.client
 import json
 
 from .config import ProtocolError
-from .mqtt import MQTT
+from .mqtt import MQTT, TASKID_RE
 
 
 def public_info(config):
@@ -33,7 +33,15 @@ def sanitized(data):
     # URLs, credentials, certificates and raw unknown fields never reach stdout.
     keys = ["printerName", "version", "modelId", "modeId", "state", "temp", "filename",
             "print_state", "progress", "curr_layer", "total_layers", "taskid", "task_id", "print_status", "model"]
-    return {k: data[k] for k in keys if k in data}
+    result = {}
+    for k in keys:
+        if k not in data:
+            continue
+        value = data[k]
+        if k in ("taskid", "task_id") and (not isinstance(value, str) or TASKID_RE.fullmatch(value) is None):
+            continue
+        result[k] = value
+    return result
 
 
 def snapshot(config):

@@ -190,6 +190,12 @@ class ControlPreflightTests(unittest.TestCase):
                 result = control_print(self.cfg, "pause", self.state_dir)
                 self.client.control_once.assert_called_once_with("pause", taskid=expected_taskid)
                 self.assertEqual(result["taskid"], expected_taskid)
+                for snapshot_key in ("before_project", "project"):
+                    if "task_id" in result[snapshot_key]:
+                        self.assertEqual(result[snapshot_key]["task_id"], expected_taskid)
+                    if "taskid" in result[snapshot_key]:
+                        self.assertEqual(result[snapshot_key]["taskid"], expected_taskid)
+                    self.assertNotIn("secret=1", str(result[snapshot_key]))
 
 
 class ControlExecutionAndSafetyTests(unittest.TestCase):
@@ -338,6 +344,36 @@ class ControlExecutionAndSafetyTests(unittest.TestCase):
                     self.assertEqual(partial["project"]["state"], "pausing")
                 else:
                     self.assertNotIn("ack", partial)
+                self.assertEqual(self.client.control_once.call_count, 1)
+
+    def test_post_publish_keyboard_interrupt_preserves_partial_evidence_without_retry(self):
+        for stage in ("ack", "poll"):
+            with self.subTest(stage=stage), \
+                    patch("kobra_lan.control.MQTT", return_value=self.session), \
+                    patch("kobra_lan.control.time.sleep"):
+                self.client.reset_mock()
+                if stage == "ack":
+                    self.client.query.side_effect = [report_with("busy", project_dict("printing"))]
+                    self.client.control_once.side_effect = KeyboardInterrupt()
+                else:
+                    self.client.query.side_effect = [
+                        report_with("busy", project_dict("printing")),
+                        report_with("busy", project_dict("pausing")),
+                        KeyboardInterrupt(),
+                    ]
+                    self.client.control_once.side_effect = None
+                    self.client.control_once.return_value = {"code": 0, "msgid": "mid-int"}
+                with self.assertRaises(ControlUncertain) as ctx:
+                    control_print(self.cfg, "pause", self.state_dir)
+                self.assertEqual(ctx.exception.exit_code, 130)
+                self.assertEqual(ctx.exception.result["status"], "control_uncertain_no_retry")
+                self.assertIn("before", ctx.exception.result)
+                self.assertIn("before_project", ctx.exception.result)
+                if stage == "poll":
+                    self.assertEqual(ctx.exception.result["ack"], {"code": 0, "msgid": "mid-int"})
+                    self.assertEqual(ctx.exception.result["project"]["state"], "pausing")
+                else:
+                    self.assertNotIn("ack", ctx.exception.result)
                 self.assertEqual(self.client.control_once.call_count, 1)
 
     def test_lock_contention_against_upload_start_and_sibling_control_refuses_before_mqtt(self):

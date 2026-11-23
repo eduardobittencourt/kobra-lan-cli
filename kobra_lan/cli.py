@@ -280,8 +280,10 @@ def main(argv=None):
         emit(json_mode, code="invalid_arguments", message=str(error))
         return 2
     except ProtocolError as error:
-        status = 3 if getattr(error, "exit_code", 2) == 3 else 2
-        code = "operation_failed" if status == 3 else "validation_failed"
+        status = getattr(error, "exit_code", 2)
+        if status not in (2, 3, 130):
+            status = 2
+        code = "interrupted" if status == 130 else ("operation_failed" if status == 3 else "validation_failed")
         partial = watch.record(watch.partial(code), state_dir) if watch else getattr(error, "result", None)
         emit(json_mode, partial, code=code, message=str(error))
         return status

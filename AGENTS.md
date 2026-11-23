@@ -13,7 +13,9 @@ Read CONTRIBUTING.md for setup, checks and review requirements. Use Python >=3.1
 and the committed uv lock: `uv sync --locked`. Verify with
 `uv run --locked python -m unittest discover -s tests -v` and `sh -n kobra-lan`.
 Run `uv run --locked ruff check kobra_lan scripts tests` for lint.
-For distribution changes, run the relevant gates documented in docs/releases.md.
+For distribution changes, keep packaging allowlists/probes in sync and verify via the
+gates documented in docs/releases.md in CI and at version release time (or locally in
+disposable environments when editing packaging/release tooling).
 
 ## Constraints
 

@@ -8,12 +8,11 @@ result reports experimental=True and hardware_control_validated=False.
 from contextlib import ExitStack
 import hashlib
 from pathlib import Path
-import re
 import time
 
 from .config import ProtocolError
 from .diagnostics import compatibility_issue
-from .mqtt import MQTT, MQTTClosed, MQTTFailure, MQTTIOFailure
+from .mqtt import MQTT, MQTTClosed, MQTTFailure, MQTTIOFailure, TASKID_RE
 from .printer import payload_data, sanitized
 from .upload import device_lock, ensure_directory_bound
 from .watch import PREPARATION_STATES, project_filename
@@ -37,20 +36,19 @@ OBSERVED_STATUS = {
     "cancel": "control_observed_stopped",
 }
 CANCEL_CONFIRMED_STATES = frozenset({"stoped", "canceled"})
-TASKID_RE = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 POLL_COUNT = 5
 POLL_INTERVAL = 1
 
 
 class ControlUncertain(ProtocolError):
-    """Post-publish communication or protocol failure retaining safe partial evidence."""
+    """Post-publish communication, protocol, or interrupt failure retaining safe partial evidence."""
 
     def __init__(self, result, *, exit_code=3, message=None):
         super().__init__(
             message or "Print control outcome is uncertain; inspect status before taking further action and never resend blindly"
         )
         self.result = result
-        self.exit_code = 3 if exit_code == 3 else 2
+        self.exit_code = exit_code if exit_code in (2, 3, 130) else 2
 
 
 def validate_filename(value):
@@ -149,10 +147,15 @@ def control_print(config, action, state_dir, *, expected_filename=None):
             confirmed = False
             for poll in range(POLL_COUNT):
                 after_info = payload_data(client.query("info", require_fresh=True))
+                if compatibility_issue(config, after_info) is not None:
+                    raise ProtocolError("Post-control status failed qualification check")
                 after_project = after_info.get("project") if isinstance(after_info.get("project"), dict) else {}
                 result["after"] = sanitized(after_info)
                 result["project"] = sanitized(after_project)
-                if transition_confirmed(action, after_info):
+                after_filename = project_filename(after_project)
+                filename_ok = (expected_filename is None or action == "cancel"
+                               or after_filename is None or after_filename == expected_filename)
+                if filename_ok and transition_confirmed(action, after_info):
                     result["status"] = OBSERVED_STATUS[action]
                     confirmed = True
                     break
@@ -160,6 +163,13 @@ def control_print(config, action, state_dir, *, expected_filename=None):
                     time.sleep(POLL_INTERVAL)
             if not confirmed:
                 result["status"] = "control_acknowledged_not_confirmed"
+        except KeyboardInterrupt:
+            result["status"] = "control_uncertain_no_retry"
+            raise ControlUncertain(
+                result,
+                exit_code=130,
+                message="Print control interrupted after publish; inspect status before taking further action and never resend blindly",
+            ) from None
         except Exception as error:
             result["status"] = "control_uncertain_no_retry"
             raise ControlUncertain(result, exit_code=_failure_exit_code(error)) from None
