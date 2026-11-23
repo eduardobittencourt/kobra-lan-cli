@@ -66,7 +66,7 @@ def make_plan(device_digest, file_sha256, filename="test.gcode", slot=1,
         "plan_sha256": review_digest(plan),
         "dry_run": True,
         "experimental": True,
-        "hardware_start_validated": (slot == 1 and material == "PLA High Speed"
+        "hardware_start_validated": (slot in (1, 2, 4) and material == "PLA High Speed"
                                      and auto_leveling and not vibration and not flow),
         "selected_slot": slot,
         "upload_performed": False,
@@ -191,7 +191,7 @@ class JobsStoreTests(unittest.TestCase):
         )
         reprint1_id, _, _ = self._write_start(
             chain_sha, previous=root_id, filename="chain.gcode", timestamp=1700000200, status="start_observed_active",
-            slot=2,
+            slot=3,
         )
         reprint2_id, _, _ = self._write_start(
             chain_sha, previous=reprint1_id, filename="chain.gcode", timestamp=1700000300, status="start_observed_active",
@@ -246,7 +246,7 @@ class JobsStoreTests(unittest.TestCase):
         self.assertEqual(reprint1_detail["previous_attempt_id"], root_id)
         self.assertEqual(reprint1_detail["next_attempt_id"], reprint2_id)
         self.assertEqual(reprint1_detail["reprint_eligibility"], "superseded")
-        self.assertEqual(reprint1_detail["selected_slot"], 2)
+        self.assertEqual(reprint1_detail["selected_slot"], 3)
         self.assertFalse(reprint1_detail["hardware_start_validated"])
 
         reprint2_detail = job_info(self.cfg, self.state_dir, reprint2_id)

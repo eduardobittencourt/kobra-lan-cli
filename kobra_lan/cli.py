@@ -143,19 +143,19 @@ def build_parser():
         "pause": (
             "Experimental guarded pause of an active print; requires --execute",
             "Experimental single-shot pause on Kobra X model 20030 / firmware 2.0.2.2 "
-            "(hardware_control_validated: false). Requires active printing state and --execute; "
+            "(hardware_control_validated: true). Requires active printing state and --execute; "
             "never retries uncertain commands automatically.",
         ),
         "resume": (
             "Experimental guarded resume of a paused print; requires --execute",
             "Experimental single-shot resume on Kobra X model 20030 / firmware 2.0.2.2 "
-            "(hardware_control_validated: false). Requires paused state and --execute; "
+            "(hardware_control_validated: true). Requires paused state and --execute; "
             "never retries uncertain commands automatically.",
         ),
         "cancel": (
             "Experimental guarded cancel of an active or paused print; requires --execute",
             "Experimental single-shot cancel on Kobra X model 20030 / firmware 2.0.2.2 "
-            "(hardware_control_validated: false). Requires printing, recognized preparation phase, "
+            "(hardware_control_validated: true). Requires printing, recognized preparation phase, "
             "or paused state and --execute; never retries uncertain commands automatically.",
         ),
     }

@@ -4,7 +4,7 @@ A direct Anycubic Kobra X LAN client with readable text and opt-in JSON for auto
 
 **Status: experimental, under active development.** The CLI and its JSON automation interface are intended for testing and feedback. Commands, output and stored-state contracts can change during 0.x; read each version's [compatibility notes](https://github.com/eduardobittencourt/kobra-lan-cli/releases) before upgrading. A downloadable package does not imply stable or broadly qualified printer support.
 
-Upload and print start were observed on Kobra X hardware running firmware 2.0.2.2 for one PLA High Speed print using onboard slot 1, automatic leveling on, vibration compensation off, and flow calibration off. Starting the stored file with `url=""` worked. That test observed preparation and the first layer. Other start combinations remain unqualified.
+Upload, print start, reviewed intentional reprints (`--reprint-from`), read-only `print watch` observation persistence, offline `jobs list|info`, and guarded `print pause|resume|cancel` were observed on Kobra X hardware running firmware 2.0.2.2 for single-filament PLA High Speed prints using onboard slots 1, 2, and 4 with automatic leveling on, vibration compensation off, and flow calibration off. Starting the stored file with `url=""` worked across initial starts and operator-confirmed reprints. Slot 3, other materials/preparation settings, multicolor, and external ACE units remain unqualified.
 
 See the [roadmap](ROADMAP.md) for implemented capabilities and future work, and the [release guide](docs/releases.md) for supported installation targets, package checks and recovery.
 
@@ -82,8 +82,8 @@ Global `--config`, `--printer`, `--state-dir` and `--json` precede the command.
 These examples describe the workflow; automated checks use synthetic fixtures.
 
 `print pause`, `print resume`, and `print cancel` are experimental single-shot
-lifecycle controls (`experimental: true`, `hardware_control_validated: false`)
-requiring `--execute`, fresh Kobra X model 20030 / firmware 2.0.2.2
+lifecycle controls (`experimental: true`, `hardware_control_validated: true` on
+qualified Kobra X model 20030 / firmware 2.0.2.2) requiring `--execute`, fresh
 qualification, and strict state preconditions, with an optional `--filename`
 active-job guard. They hold the per-device lease under `--state-dir` without
 modifying existing profiles, receipts, markers, or watch observations, and

@@ -2,8 +2,11 @@
 
 Protocol reference: KX-Bridge f0ce700fbcc9b3aed54f1a142b4e0318bc11638e and
 stribor/anycubic_kobrax 9e22712454b5c65fec6e33c92fd894a61f7f4d6f.
-Hardware transitions on FW 2.0.2.2 have not yet been validated live; every
-result reports experimental=True and hardware_control_validated=False.
+Hardware transitions on Kobra X model 20030 / FW 2.0.2.2 were observed live on
+2026-11-23 (pause -> paused, resume -> resuming -> nozzle_purging, stop ->
+stopping -> free with empty last_project); resuming/stopping can exceed the
+bounded 5 s post-ACK poll window. Results remain experimental=True with
+hardware_control_validated=True on the qualified target.
 """
 from contextlib import ExitStack
 import hashlib
@@ -135,7 +138,7 @@ def control_print(config, action, state_dir, *, expected_filename=None):
             "status": "control_uncertain_no_retry",
             "dry_run": False,
             "experimental": True,
-            "hardware_control_validated": False,
+            "hardware_control_validated": True,
             "taskid": taskid,
             "before": sanitized(info),
             "before_project": sanitized(project),

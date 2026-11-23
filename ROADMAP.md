@@ -29,7 +29,7 @@ The source launcher and Python archives work outside a desktop, bridge, HA or cl
 
 The CLI and JSON automation interface remain subject to documented changes during 0.x. Version 0.5.0 intentionally replaces flat commands and JSON-default output, requires named pairing, and removes automatic root-config fallback without migration. Existing private credentials and device-based receipt/attempt identities remain protected in normal operations; never clear markers to make a retry work.
 
-Hardware evidence remains narrow: Kobra X model 20030 / firmware 2.0.2.2, Next-generated G-code, one PLA High Speed print using onboard slot 1, automatic leveling on, vibration compensation off and flow calibration off. Physical print completion and part quality have not been assessed. Package acceptance and offline tests do not expand that evidence.
+Hardware evidence covers Kobra X model 20030 / firmware 2.0.2.2, Next-generated G-code, single-filament PLA High Speed prints using onboard slots 1, 2, and 4 (automatic leveling on, vibration compensation off, flow calibration off), reviewed intentional reprints (`--reprint-from`), read-only `print watch` observation persistence, offline `jobs list|info`, and live `print pause|resume|cancel` wire transitions (`pause`, `resume`, `stop`), with operator-confirmed completion of both runs in a two-slot reprint cycle. Slot 3, other materials and preparation combinations, multicolor, and external ACE units remain unqualified. Package acceptance and offline tests do not expand hardware evidence.
 
 ## Milestone 1 — Independent onboarding
 
@@ -71,19 +71,22 @@ record visibility, and experimental guarded lifecycle controls
 (`print pause`, `print resume`, `print cancel`) requiring `--execute`, optional
 `--filename` active-job matching, strict fresh state preconditions, shared
 per-device locking, bounded post-ACK verification, and non-replaying uncertainty
-reporting (`experimental: true`, `hardware_control_validated: false`). Hardware
-qualification for reprints and lifecycle controls remains pending for an
-integrated test session on Kobra X (model 20030 / firmware 2.0.2.2). See
+reporting (`experimental: true`, `hardware_control_validated: true` on qualified
+Kobra X model 20030 / firmware 2.0.2.2). An integrated Kobra X hardware session
+on 2026-11-23 validated intentional reprints across slots 2 and 4, watch
+observation persistence and `jobs list|info` chain inspection, and live
+`pause`, `resume`, and `cancel` (`stop`) transitions (confirming that
+`resuming`/`stopping` can exceed the 5-second post-ACK poll window and that
+`last_project` remains empty after cancellation as well as completion). See
 [reprint workflow](docs/usage.md#deliberately-reprint-a-stored-file),
 [lifecycle controls](docs/usage.md#pause-resume-and-cancel-an-active-print),
 and [local job history](docs/usage.md#inspect-local-job-history).
 
 Remaining work:
 
-- Qualify attempt identity and terminal signals where the printer reports them.
-- Qualify intentional reprints and `print pause|resume|cancel` state transitions on the Kobra X in an integrated session, keeping observed activity and acknowledgements distinct from confirmed transitions and terminal outcomes; never replay ambiguous commands blindly.
+- Qualify attempt identity and terminal signals if future firmware exposes them (firmware 2.0.2.2 reports `task_id: "-1"` and empty `last_project` after both normal completion and cancellation).
 - Validate stored-file deletion and its interaction with active jobs and receipts. Investigate download support separately.
-- Record a complete authorized physical print and inspect the part, keeping telemetry-confirmed completion distinct from operator-assessed quality.
+- Expand hardware coverage beyond PLA High Speed on slots 1, 2, and 4 with `auto-leveling on` (slot 3, other materials, and other preparation settings).
 
 Candidate commands include `files delete`. Filament inventory beyond submission preflight, discovery and other device controls also require separate work.
 
