@@ -50,7 +50,7 @@ from a filename or network acknowledgement.
 | `print plan` | `file_sha256`, `device_digest`, model/firmware, canonical `payload`, `plan_sha256`, slot and qualification flags; latest local `attempt_id` and `start_status` when available; `previous_attempt_id` for a reprint review |
 | `print start` | Plan fields, `dry_run: false`, local `attempt_id`, `previous_attempt_id` for a reprint, status/ack/observation evidence and `receipt_path`; an uncertain error may return a subset of that evidence |
 | `print watch` | `outcome`, `reason`, verified `phase`, `progress` (percent), `current_layer`, `total_layers` when available, plus `observation_recorded` and `observation_id` when an active job was observed |
-| `print pause\|resume\|cancel` | `action`, `wire_action`, `device_digest`, model/firmware, `status` (`control_observed_*`, `control_acknowledged_not_confirmed`, or `control_uncertain_no_retry`), `dry_run: false`, `experimental: true`, `hardware_control_validated: false`, `taskid`, optional `expected_filename`, sanitized `before`/`before_project`, `ack`, `after`, and `project` (subset retained on uncertain failure) |
+| `print pause\|resume\|cancel` | `action`, `wire_action`, `device_digest`, model/firmware, `status` (`control_observed_*`, `control_acknowledged_not_confirmed`, or `control_uncertain_no_retry`), `dry_run: false`, `experimental: true`, `hardware_control_validated: true`, `taskid`, optional `expected_filename`, sanitized `before`/`before_project`, `ack`, `after`, and `project` (subset retained on uncertain failure) |
 | `jobs list` | `device_digest`, `kind`, `limit`, `total_count`, `returned_count`, `incomplete_count`, `truncated`, newest-first `jobs` summaries, and local-only `coverage` metadata |
 | `jobs info` | Detailed start attempt (chain links, hashes, settings, `start_status`, `terminal_outcome: "unknown"`, `reprint_eligibility`, `upload_provenance`, `issues`, `unattributed_matching_observations`), saved watch observation, or `unreadable-<storage-key>` record, plus `coverage` metadata |
 
@@ -100,7 +100,7 @@ and device/file markers, including under `--state-dir`, remain authoritative.
   --auto-leveling on --vibration-compensation off --flow-calibration off
 ```
 
-All three preparation options are required. The example does not claim to reproduce the graphical application's defaults. Both formats include the payload and full `plan_sha256`. Changing the file, slot, or options changes the hash. The plan includes `experimental=true`; `hardware_start_validated=true` only for the observed configuration described above, and false for other combinations. This flag describes the start operation, not the quality of an arbitrary model.
+All three preparation options are required. The example does not claim to reproduce the graphical application's defaults. Both formats include the payload and full `plan_sha256`. Changing the file, slot, or options changes the hash. The plan includes `experimental=true`; `hardware_start_validated=true` only for the observed Kobra X firmware `2.0.2.2` configuration (PLA High Speed in onboard slots 1, 2, or 4, `auto-leveling on`, `vibration-compensation off`, `flow-calibration off`), and false for other combinations. This flag describes the start operation, not the quality of an arbitrary model.
 
 To request execution later, use `print start` with the same explicit arguments plus `--execute --plan-sha256 REVIEWED_PLAN_HASH`. This is a physical action: run it only when printing is authorized and the printer is prepared. It requires a verified upload receipt from this CLI, rechecks the file/state/material, and writes a durable reservation before publishing **one** MQTT `print/start` command. It does not upload again. An ACK is not treated as proof of physical printing; the client subsequently queries the active project and distinguishes observed activity from an uncertain result. It never automatically repeats the command.
 
@@ -145,9 +145,14 @@ kobra-lan --printer bench print cancel --execute --filename agent-model.gcode
 
 `print pause`, `print resume`, and `print cancel` are **experimental**
 single-shot lifecycle controls (`experimental: true`,
-`hardware_control_validated: false` until live Kobra X transitions are
-validated on hardware). They act on the active job on a qualified Kobra X
+`hardware_control_validated: true` on qualified Kobra X model 20030 / firmware
+2.0.2.2, where live `pause`, `resume`, and `stop` transitions were validated on
+2026-11-23). They act on the active job on a qualified Kobra X
 (model 20030 / firmware 2.0.2.2), including jobs started by another client.
+Because `resuming` and `stopping` on firmware `2.0.2.2` often exceed the
+bounded 5-second post-ACK polling window, `print resume` and `print cancel`
+commonly return `control_acknowledged_not_confirmed` even when the printer
+completes the transition shortly afterward.
 
 - **Explicit execution guard and optional `--filename`:** Every lifecycle
   command requires `--execute`; omitting it fails with exit 2
@@ -225,10 +230,11 @@ can qualify for `completed`, `canceled` or `failed`.
 
 A live observation on 2026-11-21 verified increasing percent and layer
 counters, followed by an idle report with the initial `last_project` still
-empty. The active report had the `task_id` placeholder `"-1"`. A repeated
-filename and that placeholder are insufficient to follow the same attempt.
-Watch preserves the first verified progress and returns `unknown` if a
-subsequent report cannot establish continuity. No terminal outcome mappings
+empty; a live cancellation on 2026-11-23 likewise settled to idle `free` with
+`last_project` still empty. The active report had the `task_id` placeholder
+`"-1"`. A repeated filename and that placeholder are insufficient to follow the
+same attempt. Watch preserves the first verified progress and returns `unknown`
+if a subsequent report cannot establish continuity. No terminal outcome mappings
 are enabled for this firmware.
 
 Exit 2 indicates argument, trust, qualification or protocol refusal. Exit 3

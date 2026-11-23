@@ -1,7 +1,7 @@
 """Experimental local-file print/start, single filament, onboard four-slot box.
 
-Hardware start observed on FW 2.0.2.2, PLA High Speed in slot 1, leveling on,
-vibration/flow calibration off. Other combinations remain unqualified.
+Hardware start observed on FW 2.0.2.2, PLA High Speed in slots 1, 2, and 4,
+leveling on, vibration/flow calibration off. Other combinations remain unqualified.
 """
 import hashlib
 import json
@@ -199,8 +199,8 @@ def build_plan(config, client, path, name, slot, auto_leveling, vibration, flow)
             "timelapse": {"status": 0, "count": 0, "type": 0},
             "drying_settings": {"status": 0, "target_temp": 0, "duration": 0, "remain_time": 0},
             "model_objects_skip_parts": []}}
-    # Empty URL starts the stored file; observed on hardware for the case below.
-    hardware_validated = (slot == 1 and selected["type"] == "PLA High Speed"
+    # Empty URL starts the stored file; observed on hardware for the cases below.
+    hardware_validated = (slot in (1, 2, 4) and selected["type"] == "PLA High Speed"
                           and auto_leveling and not vibration and not flow)
     plan = {"file_sha256": manifest["sha256"], "device_digest": hashlib.sha256(config.printer_id.encode()).hexdigest(),
             "model": info["model"], "firmware": info["version"], "payload": payload}

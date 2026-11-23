@@ -173,7 +173,7 @@ class SafeArgumentTests(unittest.TestCase):
             "status": "control_observed_paused",
             "dry_run": False,
             "experimental": True,
-            "hardware_control_validated": False,
+            "hardware_control_validated": True,
             "taskid": "-1",
             "before": {"state": "busy"},
             "before_project": {"state": "printing", "filename": "sample.gcode"},
@@ -214,12 +214,12 @@ class SafeArgumentTests(unittest.TestCase):
                         self.assertEqual(envelope["ok"], expected_exit == 0)
                         self.assertEqual(envelope["result"]["status"], expected_status)
                         self.assertTrue(envelope["result"]["experimental"])
-                        self.assertFalse(envelope["result"]["hardware_control_validated"])
+                        self.assertTrue(envelope["result"]["hardware_control_validated"])
                         if expected_code is not None:
                             self.assertEqual(envelope["error"]["code"], expected_code)
                     else:
                         self.assertIn("Experimental: yes", rendered)
-                        self.assertIn("Hardware control validated: no", rendered)
+                        self.assertIn("Hardware control validated: yes", rendered)
                         if expected_code is not None:
                             self.assertIn(f"Error ({expected_code}):", rendered)
 

@@ -53,11 +53,11 @@ Each lifecycle command SHALL publish at most one MQTT `print` action (`pause`, `
 - **THEN** the CLI does not retry or reconnect and reports an error instructing the operator to inspect `status` rather than resend blindly
 
 ### Requirement: Bounded post-action verification and honest outcome reporting
-After a correlated ACK, the CLI SHALL poll fresh `info` on the same session without treating ACK as proof of state change. It SHALL report `control_observed_paused`, `control_observed_resumed`, `control_observed_stopped`, `control_acknowledged_not_confirmed`, or `control_uncertain_no_retry`, plus `experimental: true` and `hardware_control_validated: false` until qualified.
+After a correlated ACK, the CLI SHALL poll fresh `info` on the same session without treating ACK as proof of state change. It SHALL report `control_observed_paused`, `control_observed_resumed`, `control_observed_stopped`, `control_acknowledged_not_confirmed`, or `control_uncertain_no_retry`, plus `experimental: true` and `hardware_control_validated: true` on the qualified Kobra X model `20030` / firmware `2.0.2.2` target.
 
 #### Scenario: Confirmed pause, resume, or cancel transition
 - **WHEN** bounded fresh polling observes `paused` after `pause`, `printing` or a recognized preparation phase after `resume`, or idle/`stoped`/`canceled` after `cancel`
-- **THEN** the command exits 0 with the corresponding `control_observed_*` status, sanitized `before` and `after` snapshots, `experimental: true`, and `hardware_control_validated: false`
+- **THEN** the command exits 0 with the corresponding `control_observed_*` status, sanitized `before` and `after` snapshots, `experimental: true`, and `hardware_control_validated: true`
 
 #### Scenario: Acknowledged without observed transition
 - **WHEN** ACK succeeds and bounded polling completes without error while the printer remains in its prior or transitional state

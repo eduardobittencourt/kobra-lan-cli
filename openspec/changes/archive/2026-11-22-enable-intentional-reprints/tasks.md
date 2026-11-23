@@ -14,8 +14,7 @@
 ## 3. Integration and qualification
 
 - [x] 3.1 Run the locked offline suite, Ruff, launcher syntax check and strict OpenSpec validation. Run the relevant Python archive and Debian acceptance checks in `docs/releases.md` for the installed interface changes.
-- [ ] 3.2 With separate authorization and agreed timing, use the qualified Kobra X setup to validate two deliberate starts of the same stored file on the printer. Confirm activity for the first run and operator-confirmed end before the reprint. Verify that the reprint uses the same upload provenance and yields a distinct linked attempt ID. Record sanitized evidence and attribute terminal outcomes to their observed source. Keep concurrency, uncertain-start and replay checks offline.
+- [x] 3.2 With separate authorization and agreed timing, use the qualified Kobra X setup to validate two deliberate starts of the same stored file on the printer. Confirm activity for the first run and operator-confirmed end before the reprint. Verify that the reprint uses the same upload provenance and yields a distinct linked attempt ID. Record sanitized evidence and attribute terminal outcomes to their observed source. Keep concurrency, uncertain-start and replay checks offline.
 
-  Hardware validation is deferred to a future integrated test session covering
-  reprints and print lifecycle controls. This task remains open; agree on the
-  timing and authorized actions before operating the printer.
+  Validated on 2026-11-23 on Kobra X model 20030 / firmware 2.0.2.2 across
+  onboard slots 2 and 4; see `verification.md` for sanitized evidence.
