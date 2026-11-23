@@ -60,6 +60,10 @@ class CompletionTests(unittest.TestCase):
 compopt() { printf 'filename-mode:%s\\n' "$*"; }
 COMP_WORDS=(kobra-lan --json --printer bench files ''); COMP_CWORD=5
 _kobra_lan; printf '%s\\n' "${COMPREPLY[@]}"
+COMP_WORDS=(kobra-lan sl); COMP_CWORD=1
+_kobra_lan; printf 'root:%s\\n' "${COMPREPLY[@]}"
+COMP_WORDS=(kobra-lan slots ''); COMP_CWORD=2
+_kobra_lan; printf 'slots:%s\\n' "${COMPREPLY[@]}"
 COMP_WORDS=(kobra-lan print plan test.gcode --auto-leveling o); COMP_CWORD=5
 _kobra_lan; printf '%s\\n' "${COMPREPLY[@]}"
 COMP_WORDS=(kobra-lan print wa); COMP_CWORD=2
@@ -93,6 +97,7 @@ _kobra_lan; printf '%s\\n' "${COMPREPLY[@]}"
         self.assertEqual(process.returncode, 0, process.stderr)
         self.assertEqual(process.stderr, '')
         for expected in ('list', 'info', 'upload', 'on', 'off', 'watch', '--timeout', '--json', 'pyproject.toml',
+                         'root:slots', 'slots:list',
                          'plan:--reprint-from', 'start:--reprint-from',
                          'print:pause', 'print:resume', 'print:cancel',
                          'pause:--execute', 'pause:--filename', 'resume:--execute', 'resume:--filename',
@@ -136,6 +141,12 @@ _kobra_lan; printf '%s\\n' "${COMPREPLY[@]}"
         script = generate(build_parser(), 'fish')
         script += '''
 complete -C 'kobra-lan --json --printer bench files '
+for item in (complete -C 'kobra-lan sl')
+  printf 'root:%s\\n' $item
+end
+for item in (complete -C 'kobra-lan slots ')
+  printf 'slots:%s\\n' $item
+end
 complete -C 'kobra-lan print plan a.gcode --auto-leveling o'
 complete -C 'kobra-lan print wa'
 complete -C 'kobra-lan print watch --time'
@@ -162,6 +173,7 @@ complete -C 'kobra-lan --j'
         self.assertEqual(process.returncode, 0, process.stderr)
         self.assertEqual(process.stderr, '')
         for expected in ('list', 'info', 'upload', 'on', 'off', 'watch', '--timeout', '--json',
+                         'root:slots', 'slots:list',
                          'plan:--reprint-from', 'start:--reprint-from',
                          'print:pause', 'print:resume', 'print:cancel',
                          'pause:--execute', 'pause:--filename', 'resume:--execute', 'resume:--filename',
@@ -179,6 +191,10 @@ compadd() { print -l -- "$@"; }
 _files() { print local-files; }
 words=(kobra-lan --json files ''); CURRENT=4
 _kobra_lan
+words=(kobra-lan sl); CURRENT=2
+for candidate in $(_kobra_lan); do print -r -- "root:$candidate"; done
+words=(kobra-lan slots ''); CURRENT=3
+for candidate in $(_kobra_lan); do print -r -- "slots:$candidate"; done
 words=(kobra-lan print plan a.gcode --auto-leveling o); CURRENT=6
 _kobra_lan
 words=(kobra-lan print wa); CURRENT=3
@@ -210,6 +226,7 @@ _kobra_lan
         self.assertEqual(process.returncode, 0, process.stderr)
         self.assertEqual(process.stderr, '')
         for expected in ('list', 'info', 'upload', 'on', 'off', 'watch', '--timeout', '--json',
+                         'root:slots', 'slots:list',
                          'plan:--reprint-from', 'start:--reprint-from',
                          'print:pause', 'print:resume', 'print:cancel',
                          'pause:--execute', 'pause:--filename', 'resume:--execute', 'resume:--filename',

@@ -66,6 +66,9 @@ def installed_probes(probe, version, home, work, before):
     empty_home.mkdir(exist_ok=True)
     home_owner = home.stat()
     os.chown(empty_home, home_owner.st_uid, home_owner.st_gid)
+    slots_help = probe("slots", "--help", probe_home=empty_home)
+    assert "list" in slots_help
+    assert "onboard" in probe("slots", "list", "--help", probe_home=empty_home).lower()
     print_help = probe("print", "--help", probe_home=empty_home)
     assert all(word in print_help for word in ("watch", "pause", "resume", "cancel"))
     assert "--timeout SECONDS" in probe("print", "watch", "--help", probe_home=empty_home)
@@ -81,8 +84,9 @@ def installed_probes(probe, version, home, work, before):
     assert "RECORD_ID" in probe("jobs", "info", "--help", probe_home=empty_home)
     for shell in ("bash", "zsh", "fish"):
         completion = probe("completion", shell, probe_home=empty_home)
-        assert all(word in completion for word in ("kobra-lan", "watch", "timeout", "pause", "resume", "cancel",
+        assert all(word in completion for word in ("kobra-lan", "slots", "watch", "timeout", "pause", "resume", "cancel",
                                                    "execute", "filename", "jobs", "observation", "limit"))
+        assert "slots:list" in completion
         assert all(f"print {action}:--reprint-from" in completion for action in ("plan", "start"))
         assert all(f"print {action}:--filename" in completion for action in ("pause", "resume", "cancel"))
         assert "jobs list:--kind" in completion and "jobs list:--limit" in completion

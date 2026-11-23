@@ -35,8 +35,15 @@ manages private access locally and establishes explicit trust.
 and
 .B files list|info
 are read-only network observations.
+.B slots list
+is a read-only onboard four-slot filament inventory query over one pinned MQTT
+session on Kobra X model 20030 / firmware 2.0.2.2 (idle or printing) without
+state writes; external ACE and multi-box topologies remain unqualified and exit 2.
 .B gcode inspect FILE [--name NAME]
-inspects local immutable bytes without configuration or network.
+inspects local immutable bytes without configuration or network, reporting
+hashes, layer/slicer metadata, and filament/color metadata (paint_info entries,
+T<n> tool indices, optional weights, multicolor, and
+single_filament_start_compatible). Multicolor print start remains unqualified.
 .B files upload FILE [--name NAME] --sha256 HASH --execute
 uploads inspected bytes once; never starts a print and has no implicit dry run.
 .B print plan FILE --name NAME --slot N --auto-leveling on|off --vibration-compensation on|off --flow-calibration on|off [--reprint-from PREVIOUS_ATTEMPT_ID]

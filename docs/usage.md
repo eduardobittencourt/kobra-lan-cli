@@ -43,9 +43,10 @@ from a filename or network acknowledgement.
 | `printer remove` | `name`, `registration_removed`, `deleted_files`, `preserved_files`, cleanup outcome |
 | `doctor` | Inner `version: 1`, safe `target`, ordered `checks`, `healthy` |
 | `status` | `identity`, sanitized `info`, nullable `print`, `last_print` |
+| `slots list` | `device_digest`, `model`, `firmware`, `printer_state`, onboard box summary (`box_id: -1`, `box_kind: "onboard"`, `slot_count: 4`, `loaded_count`), and ordered `slots` (`slot`, `ams_index`, `status`, `status_label`, `available_for_start`, nullable `material_type`, `color_rgb`, `color_hex`) |
 | `files list` | `records` array of filename/size/directory metadata |
 | `files info` | `filename` and available safe file details |
-| `gcode inspect` | `sha256`, `md5`, `size_bytes`, `remote_filename`, nullable `layer_count`, `slicer_version`, operation/qualification flags |
+| `gcode inspect` | `sha256`, `md5`, `size_bytes`, `remote_filename`, nullable `layer_count`, `slicer_version`, filament/color metadata (`paint_info_present`, ordered `filaments`, `filament_count`, `multicolor`, `tool_indices`, nullable `total_filament_used_g`, `single_filament_start_compatible`), operation/qualification flags |
 | `files upload` | Manifest, verification/status flags, timestamp and `receipt_path` |
 | `print plan` | `file_sha256`, `device_digest`, model/firmware, canonical `payload`, `plan_sha256`, slot and qualification flags; latest local `attempt_id` and `start_status` when available; `previous_attempt_id` for a reprint review |
 | `print start` | Plan fields, `dry_run: false`, local `attempt_id`, `previous_attempt_id` for a reprint, status/ack/observation evidence and `receipt_path`; an uncertain error may return a subset of that evidence |
@@ -57,6 +58,39 @@ from a filename or network acknowledgement.
 Both formats preserve full review hashes, experimental qualification and uncertain
 outcomes. Upload metadata confirmation does not prove remote byte equality;
 start acknowledgement and observed activity do not prove completion or quality.
+
+## Inspect onboard filament slots
+
+```sh
+kobra-lan slots list
+kobra-lan --json --printer bench slots list
+```
+
+`slots list` is strictly read-only: it resolves the selected printer via
+`--printer`, `--config`, or the saved default, opens one pinned MQTT session
+without writing local state or modifying device state, verifies a fresh `info`
+report for Kobra X model 20030 / firmware 2.0.2.2 (succeeding whether the
+printer is idle or actively printing), and queries `multiColorBox / getInfo`.
+It reports the onboard four-slot box (`box_id: -1`, `box_kind: "onboard"`,
+`slot_count: 4`, `loaded_count`) and four `slots` ordered by `ams_index` `0..3`
+(`slot` `1..4`) with raw integer `status`, `status_label` (`loaded`, `empty`,
+or `other`), `available_for_start`, and nullable `material_type`, `color_rgb`,
+and `color_hex`. Raw unknown telemetry fields, URLs, and credentials are
+excluded. External ACE or multi-box topologies (`id != -1` or box count other
+than 1) and unqualified firmware fail with exit 2 (`validation_failed`).
+
+Offline `gcode inspect <file> [--name <remote-name>]` inspects the other side
+of filament planning without configuration, network, or state writes. It
+validates every `; paint_info =` declaration in the file (rejecting malformed
+or conflicting repeated headers with exit 2), extracts sorted unique `T<n>`
+tool indices and optional `; filament used [g]` / `; total filament used [g]`
+summaries, and reports `paint_info_present`, ordered `filaments` (supporting
+non-contiguous `paint_index` values and mixed materials), `filament_count`,
+`multicolor`, `tool_indices`, `total_filament_used_g`, and
+`single_filament_start_compatible`. Minimal Kobra X G-codes omitting
+`; paint_info =` remain inspectable and uploadable via `files upload`.
+Onboard four-slot inventory is read-only; multicolor `print start` and external
+ACE units remain unqualified.
 
 ## Inspect, upload, plan and start
 

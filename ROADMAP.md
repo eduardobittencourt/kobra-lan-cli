@@ -82,13 +82,22 @@ observation persistence and `jobs list|info` chain inspection, and live
 [lifecycle controls](docs/usage.md#pause-resume-and-cancel-an-active-print),
 and [local job history](docs/usage.md#inspect-local-job-history).
 
+The source CLI also includes read-only onboard four-slot filament inventory
+(`slots list`) over one pinned MQTT session without requiring idle state or
+writing local state, plus multicolor-aware offline `gcode inspect` reporting
+validated `; paint_info =` filament/color entries, `T<n>` tool indices,
+optional filament weights, `multicolor`, and `single_filament_start_compatible`
+while keeping `files upload` compatible and byte-preserving. Multicolor
+`print plan`/`print start` slot mapping and external ACE units remain
+unqualified.
+
 Remaining work:
 
 - Qualify attempt identity and terminal signals if future firmware exposes them (firmware 2.0.2.2 reports `task_id: "-1"` and empty `last_project` after both normal completion and cancellation).
 - Validate stored-file deletion and its interaction with active jobs and receipts. Investigate download support separately.
 - Expand hardware coverage beyond PLA High Speed on slots 1, 2, and 4 with `auto-leveling on` (slot 3, other materials, and other preparation settings).
 
-Candidate commands include `files delete`. Filament inventory beyond submission preflight, discovery and other device controls also require separate work.
+Candidate commands include `files delete`. Multicolor `print plan`/`print start`, external ACE units, discovery and other device controls also require separate work.
 
 ## Milestone 4 — Broader compatibility and stable releases
 
