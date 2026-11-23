@@ -1,5 +1,11 @@
 schema: spec-driven
 
+context: |
+  Focus OpenSpec changes on implementation, tests, documentation, and local offline validation gates.
+  Keep packaging module allowlists in sync when adding or moving modules so offline unit tests stay green,
+  but defer full Python archive and Debian package build/acceptance checks (scripts/check_python.py,
+  scripts/build_deb.py, lintian, scripts/accept_deb.py) to version release time rather than gating OpenSpec tasks on them.
+
 # Project context (optional)
 # Add only constraints that should guide OpenSpec artifacts and workflows.
 # Include constraints an agent cannot infer by reading the code.

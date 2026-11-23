@@ -174,25 +174,36 @@ def upload_lock(directory):
     return device_lock(directory, "upload")
 
 
+def _open_lock_file(parent, filename, label):
+    fd = os.open(filename, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600, dir_fd=parent)
+    try:
+        saved = os.fstat(fd)
+        if (not stat.S_ISREG(saved.st_mode) or saved.st_uid != os.geteuid()
+                or stat.S_IMODE(saved.st_mode) != 0o600 or saved.st_nlink != 1):
+            raise ProtocolError(f"{label} lock must be a private user-owned regular file")
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise ProtocolError(f"Another {label.lower()} is active for this device; no command was sent") from None
+        return fd
+    except BaseException:
+        os.close(fd)
+        raise
+
+
 @contextmanager
 def device_lock(directory, operation):
     """Serialize cooperating callers by device, retaining the lock inode after close."""
     parent = open_directory(directory, create=True)
+    fds = []
     try:
-        fd = os.open(f'.{operation}.lock', os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600, dir_fd=parent)
-        try:
-            saved = os.fstat(fd)
-            if (not stat.S_ISREG(saved.st_mode) or saved.st_uid != os.geteuid()
-                    or stat.S_IMODE(saved.st_mode) != 0o600 or saved.st_nlink != 1):
-                raise ProtocolError(f"{operation.capitalize()} lock must be a private user-owned regular file")
-            try:
-                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except BlockingIOError:
-                raise ProtocolError(f"Another {operation} is active for this device; no command was sent") from None
-            yield parent
-        finally:
-            os.close(fd)
+        if operation != "control":
+            fds.append(_open_lock_file(parent, f'.{operation}.lock', operation.capitalize()))
+        fds.append(_open_lock_file(parent, '.device.lock', "Device operation"))
+        yield parent
     finally:
+        for fd in reversed(fds):
+            os.close(fd)
         os.close(parent)
 
 

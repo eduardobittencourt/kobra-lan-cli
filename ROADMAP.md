@@ -64,23 +64,28 @@ cannot identify the same attempt. See
 [watch outcomes and evidence](docs/usage.md#watch-an-active-print).
 The source CLI also includes reviewed intentional reprints (`--reprint-from`)
 with durable local per-attempt identities while preserving legacy file-keyed
-markers and receipts, plus offline read-only `jobs list|info` over local start
+markers and receipts, offline read-only `jobs list|info` over local start
 receipts/markers, upload provenance, and saved watch observations with explicit
 local-only coverage, unattributed other-client observations, and incomplete
-record visibility; hardware qualification for reprints remains pending for an
-integrated test session with lifecycle controls. See
-[reprint workflow](docs/usage.md#deliberately-reprint-a-stored-file) and
-[local job history](docs/usage.md#inspect-local-job-history).
+record visibility, and experimental guarded lifecycle controls
+(`print pause`, `print resume`, `print cancel`) requiring `--execute`, optional
+`--filename` active-job matching, strict fresh state preconditions, shared
+per-device locking, bounded post-ACK verification, and non-replaying uncertainty
+reporting (`experimental: true`, `hardware_control_validated: false`). Hardware
+qualification for reprints and lifecycle controls remains pending for an
+integrated test session on Kobra X (model 20030 / firmware 2.0.2.2). See
+[reprint workflow](docs/usage.md#deliberately-reprint-a-stored-file),
+[lifecycle controls](docs/usage.md#pause-resume-and-cancel-an-active-print),
+and [local job history](docs/usage.md#inspect-local-job-history).
 
 Remaining work:
 
 - Qualify attempt identity and terminal signals where the printer reports them.
-- Qualify intentional reprints on the Kobra X in an integrated session alongside lifecycle controls, keeping observed activity distinct from terminal outcome.
-- Add pause/resume/cancel only after validating state transitions and uncertainty recovery; never replay ambiguous commands blindly.
+- Qualify intentional reprints and `print pause|resume|cancel` state transitions on the Kobra X in an integrated session, keeping observed activity and acknowledgements distinct from confirmed transitions and terminal outcomes; never replay ambiguous commands blindly.
 - Validate stored-file deletion and its interaction with active jobs and receipts. Investigate download support separately.
 - Record a complete authorized physical print and inspect the part, keeping telemetry-confirmed completion distinct from operator-assessed quality.
 
-Candidate commands include `print pause|resume|cancel` and `files delete`. Filament inventory beyond submission preflight, discovery and other device controls also require separate work.
+Candidate commands include `files delete`. Filament inventory beyond submission preflight, discovery and other device controls also require separate work.
 
 ## Milestone 4 — Broader compatibility and stable releases
 
