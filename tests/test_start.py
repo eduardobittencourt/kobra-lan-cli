@@ -121,6 +121,23 @@ class StartTests(unittest.TestCase):
         self.file.write_bytes(conflicting)
         with self.assertRaises(ProtocolError):
             self.plan()
+
+    def test_start_payload_preserves_four_channel_color_arrays(self):
+        rgba_gcode = GCODE.replace(b"[138,148,158]", b"[138,148,158,128]")
+        self.file.write_bytes(rgba_gcode)
+        class RgbaClient(Client):
+            def query(self, kind, action="query", data=None, *, require_fresh=False):
+                result = super().query(kind, action, data, require_fresh=require_fresh)
+                if kind == "file":
+                    result["data"]["file_details"]["file_size"] = len(rgba_gcode)
+                elif kind == "multiColorBox":
+                    for slot in result["data"]["multi_color_box"][0]["slots"]:
+                        slot["color"] = [255, 255, 255, 128]
+                return result
+        mapping = build_plan(config(), RgbaClient(config()), self.file, "test.gcode", 1, True, False, False)[
+            "payload"]["ams_settings"]["ams_box_mapping"][0]
+        self.assertEqual(mapping["paint_color"], [138, 148, 158, 128])
+        self.assertEqual(mapping["ams_color"], [255, 255, 255, 128])
     def test_missing_or_changed_plan_blocks_execution(self):
         with patch("kobra_lan.start.MQTT", Client):
             with self.assertRaises(ProtocolError): self.run_start(True, "changed")

@@ -311,34 +311,39 @@ def main(argv=None):
         return 130
 
 
+def _operate_files(args, config):
+    if args.files_command == "list":
+        with MQTT(config) as client:
+            return {"records": list_files(client)}
+    if args.files_command == "info":
+        with MQTT(config) as client:
+            return safe_file_details(file_details(client, args.name))
+    if not args.sha256:
+        raise ProtocolError("--sha256 is required for an actual upload")
+    return execute(config, args.file, args.sha256, args.state_dir, args.name)
+
+
+def _operate_print(args, config):
+    if args.print_command in ("pause", "resume", "cancel"):
+        return control_print(config, args.print_command, args.state_dir, expected_filename=args.filename)
+    return start(config, args.file, args.name, args.slot,
+        args.auto_leveling == "on", args.vibration_compensation == "on", args.flow_calibration == "on",
+        args.state_dir, args.print_command == "start", getattr(args, "plan_sha256", None), args.reprint_from)
+
+
 def operate(args, config):
     """Run one operation while its selected managed configuration is leased."""
     if args.command == "status":
-        result = snapshot(config)
-    elif args.command == "slots" and args.slots_command == "list":
-        result = list_slots(config)
-    elif args.command == "files" and args.files_command == "list":
-        with MQTT(config) as client:
-            result = {"records": list_files(client)}
-    elif args.command == "files" and args.files_command == "info":
-        with MQTT(config) as client:
-            result = safe_file_details(file_details(client, args.name))
-    elif args.command == "print" and args.print_command in ("pause", "resume", "cancel"):
-        result = control_print(config, args.print_command, args.state_dir, expected_filename=args.filename)
-    elif args.command == "print":
-        result = start(config, args.file, args.name, args.slot,
-            args.auto_leveling == "on", args.vibration_compensation == "on", args.flow_calibration == "on",
-            args.state_dir, args.print_command == "start", getattr(args, "plan_sha256", None), args.reprint_from)
-    elif args.command == "jobs":
-        if args.jobs_command == "list":
-            result = list_jobs(config, args.state_dir, kind=args.kind, limit=args.limit)
-        else:
-            result = job_info(config, args.state_dir, args.record_id)
-    else:
-        if not args.sha256:
-            raise ProtocolError("--sha256 is required for an actual upload")
-        result = execute(config, args.file, args.sha256, args.state_dir, args.name)
-    return result
+        return snapshot(config)
+    if args.command == "slots":
+        return list_slots(config)
+    if args.command == "files":
+        return _operate_files(args, config)
+    if args.command == "print":
+        return _operate_print(args, config)
+    if args.jobs_command == "list":
+        return list_jobs(config, args.state_dir, kind=args.kind, limit=args.limit)
+    return job_info(config, args.state_dir, args.record_id)
 
 
 if __name__ == "__main__":

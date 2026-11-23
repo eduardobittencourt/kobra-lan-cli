@@ -13,25 +13,34 @@ PAINT_INFO_RE = re.compile(rb"^; paint_info = (.*)$", re.M)
 TOOL_RE = re.compile(rb"^T(\d+)(?:[\s;]|$)", re.M)
 FILAMENT_USED_G_RE = re.compile(rb"^; filament used \[g\] = (.*)$", re.M)
 TOTAL_FILAMENT_USED_G_RE = re.compile(rb"^; total filament used \[g\] = (.*)$", re.M)
+UNSUPPORTED_BOX_SCHEMA = "Unsupported filament box schema"
+STATUS_LABELS = {5: "loaded", 0: "empty"}
+
+
+def validate_color_channels(color):
+    """Validate 3- or 4-channel integer RGB/RGBA values in 0..255 and return a channel copy."""
+    if (not isinstance(color, list) or len(color) not in (3, 4)
+            or not all(type(channel) is int and 0 <= channel <= 255 for channel in color)):
+        raise ProtocolError("Invalid filament color schema")
+    return list(color)
 
 
 def normalize_color(color):
     """Validate 3- or 4-channel integer RGB/RGBA values in 0..255 and return ([R, G, B], '#RRGGBB')."""
-    if (not isinstance(color, list) or len(color) not in (3, 4)
-            or not all(type(channel) is int and 0 <= channel <= 255 for channel in color)):
-        raise ProtocolError("Invalid filament color schema")
-    rgb = [color[0], color[1], color[2]]
+    channels = validate_color_channels(color)
+    rgb = channels[:3]
     return rgb, f"#{rgb[0]:02X}{rgb[1]:02X}{rgb[2]:02X}"
 
 
 def _parse_paint_info_line(raw_line):
     try:
         parsed = json.loads(raw_line.strip().decode("utf-8"))
-    except (UnicodeDecodeError, ValueError):
+    except (ValueError, RecursionError):
         raise ProtocolError("Malformed G-code paint_info metadata") from None
     if not isinstance(parsed, list) or not parsed:
         raise ProtocolError("Malformed G-code paint_info metadata")
     entries = []
+    raw_colors = {}
     seen_indices = set()
     for item in parsed:
         if not isinstance(item, dict):
@@ -44,7 +53,9 @@ def _parse_paint_info_line(raw_line):
         if (not isinstance(material, str) or not material.strip() or len(material) > 80
                 or not material.isascii() or not material.isprintable()):
             raise ProtocolError("Invalid material_type in G-code paint_info")
-        color_rgb, color_hex = normalize_color(item.get("paint_color"))
+        channels = validate_color_channels(item.get("paint_color"))
+        color_rgb, color_hex = normalize_color(channels)
+        raw_colors[paint_index] = channels
         entries.append({
             "paint_index": paint_index,
             "material_type": material.strip(),
@@ -52,7 +63,7 @@ def _parse_paint_info_line(raw_line):
             "color_hex": color_hex,
         })
     entries.sort(key=lambda entry: entry["paint_index"])
-    return entries
+    return entries, raw_colors
 
 
 def _parse_weight(raw_value):
@@ -86,10 +97,11 @@ def _parse_filament_weights(data):
     return per_index, total_used
 
 
-def inspect_gcode_filaments(data):
+def inspect_gcode_filaments(data, *, return_raw_colors=False):
     """Parse all paint_info lines, T<n> tools, and optional weights from G-code bytes."""
     paint_matches = list(PAINT_INFO_RE.finditer(data))
-    declarations = [_parse_paint_info_line(match.group(1)) for match in paint_matches]
+    parsed_lines = [_parse_paint_info_line(match.group(1)) for match in paint_matches]
+    declarations = [entries for entries, _ in parsed_lines]
     if len(declarations) > 1:
         canonical = declarations[0]
         if any(other != canonical for other in declarations[1:]):
@@ -111,7 +123,7 @@ def inspect_gcode_filaments(data):
         and filaments[0]["paint_index"] == 0
         and set(tool_indices) <= {0}
     )
-    return {
+    result = {
         "paint_info_present": paint_info_present,
         "filaments": filaments,
         "filament_count": len(filaments),
@@ -120,13 +132,16 @@ def inspect_gcode_filaments(data):
         "total_filament_used_g": total_filament_used_g,
         "single_filament_start_compatible": single_filament_start_compatible,
     }
+    if return_raw_colors:
+        return result, (parsed_lines[0][1] if parsed_lines else {})
+    return result
 
 
 def _sanitize_slot_material(raw_type):
     if raw_type is None:
         return None
     if not isinstance(raw_type, str):
-        raise ProtocolError("Unsupported filament box schema")
+        raise ProtocolError(UNSUPPORTED_BOX_SCHEMA)
     candidate = raw_type.strip()
     if (not candidate or len(candidate) > 80 or not candidate.isprintable()
             or "://" in candidate or "-----BEGIN" in candidate):
@@ -145,6 +160,37 @@ def _parse_slot_color(raw_color):
         return None, None
 
 
+def _parse_onboard_slot(ams_index, raw):
+    status = raw.get("status")
+    if type(status) is not int:
+        raise ProtocolError(UNSUPPORTED_BOX_SCHEMA)
+    status_label = STATUS_LABELS.get(status, "other")
+    material_type = _sanitize_slot_material(raw.get("type"))
+    color_rgb, color_hex = _parse_slot_color(raw.get("color"))
+    return {
+        "slot": ams_index + 1,
+        "ams_index": ams_index,
+        "status": status,
+        "status_label": status_label,
+        "available_for_start": status == 5 and material_type is not None and color_rgb is not None,
+        "material_type": material_type,
+        "color_rgb": color_rgb,
+        "color_hex": color_hex,
+    }
+
+
+def _index_onboard_slots(raw_slots):
+    if not isinstance(raw_slots, list) or len(raw_slots) != 4 or not all(isinstance(s, dict) for s in raw_slots):
+        raise ProtocolError(UNSUPPORTED_BOX_SCHEMA)
+    by_index = {}
+    for raw in raw_slots:
+        ams_index = raw.get("index")
+        if type(ams_index) is not int or ams_index not in (0, 1, 2, 3) or ams_index in by_index:
+            raise ProtocolError(UNSUPPORTED_BOX_SCHEMA)
+        by_index[ams_index] = raw
+    return by_index
+
+
 def parse_onboard_box(boxes):
     """Validate and sanitize the qualified Kobra X onboard four-slot box payload."""
     if not isinstance(boxes, list) or len(boxes) != 1 or not isinstance(boxes[0], dict):
@@ -152,40 +198,8 @@ def parse_onboard_box(boxes):
     box_id = boxes[0].get("id")
     if type(box_id) is not int or box_id != -1:
         raise ProtocolError("Only the onboard four-slot configuration is supported")
-    raw_slots = boxes[0].get("slots")
-    if not isinstance(raw_slots, list) or len(raw_slots) != 4 or not all(isinstance(s, dict) for s in raw_slots):
-        raise ProtocolError("Unsupported filament box schema")
-    by_index = {}
-    for raw in raw_slots:
-        ams_index = raw.get("index")
-        if type(ams_index) is not int or ams_index not in (0, 1, 2, 3) or ams_index in by_index:
-            raise ProtocolError("Unsupported filament box schema")
-        by_index[ams_index] = raw
-    slots = []
-    for ams_index in range(4):
-        raw = by_index[ams_index]
-        status = raw.get("status")
-        if type(status) is not int:
-            raise ProtocolError("Unsupported filament box schema")
-        if status == 5:
-            status_label = "loaded"
-        elif status == 0:
-            status_label = "empty"
-        else:
-            status_label = "other"
-        material_type = _sanitize_slot_material(raw.get("type"))
-        color_rgb, color_hex = _parse_slot_color(raw.get("color"))
-        available_for_start = status == 5 and material_type is not None and color_rgb is not None
-        slots.append({
-            "slot": ams_index + 1,
-            "ams_index": ams_index,
-            "status": status,
-            "status_label": status_label,
-            "available_for_start": available_for_start,
-            "material_type": material_type,
-            "color_rgb": color_rgb,
-            "color_hex": color_hex,
-        })
+    by_index = _index_onboard_slots(boxes[0].get("slots"))
+    slots = [_parse_onboard_slot(ams_index, by_index[ams_index]) for ams_index in range(4)]
     return {
         "box_id": -1,
         "box_kind": "onboard",

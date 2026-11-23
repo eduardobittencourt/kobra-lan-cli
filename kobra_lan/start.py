@@ -12,7 +12,7 @@ from contextlib import ExitStack
 from pathlib import Path
 
 from .config import ProtocolError
-from .filaments import inspect_gcode_filaments, parse_onboard_box
+from .filaments import inspect_gcode_filaments, parse_onboard_box, validate_color_channels
 from .mqtt import MQTT
 from .printer import payload_data, file_details, safe_file_details, sanitized
 from .profiles import open_directory, read_json
@@ -147,7 +147,7 @@ def build_plan(config, client, path, name, slot, auto_leveling, vibration, flow)
     if slot not in range(1, 5):
         raise ProtocolError("Slot must be 1..4 (human numbering)")
     data, manifest = describe(path, name)
-    filament_info = inspect_gcode_filaments(data)
+    filament_info, raw_paint_colors = inspect_gcode_filaments(data, return_raw_colors=True)
     if not filament_info["paint_info_present"]:
         raise ProtocolError("G-code has no paint mapping")
     if not filament_info["single_filament_start_compatible"]:
@@ -172,10 +172,9 @@ def build_plan(config, client, path, name, slot, auto_leveling, vibration, flow)
     slot_material = (selected["material_type"] or "").split()
     if not slot_material or slot_material[0].upper() != material.upper():
         raise ProtocolError("Selected slot material differs from the G-code")
-    color = filament["color_rgb"]
-    ams_color = selected["color_rgb"]
-    if ams_color is None:
-        raise ProtocolError("Invalid filament color schema")
+    raw_slot = next(raw for raw in boxes[0]["slots"] if raw.get("index") == slot - 1)
+    color = raw_paint_colors[0]
+    ams_color = validate_color_channels(raw_slot.get("color"))
     if any(type(v) is not bool for v in [auto_leveling, vibration, flow]):
         raise ProtocolError("Preparation settings must be explicit booleans")
     payload = {
@@ -184,7 +183,7 @@ def build_plan(config, client, path, name, slot, auto_leveling, vibration, flow)
         "filesize": manifest["size_bytes"],
         "ams_settings": {"use_ams": True, "ams_box_mapping": [{
             "paint_index": 0, "ams_index": slot - 1,
-            "paint_color": color, "ams_color": ams_color + [255],
+            "paint_color": color, "ams_color": ams_color + [255] if len(ams_color) == 3 else ams_color,
             "material_type": selected["material_type"]}]},
         "task_settings": {"auto_leveling": int(auto_leveling), "vibration_compensation": int(vibration),
             "flow_calibration": int(flow), "dry_mode": 0,

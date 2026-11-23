@@ -158,6 +158,7 @@ class InspectGcodeFilamentsTests(unittest.TestCase):
              b'; paint_info = [{"paint_index":0,"material_type":"PETG","paint_color":[0,255,0]}]\n'),
             (b'; paint_info = [{"paint_index":0,"material_type":"PLA","paint_color":[0,255,0]}]\n'
              b'; paint_info = [{"paint_index":1,"material_type":"PLA","paint_color":[0,255,0]}]\n'),
+            b"; paint_info = " + b"[" * 2000 + b"]" * 2000 + b"\n",
         )
         for payload in cases:
             with self.subTest(payload=payload), self.assertRaises(ProtocolError):
