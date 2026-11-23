@@ -6,6 +6,7 @@ from pathlib import Path
 from . import __version__
 from .cli_output import emit
 from .config import ProtocolError
+from .control import control_print, validate_filename
 from .jobs import DEFAULT_LIMIT, KINDS, MAX_LIMIT, job_info, list_jobs, valid_record_id
 from .mqtt import MQTT
 from .printer import snapshot, file_details, safe_file_details, list_files
@@ -31,6 +32,9 @@ class Parser(argparse.ArgumentParser):
             "kobra-lan files upload": "; review first with kobra-lan gcode inspect",
             "kobra-lan print start": "; review first with kobra-lan print plan",
             "kobra-lan print watch": f"; --timeout accepts whole seconds from 1 to {MAX_TIMEOUT}",
+            "kobra-lan print pause": "; inspect kobra-lan status first and supply --execute (optional --filename NAME)",
+            "kobra-lan print resume": "; inspect kobra-lan status first and supply --execute (optional --filename NAME)",
+            "kobra-lan print cancel": "; inspect kobra-lan status first and supply --execute (optional --filename NAME)",
             "kobra-lan jobs list": f"; --kind accepts all, start, or observation and --limit accepts 1 to {MAX_LIMIT}",
             "kobra-lan jobs info": "; supply a local attempt_id, obs-<32hex>, or unreadable-<64hex> record ID",
         }.get(self.prog, "")
@@ -114,8 +118,9 @@ def build_parser():
     p = gcode.add_parser("inspect", help="Inspect immutable local G-code; no state writes")
     p.add_argument("file", type=Path)
     p.add_argument("--name")
-    p = sub.add_parser("print", help="Watch, plan or explicitly start a print",
-                       description="watch and plan are read-only. start requires a reviewed plan hash and --execute")
+    p = sub.add_parser("print", help="Watch, plan, start or control a print",
+                       description="watch and plan are read-only. start requires a reviewed plan hash and --execute. "
+                                   "pause, resume and cancel are experimental controls requiring --execute")
     printing = p.add_subparsers(dest="print_command", required=True)
     for command in ("plan", "start"):
         p = printing.add_parser(command, help="Read-only plan" if command == "plan" else "Experimental guarded execution")
@@ -134,6 +139,32 @@ def build_parser():
                                         "Reports an unknown outcome when telemetry cannot establish it.")
     p.add_argument("--timeout", type=watch_timeout, default=DEFAULT_TIMEOUT, metavar="SECONDS",
                    help=f"Observation deadline in seconds (1 to {MAX_TIMEOUT}, default {DEFAULT_TIMEOUT})")
+    control_docs = {
+        "pause": (
+            "Experimental guarded pause of an active print; requires --execute",
+            "Experimental single-shot pause on Kobra X model 20030 / firmware 2.0.2.2 "
+            "(hardware_control_validated: false). Requires active printing state and --execute; "
+            "never retries uncertain commands automatically.",
+        ),
+        "resume": (
+            "Experimental guarded resume of a paused print; requires --execute",
+            "Experimental single-shot resume on Kobra X model 20030 / firmware 2.0.2.2 "
+            "(hardware_control_validated: false). Requires paused state and --execute; "
+            "never retries uncertain commands automatically.",
+        ),
+        "cancel": (
+            "Experimental guarded cancel of an active or paused print; requires --execute",
+            "Experimental single-shot cancel on Kobra X model 20030 / firmware 2.0.2.2 "
+            "(hardware_control_validated: false). Requires printing, recognized preparation phase, "
+            "or paused state and --execute; never retries uncertain commands automatically.",
+        ),
+    }
+    for command, (help_text, desc_text) in control_docs.items():
+        p = printing.add_parser(command, help=help_text, description=desc_text)
+        p.add_argument("--execute", action="store_true", required=True,
+                       help="Explicitly execute one control command; no implicit dry run")
+        p.add_argument("--filename", metavar="NAME",
+                       help="Optional active remote filename guard; refuses before publish on mismatch")
     p = sub.add_parser("jobs", help="Inspect local job history; no network or state writes",
                        description="Offline read-only inspection of local start receipts/markers and saved watch "
                                    "observations. Does not query the printer; unwatched other-client prints are absent.")
@@ -181,6 +212,14 @@ def main(argv=None):
             args.plan_sha256 = args.plan_sha256.lower()
         if args.command == "print" and args.print_command == "watch":
             watch = WatchProgress()
+        if args.command == "print" and args.print_command in ("pause", "resume", "cancel"):
+            if args.filename is not None:
+                try:
+                    validate_filename(args.filename)
+                except ProtocolError:
+                    raise ArgumentFailure(
+                        "Invalid --filename guard; supply a safe printable filename without path separators or URL characters"
+                    ) from None
         if args.command == "jobs" and args.jobs_command == "info":
             if not valid_record_id(args.record_id):
                 raise ArgumentFailure(
@@ -241,8 +280,10 @@ def main(argv=None):
         emit(json_mode, code="invalid_arguments", message=str(error))
         return 2
     except ProtocolError as error:
-        status = 3 if getattr(error, "exit_code", 2) == 3 else 2
-        code = "operation_failed" if status == 3 else "validation_failed"
+        status = getattr(error, "exit_code", 2)
+        if status not in (2, 3, 130):
+            status = 2
+        code = "interrupted" if status == 130 else ("operation_failed" if status == 3 else "validation_failed")
         partial = watch.record(watch.partial(code), state_dir) if watch else getattr(error, "result", None)
         emit(json_mode, partial, code=code, message=str(error))
         return status
@@ -272,6 +313,8 @@ def operate(args, config):
     elif args.command == "files" and args.files_command == "info":
         with MQTT(config) as client:
             result = safe_file_details(file_details(client, args.name))
+    elif args.command == "print" and args.print_command in ("pause", "resume", "cancel"):
+        result = control_print(config, args.print_command, args.state_dir, expected_filename=args.filename)
     elif args.command == "print":
         result = start(config, args.file, args.name, args.slot,
             args.auto_leveling == "on", args.vibration_compensation == "on", args.flow_calibration == "on",

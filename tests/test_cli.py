@@ -11,7 +11,8 @@ class CommandTreeTests(unittest.TestCase):
     def test_every_leaf_has_help_without_operations(self):
         leaves = [("printer", c) for c in ("pair", "list", "info", "use", "remove")]
         leaves += [("files", c) for c in ("list", "info", "upload")]
-        leaves += [("gcode", "inspect"), ("print", "plan"), ("print", "start"), ("print", "watch")]
+        leaves += [("gcode", "inspect"), ("print", "plan"), ("print", "start"), ("print", "watch"),
+                   ("print", "pause"), ("print", "resume"), ("print", "cancel")]
         leaves += [("jobs", "list"), ("jobs", "info")]
         leaves += [(c,) for c in ("status", "doctor", "completion")]
         for leaf in leaves:
@@ -39,7 +40,9 @@ class CommandTreeTests(unittest.TestCase):
     def test_execution_options_cannot_be_abbreviated(self):
         parser = build_parser()
         for argv in (["files", "upload", "a.gcode", "--sha256", "0" * 64, "--exec"],
-                     ["files", "upload", "a.gcode", "--execute", "--sha", "0" * 64]):
+                     ["files", "upload", "a.gcode", "--execute", "--sha", "0" * 64],
+                     ["print", "pause", "--exec"],
+                     ["print", "cancel", "--execute", "--file", "a.gcode"]):
             with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(ArgumentFailure):
                 parser.parse_args(argv)
 
@@ -120,7 +123,14 @@ class SafeArgumentTests(unittest.TestCase):
                  ["jobs", "list", "--limit", secret],
                  ["jobs", "list", "--limit", "0"],
                  ["jobs", "list", "--limit", "501"],
-                 ["jobs", "info", secret]]
+                 ["jobs", "info", secret],
+                 ["print", "pause"],
+                 ["print", "resume"],
+                 ["print", "cancel"],
+                 ["print", "pause", "--filename", secret],
+                 ["print", "pause", "--execute", "--filename", secret],
+                 ["print", "resume", "--execute", "--filename", ""],
+                 ["print", "cancel", "--execute", "--filename", "../escape.gcode"]]
         for mode in ([], ["--json"]):
             for case in cases:
                 with self.subTest(case=case, mode=mode), patch("kobra_lan.cli.Registry") as registry:
@@ -141,12 +151,77 @@ class SafeArgumentTests(unittest.TestCase):
 
     def test_missing_execution_controls_direct_to_review_commands(self):
         for argv, guidance in ((['files', 'upload', 'a.gcode'], 'gcode inspect'),
-                               (['print', 'start', 'a.gcode'], 'print plan')):
+                               (['print', 'start', 'a.gcode'], 'print plan'),
+                               (['print', 'pause'], '--execute'),
+                               (['print', 'resume'], '--execute'),
+                               (['print', 'cancel'], '--execute')):
             out = io.StringIO()
             with patch('kobra_lan.cli.Registry') as registry, contextlib.redirect_stdout(out):
                 self.assertEqual(main(argv), 2)
             registry.assert_not_called()
             self.assertIn(guidance, out.getvalue())
+
+    def test_print_control_outcomes_render_cleanly_in_text_and_json_modes(self):
+        import json
+        from kobra_lan.control import ControlUncertain
+        confirmed = {
+            "action": "pause",
+            "wire_action": "pause",
+            "device_digest": "a" * 64,
+            "model": "Anycubic Kobra X",
+            "firmware": "2.0.2.2",
+            "status": "control_observed_paused",
+            "dry_run": False,
+            "experimental": True,
+            "hardware_control_validated": False,
+            "taskid": "-1",
+            "before": {"state": "busy"},
+            "before_project": {"state": "printing", "filename": "sample.gcode"},
+            "ack": {"code": 0, "msgid": "mid-1"},
+            "after": {"state": "busy"},
+            "project": {"state": "paused", "filename": "sample.gcode"},
+        }
+        unconfirmed = {**confirmed, "status": "control_acknowledged_not_confirmed",
+                       "project": {"state": "pausing", "filename": "sample.gcode"}}
+        uncertain_io = {**confirmed, "status": "control_uncertain_no_retry"}
+        cases = (
+            (["print", "pause", "--execute"], confirmed, None, 0, None, "control_observed_paused"),
+            (["print", "resume", "--execute", "--filename", "sample.gcode"], unconfirmed, None, 0, None,
+             "control_acknowledged_not_confirmed"),
+            (["print", "cancel", "--execute"], None, ControlUncertain(uncertain_io, exit_code=3), 3,
+             "operation_failed", "control_uncertain_no_retry"),
+            (["print", "cancel", "--execute"], None, ControlUncertain(uncertain_io, exit_code=2), 2,
+             "validation_failed", "control_uncertain_no_retry"),
+            (["print", "cancel", "--execute"], None, ControlUncertain(uncertain_io, exit_code=130), 130,
+             "interrupted", "control_uncertain_no_retry"),
+        )
+        for argv, ret, exc, expected_exit, expected_code, expected_status in cases:
+            for mode in ([], ["--json"]):
+                with self.subTest(argv=argv, mode=mode, expected_status=expected_status):
+                    out, err = io.StringIO(), io.StringIO()
+                    with patch("kobra_lan.cli.Registry") as registry, \
+                            patch("kobra_lan.cli.control_print", return_value=ret, side_effect=exc) as ctrl, \
+                            contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                        registry.return_value.access.return_value.__enter__.return_value = (object(), {})
+                        self.assertEqual(main([*mode, *argv]), expected_exit)
+                    ctrl.assert_called_once()
+                    self.assertEqual(err.getvalue(), "")
+                    rendered = out.getvalue()
+                    self.assertIn(expected_status, rendered)
+                    if mode:
+                        envelope = json.loads(rendered)
+                        self.assertEqual(envelope["schema_version"], 1)
+                        self.assertEqual(envelope["ok"], expected_exit == 0)
+                        self.assertEqual(envelope["result"]["status"], expected_status)
+                        self.assertTrue(envelope["result"]["experimental"])
+                        self.assertFalse(envelope["result"]["hardware_control_validated"])
+                        if expected_code is not None:
+                            self.assertEqual(envelope["error"]["code"], expected_code)
+                    else:
+                        self.assertIn("Experimental: yes", rendered)
+                        self.assertIn("Hardware control validated: no", rendered)
+                        if expected_code is not None:
+                            self.assertIn(f"Error ({expected_code}):", rendered)
 
 
 class NamedOnlySetupTests(unittest.TestCase):

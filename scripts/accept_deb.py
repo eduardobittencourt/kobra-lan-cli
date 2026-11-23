@@ -66,10 +66,14 @@ def installed_probes(probe, version, home, work, before):
     empty_home.mkdir(exist_ok=True)
     home_owner = home.stat()
     os.chown(empty_home, home_owner.st_uid, home_owner.st_gid)
-    assert "watch" in probe("print", "--help", probe_home=empty_home)
+    print_help = probe("print", "--help", probe_home=empty_home)
+    assert all(word in print_help for word in ("watch", "pause", "resume", "cancel"))
     assert "--timeout SECONDS" in probe("print", "watch", "--help", probe_home=empty_home)
     for action in ("plan", "start"):
         assert "--reprint-from PREVIOUS_ATTEMPT_ID" in probe("print", action, "--help", probe_home=empty_home)
+    for action in ("pause", "resume", "cancel"):
+        help_text = probe("print", action, "--help", probe_home=empty_home)
+        assert "--execute" in help_text and "--filename" in help_text
     jobs_help = probe("jobs", "--help", probe_home=empty_home)
     assert "list" in jobs_help and "info" in jobs_help
     jobs_list_help = probe("jobs", "list", "--help", probe_home=empty_home)
@@ -77,8 +81,10 @@ def installed_probes(probe, version, home, work, before):
     assert "RECORD_ID" in probe("jobs", "info", "--help", probe_home=empty_home)
     for shell in ("bash", "zsh", "fish"):
         completion = probe("completion", shell, probe_home=empty_home)
-        assert all(word in completion for word in ("kobra-lan", "watch", "timeout", "jobs", "observation", "limit"))
+        assert all(word in completion for word in ("kobra-lan", "watch", "timeout", "pause", "resume", "cancel",
+                                                   "execute", "filename", "jobs", "observation", "limit"))
         assert all(f"print {action}:--reprint-from" in completion for action in ("plan", "start"))
+        assert all(f"print {action}:--filename" in completion for action in ("pause", "resume", "cancel"))
         assert "jobs list:--kind" in completion and "jobs list:--limit" in completion
     assert not list(empty_home.iterdir())
     hostile = "https://example.test/?token=SYNTHETIC_PRIVATE"

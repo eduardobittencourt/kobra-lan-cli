@@ -53,6 +53,10 @@ cd kobra-lan-cli
   --plan-sha256 PLAN_HASH --execute
 # Observe a job already active on the selected printer:
 ./kobra-lan --printer bench print watch --timeout 3600
+# Experimental guarded lifecycle controls (explicit --execute, optional --filename guard):
+./kobra-lan --printer bench print pause --execute --filename agent-model.gcode
+./kobra-lan --printer bench print resume --execute --filename agent-model.gcode
+./kobra-lan --printer bench print cancel --execute --filename agent-model.gcode
 # Inspect local job history offline (start receipts/markers and saved watch observations):
 ./kobra-lan --printer bench jobs list --kind all --limit 20
 ./kobra-lan --printer bench jobs info RECORD_ID
@@ -66,9 +70,9 @@ with `--reprint-from PREVIOUS_ATTEMPT_ID` on both commands. See the
 [reprint workflow](docs/usage.md#deliberately-reprint-a-stored-file) for eligibility and safety checks.
 
 The canonical tree is `printer pair|list|info|use|remove`, `doctor`, `status`,
-`files list|info|upload`, `gcode inspect`, `print plan|start|watch`,
+`files list|info|upload`, `gcode inspect`, `print plan|start|watch|pause|resume|cancel`,
 `jobs list|info`, and `completion bash|zsh|fish`. Group `--help` describes
-local history inspection, observation, planning and execution.
+local history inspection, observation, planning and execution controls.
 Upload requires both execution controls and never starts a print. Inspection and
 job history are local and read-only; planning queries the printer without changing
 it. Text is the default; root `--json` selects the versioned machine contract.
@@ -76,6 +80,15 @@ Exit codes are 0 (success), 2 (arguments/protocol/validation), 3
 (configuration/network failure), and 130 (interrupted print observation).
 Global `--config`, `--printer`, `--state-dir` and `--json` precede the command.
 These examples describe the workflow; automated checks use synthetic fixtures.
+
+`print pause`, `print resume`, and `print cancel` are experimental single-shot
+lifecycle controls (`experimental: true`, `hardware_control_validated: false`)
+requiring `--execute`, fresh Kobra X model 20030 / firmware 2.0.2.2
+qualification, and strict state preconditions, with an optional `--filename`
+active-job guard. They hold the per-device lease under `--state-dir` without
+modifying existing profiles, receipts, markers, or watch observations, and
+never replay uncertain commands automatically. See
+[lifecycle controls](docs/usage.md#pause-resume-and-cancel-an-active-print).
 
 `print watch` uses read-only telemetry on Kobra X model 20030 / firmware
 2.0.2.2. It defaults to 86400 seconds, saves a sanitized local observation under

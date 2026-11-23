@@ -20,8 +20,8 @@ ENTRY_POINTS_FILE = "entry_points.txt"
 RUNTIME_LOCK = ROOT / "requirements-runtime.txt"
 
 MODULES = {f"kobra_lan/{name}.py" for name in
-           ("__init__", "cli", "cli_output", "completions", "config", "jobs", "mqtt", "printer", "start", "upload",
-            "provisioning", "pairing", "profiles", "diagnostics", "watch")}
+           ("__init__", "cli", "cli_output", "completions", "config", "control", "jobs", "mqtt", "printer", "start",
+            "upload", "provisioning", "pairing", "profiles", "diagnostics", "watch")}
 DOCS = {
     "README.md", "LICENSE", "NOTICE.md", "CHANGELOG.md", "ROADMAP.md", "CONTRIBUTING.md",
     "AGENTS.md", "SECURITY.md", "CODE_OF_CONDUCT.md", "docs/README.md", "docs/pairing.md",
@@ -135,6 +135,9 @@ def main():
     empty_home = outside / "empty-home"
     empty_home.mkdir()
     probe_env = dict(env, HOME=str(empty_home))
+    print_help = subprocess.check_output([str(command), "print", "--help"],
+                                         cwd=outside, env=probe_env, text=True)
+    assert all(word in print_help for word in ("watch", "pause", "resume", "cancel"))
     help_text = subprocess.check_output([str(command), "print", "watch", "--help"],
                                         cwd=outside, env=probe_env, text=True)
     assert "--timeout SECONDS" in help_text
@@ -142,6 +145,10 @@ def main():
         help_text = subprocess.check_output([str(command), "print", action, "--help"],
                                             cwd=outside, env=probe_env, text=True)
         assert "--reprint-from PREVIOUS_ATTEMPT_ID" in help_text
+    for action in ("pause", "resume", "cancel"):
+        help_text = subprocess.check_output([str(command), "print", action, "--help"],
+                                            cwd=outside, env=probe_env, text=True)
+        assert "--execute" in help_text and "--filename" in help_text
     jobs_help = subprocess.check_output([str(command), "jobs", "--help"],
                                         cwd=outside, env=probe_env, text=True)
     assert "list" in jobs_help and "info" in jobs_help
@@ -154,8 +161,10 @@ def main():
     for shell in ("bash", "zsh", "fish"):
         completion = subprocess.check_output([str(command), "completion", shell],
                                              cwd=outside, env=probe_env, text=True)
-        assert all(word in completion for word in ("kobra-lan", "watch", "timeout", "jobs", "observation", "limit"))
+        assert all(word in completion for word in ("kobra-lan", "watch", "timeout", "pause", "resume", "cancel",
+                                                   "execute", "filename", "jobs", "observation", "limit"))
         assert all(f"print {action}:--reprint-from" in completion for action in ("plan", "start"))
+        assert all(f"print {action}:--filename" in completion for action in ("pause", "resume", "cancel"))
         assert "jobs list:--kind" in completion and "jobs list:--limit" in completion
     assert not list(empty_home.iterdir())
     print(f"Python archives and independent installation verified: {version}")

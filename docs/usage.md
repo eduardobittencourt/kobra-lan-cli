@@ -24,7 +24,7 @@ The output envelope does not change private receipt or registry schemas.
 
 | Error code | Exit | Meaning |
 | --- | --- | --- |
-| `invalid_arguments` | 2 | Parser failure or malformed required execution hash |
+| `invalid_arguments` | 2 | Parser failure or malformed required execution hash or `--filename` guard |
 | `validation_failed` | 2 | Selection, trust, protocol, qualification or reviewed-content refusal |
 | `operation_failed` | 3 | Configuration, dependency, I/O or network failure; may retain local partial outcome |
 | `diagnostic_failed` | 2 or 3 | Failed ordered doctor checks; exit 3 takes precedence |
@@ -50,6 +50,7 @@ from a filename or network acknowledgement.
 | `print plan` | `file_sha256`, `device_digest`, model/firmware, canonical `payload`, `plan_sha256`, slot and qualification flags; latest local `attempt_id` and `start_status` when available; `previous_attempt_id` for a reprint review |
 | `print start` | Plan fields, `dry_run: false`, local `attempt_id`, `previous_attempt_id` for a reprint, status/ack/observation evidence and `receipt_path`; an uncertain error may return a subset of that evidence |
 | `print watch` | `outcome`, `reason`, verified `phase`, `progress` (percent), `current_layer`, `total_layers` when available, plus `observation_recorded` and `observation_id` when an active job was observed |
+| `print pause\|resume\|cancel` | `action`, `wire_action`, `device_digest`, model/firmware, `status` (`control_observed_*`, `control_acknowledged_not_confirmed`, or `control_uncertain_no_retry`), `dry_run: false`, `experimental: true`, `hardware_control_validated: false`, `taskid`, optional `expected_filename`, sanitized `before`/`before_project`, `ack`, `after`, and `project` (subset retained on uncertain failure) |
 | `jobs list` | `device_digest`, `kind`, `limit`, `total_count`, `returned_count`, `incomplete_count`, `truncated`, newest-first `jobs` summaries, and local-only `coverage` metadata |
 | `jobs info` | Detailed start attempt (chain links, hashes, settings, `start_status`, `terminal_outcome: "unknown"`, `reprint_eligibility`, `upload_provenance`, `issues`, `unattributed_matching_observations`), saved watch observation, or `unreadable-<storage-key>` record, plus `coverage` metadata |
 
@@ -132,6 +133,73 @@ previous print completed successfully. A missing or inconsistent receipt, a
 reservation without observed activity, or a bare ACK is not eligible. If a
 start is interrupted or uncertain, inspect status and keep the records intact;
 do not replay the review, change `--state-dir` or remove reservations to retry.
+
+## Pause, resume and cancel an active print
+
+```sh
+kobra-lan --printer bench print pause --execute
+kobra-lan --printer bench print pause --execute --filename agent-model.gcode
+kobra-lan --printer bench print resume --execute --filename agent-model.gcode
+kobra-lan --printer bench print cancel --execute --filename agent-model.gcode
+```
+
+`print pause`, `print resume`, and `print cancel` are **experimental**
+single-shot lifecycle controls (`experimental: true`,
+`hardware_control_validated: false` until live Kobra X transitions are
+validated on hardware). They act on the active job on a qualified Kobra X
+(model 20030 / firmware 2.0.2.2), including jobs started by another client.
+
+- **Explicit execution guard and optional `--filename`:** Every lifecycle
+  command requires `--execute`; omitting it fails with exit 2
+  (`invalid_arguments`) before target selection, state locking, or printer
+  access (there is no implicit dry run). Optional `--filename NAME` is
+  validated before target selection as a safe printable filename (non-empty,
+  at most 255 printable characters, no `/ \ : ? #`, no URL schemes or control
+  characters). If the fresh active `project.filename` differs, the CLI exits 2
+  (`validation_failed`) before publishing.
+- **Strict pre-flight qualification and state preconditions:** Over one pinned
+  MQTT session, the CLI verifies a fresh `info` report for Kobra X model 20030
+  / firmware 2.0.2.2 and consistent optional identifiers, then enforces:
+  - `print pause` (wire action `pause`): requires active `project.state == "printing"`.
+  - `print resume` (wire action `resume`): requires `project.state == "paused"`.
+  - `print cancel` (wire action `stop`): requires `project.state` in `printing`,
+    a recognized firmware `2.0.2.2` preparation phase (`extfilbox_filament_feeding`,
+    `frequency_sweeping`, `hotbed_cooling_off`, `hotbed_heating`, `nozzle_cooling`,
+    `nozzle_heating`, `nozzle_purging`, `nozzle_wiping`, `z_offset_calibrating`),
+    or `paused`.
+  - Idle (`state == "free"`), already-reached states, transitional states
+    (`pausing`, `resuming`, `stopping`), and unrecognized states fail with exit
+    2 (`validation_failed`) without publishing.
+- **Single-shot publish and bounded post-ACK verification:** The CLI sends at
+  most one QoS 0 MQTT `print` command carrying the validated active `task_id`
+  (or `"-1"` placeholder), waits for one correlated `/response` ACK (`code == 0`),
+  and then polls fresh `info` up to 5 times at 1-second intervals on the same
+  session without treating ACK as proof of state change:
+  - `control_observed_paused`, `control_observed_resumed`, or
+    `control_observed_stopped` (exit 0): bounded polling observed the expected
+    post-action state (`paused` for pause; `printing` or a recognized
+    preparation phase for resume; idle `free` with no active project, `stoped`,
+    or `canceled` for cancel).
+  - `control_acknowledged_not_confirmed` (exit 0): ACK succeeded and bounded
+    polling completed cleanly while the printer remained in a prior or
+    transitional state (for example, while parking or cooling). Inspect
+    `status` or `print watch` rather than replaying blindly.
+  - `control_uncertain_no_retry` (exit 2 on protocol rejection/malformed
+    response, exit 3 on timeout, disconnect, or I/O failure): retains safe
+    partial evidence (`before`, `before_project`, and `ack`/`after`/`project`
+    when available) and performs no reconnect or retry. Always inspect `status`
+    before taking further action; never resend blindly.
+- **Per-device concurrency lease and state preservation:** Lifecycle controls
+  acquire the shared private per-device lease (`.device.lock`) under
+  `--state-dir` across pre-flight inspection, publish, and bounded observation,
+  verifying directory binding before publish without following symlinks or
+  changing permissions. Concurrent `files upload`, `print start`, and
+  `print pause|resume|cancel` invocations targeting the same device and
+  `--state-dir` fail before printer access. Existing profiles, upload receipts,
+  start receipts, `.attempt` markers, and watch observations remain
+  byte-for-byte unchanged. Because the printer has no compare-and-swap control
+  primitive, external clients (touchscreen or mobile app) can still change
+  printer state between pre-flight inspection and publish.
 
 ## Watch an active print
 
@@ -246,11 +314,9 @@ the same `printer_id` and `--state-dir` see identical local history.
 - Upload is currently qualified only for model 20030 / firmware 2.0.2.2, Next-generated G-code, and the Kobra X profile. It requires an idle printer with no active project.
 - Hashing and multipart construction use the same bytes in memory. No G-code translation, `print=true` flag, or HTTP redirects.
 - Exclusive reservations are persisted with fsync in `~/.local/share/kobra-lan/uploads/`. Upload and first start use separate device/file markers. A reprint adds an attempt-keyed successor without modifying the original. Each predecessor can be consumed at most once across processes and restarts.
-- Starts also hold a private per-device lease from before printer access until observation ends. After an ambiguous response, inspect status/files/receipts and preserve all markers. Different state directories, older binaries and other clients do not share the start lease.
-- Uploads sharing a device state directory hold a private device lock through
-  listing, reservation, POST and verification. A concurrent contender fails
-  before printer access, including for different hashes or profile names.
-  The lock file is retained; closing its descriptor releases the lease.
+- Mutating device commands (`files upload`, `print start`, and `print pause|resume|cancel`) sharing a device state directory hold a private shared per-device lease (`.device.lock`, alongside `.upload.lock`/`.start.lock` for upload and start compatibility) from before printer access until post-action observation ends. A concurrent contender fails before printer access, including for different hashes, operations, or profile names. After an ambiguous response, inspect status/files/receipts and preserve all markers. Different state directories, older binaries and other clients do not share this lease.
+- Uploads keep listing, reservation, POST and verification inside that device lease.
+  The lock files are retained; closing their descriptors releases the lease.
   State paths are walked without following symlinks; an existing device directory
   must be user-owned and private (0700). Invalid permissions are refused without
   changing them, and the lock must be a private regular file (0600).

@@ -19,8 +19,8 @@ SOURCE_FILES = [
     "docs/README.md", "docs/pairing.md", "docs/usage.md", "docs/development.md",
     "docs/releases.md", "docs/pairing-security-review.md", "docs/maintenance.md",
 ]
-MODULES = ["__init__", "cli", "cli_output", "completions", "config", "jobs", "mqtt", "printer", "start", "upload",
-           "provisioning", "pairing", "profiles", "diagnostics", "watch"]
+MODULES = ["__init__", "cli", "cli_output", "completions", "config", "control", "jobs", "mqtt", "printer", "start",
+           "upload", "provisioning", "pairing", "profiles", "diagnostics", "watch"]
 DEBIAN_FILES = ["control", "rules", "source/format", "docs", "copyright", "kobra-lan.1", "manpages"]
 
 

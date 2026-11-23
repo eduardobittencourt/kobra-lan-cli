@@ -56,6 +56,20 @@ to 86400. Once an active job is observed, it atomically saves one sanitized
 private observation record under --state-dir/observations/<device-prefix>/
 without altering existing receipts or markers. See usage.md for outcomes and
 qualification evidence.
+.B print pause|resume|cancel --execute [--filename NAME]
+executes one experimental guarded lifecycle command (wire actions pause,
+resume, or stop for cancel) on Kobra X model 20030 / firmware 2.0.2.2
+(experimental: true, hardware_control_validated: false). Omitting --execute or
+supplying a malformed --filename exits 2 before target selection or printer
+access; there is no implicit dry run. Pre-flight fresh info checks require
+printing for pause, paused for resume, and printing, a recognized preparation
+phase, or paused for cancel; idle, already-reached, transitional, unrecognized,
+or mismatched --filename states exit 2 without publishing. Holds the shared
+per-device lease under --state-dir without altering existing profiles, receipts,
+markers, or watch observations. Bounded post-ACK polling reports
+control_observed_paused|resumed|stopped, control_acknowledged_not_confirmed, or
+control_uncertain_no_retry (exit 2 protocol / exit 3 I/O or timeout) with no
+automatic retry; inspect status before taking further action.
 .B jobs list [--kind all|start|observation] [--limit N]
 and
 .B jobs info RECORD_ID

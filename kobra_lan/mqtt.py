@@ -6,6 +6,7 @@ This implementation contains no imported Bridge modules.
 import hashlib
 import hmac
 import json
+import re
 import socket
 import ssl
 import struct
@@ -16,6 +17,8 @@ from .config import ProtocolError
 
 MAX_PACKET = 4 * 1024 * 1024
 BASE = "anycubic/anycubicCloud/v1"
+CONTROL_ACTIONS = frozenset({"pause", "resume", "stop"})
+TASKID_RE = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 
 
 def string(value):
@@ -268,4 +271,67 @@ class MQTT:
             if isinstance(response, dict) and topic.endswith("/response") and response.get("msgid") == msgid:
                 if response.get("code") != 0:
                     raise ProtocolError("Start was rejected; do not retry automatically")
+                return {"code": 0, "msgid": msgid}
+
+    def control_once(self, action, taskid="-1"):
+        """One MQTT print control publish, one correlated ACK wait; never reconnect/replay.
+
+        Allowed actions are strictly pause, resume, and stop. ACK means accepted by the
+        broker/device, not proof of physical state transition.
+        """
+        if action not in CONTROL_ACTIONS:
+            raise ProtocolError("Unqualified MQTT print control action")
+        if not isinstance(taskid, str) or TASKID_RE.fullmatch(taskid) is None:
+            raise ProtocolError("Invalid print control taskid")
+        self.begin_stage('control')
+        msgid = str(uuid.uuid4())
+        message = {
+            "type": "print",
+            "action": action,
+            "msgid": msgid,
+            "timestamp": int(time.time() * 1000),
+            "data": {"taskid": taskid},
+        }
+        topic = f"{BASE}/slicer/printer/{self.config.type_id}/{self.config.printer_id}/print"
+        self.sock.settimeout(self.remaining())
+        self.sock.sendall(packet(0x30, string(topic) + json.dumps(message, separators=(",", ":")).encode()))
+        deadline = self.stage_deadline
+        while True:
+            header, body = self.receive(deadline)
+            if header >> 4 != 3:
+                continue
+            if len(body) < 2:
+                raise ProtocolError("Malformed MQTT publish")
+            length = struct.unpack("!H", body[:2])[0]
+            if length + 2 > len(body):
+                raise ProtocolError("Malformed MQTT topic")
+            try:
+                response_topic = body[2:2 + length].decode()
+            except UnicodeDecodeError:
+                raise ProtocolError("Malformed MQTT topic") from None
+            offset = 2 + length
+            qos = (header >> 1) & 3
+            if qos not in (0, 1):
+                raise ProtocolError("Unsupported MQTT QoS")
+            if qos == 1:
+                pid = body[offset:offset + 2]
+                if len(pid) != 2:
+                    raise ProtocolError("Malformed MQTT packet identifier")
+                offset += 2
+                self.sock.settimeout(self.remaining())
+                self.sock.sendall(packet(0x40, pid))
+            try:
+                response = json.loads(body[offset:])
+            except (ValueError, UnicodeDecodeError):
+                if response_topic.endswith("/response"):
+                    raise ProtocolError("Malformed MQTT control response") from None
+                continue
+            if not isinstance(response, dict):
+                if response_topic.endswith("/response"):
+                    raise ProtocolError("Malformed MQTT control response")
+                continue
+            if response_topic.endswith("/response") and response.get("msgid") == msgid:
+                code = response.get("code")
+                if type(code) is not int or code != 0:
+                    raise ProtocolError("Print control was rejected; do not retry automatically")
                 return {"code": 0, "msgid": msgid}

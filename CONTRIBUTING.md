@@ -31,7 +31,8 @@ The source launcher uses `/usr/bin/python3`; install distro
 Use the project's declared development dependencies, not global packages.
 Initial lint checks syntax and Pyflakes (`E9`, `F`); formatting is not enforced.
 See [release checks](docs/releases.md) for Python archive, Debian build, lintian
-and Debian 13/Ubuntu 24.04 acceptance commands when distribution inputs change.
+and Debian 13/Ubuntu 24.04 acceptance commands, which run in CI and at version
+release time (and locally in disposable environments when changing packaging tooling).
 
 ## Changes and reviews
 
