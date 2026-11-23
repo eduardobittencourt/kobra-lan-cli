@@ -7,6 +7,7 @@ from . import __version__
 from .cli_output import emit
 from .config import ProtocolError
 from .control import control_print, validate_filename
+from .filaments import inspect_gcode_filaments, list_slots
 from .jobs import DEFAULT_LIMIT, KINDS, MAX_LIMIT, job_info, list_jobs, valid_record_id
 from .mqtt import MQTT
 from .printer import snapshot, file_details, safe_file_details, list_files
@@ -102,6 +103,13 @@ def build_parser():
     p.add_argument("--yes", action="store_true", help="Confirm local deletion without a terminal")
     sub.add_parser("doctor", help="Bounded read-only connection diagnosis; never repairs or provisions")
     sub.add_parser("status", help="Read identity, firmware, temperature and current print")
+    p = sub.add_parser("slots", help="Inspect onboard four-slot filament inventory; read-only",
+                       description="Read-only inspection of the qualified Kobra X onboard four-slot filament box. "
+                                   "Does not modify slots, credentials, or local state; external ACE units remain unqualified.")
+    slots = p.add_subparsers(dest="slots_command", required=True)
+    slots.add_parser("list", help="List onboard filament slots (1..4); read-only",
+                     description="Read-only onboard four-slot inventory on Kobra X model 20030 / firmware 2.0.2.2 "
+                                 "(idle or printing). Reports slot numbering, status, material, color, and start availability.")
     p = sub.add_parser("files", help="Observe storage or explicitly upload; never starts prints",
                        description="list/info are read-only; upload requires reviewed hash and --execute")
     files = p.add_subparsers(dest="files_command", required=True)
@@ -263,8 +271,8 @@ def main(argv=None):
                     raise ProtocolError("Pairing rejects --printer and --config; supply --name for a new profile")
                 result = registry.pair(args.name, args.host, args.trust_sha256, args.default)
         elif args.command == "gcode":
-            _, result = describe(args.file, args.name)
-            result["dry_run"] = True
+            data, result = describe(args.file, args.name)
+            result = {**result, **inspect_gcode_filaments(data), "dry_run": True}
         elif watch is not None:
             result = observe(registry, args.config, args.selected_printer, args.timeout,
                              watch.update, on_target=watch.bind_device)
@@ -307,6 +315,8 @@ def operate(args, config):
     """Run one operation while its selected managed configuration is leased."""
     if args.command == "status":
         result = snapshot(config)
+    elif args.command == "slots" and args.slots_command == "list":
+        result = list_slots(config)
     elif args.command == "files" and args.files_command == "list":
         with MQTT(config) as client:
             result = {"records": list_files(client)}

@@ -10,6 +10,7 @@ from kobra_lan.cli import ArgumentFailure, build_parser, main
 class CommandTreeTests(unittest.TestCase):
     def test_every_leaf_has_help_without_operations(self):
         leaves = [("printer", c) for c in ("pair", "list", "info", "use", "remove")]
+        leaves += [("slots", "list")]
         leaves += [("files", c) for c in ("list", "info", "upload")]
         leaves += [("gcode", "inspect"), ("print", "plan"), ("print", "start"), ("print", "watch"),
                    ("print", "pause"), ("print", "resume"), ("print", "cancel")]
@@ -24,7 +25,7 @@ class CommandTreeTests(unittest.TestCase):
 
     def test_removed_commands_and_missing_groups_fail_before_access(self):
         for argv in (["file", "x"], ["upload", "x"], ["inspect", "x"], ["start", "x"],
-                     ["files"], ["printer"], ["gcode"], ["print"], ["jobs"],
+                     ["slots"], ["files"], ["printer"], ["gcode"], ["print"], ["jobs"],
                      ["status", "--printer", "bench"], ["--print", "bench", "status"]):
             with self.subTest(argv=argv), patch("kobra_lan.cli.Registry") as registry:
                 with contextlib.redirect_stdout(io.StringIO()):
@@ -113,7 +114,7 @@ class SafeArgumentTests(unittest.TestCase):
     def test_hostile_inputs_never_echo_or_open_access(self):
         import json
         secret = "https://example.test/?token=SYNTHETIC_PRIVATE\x1b[31m"
-        cases = [[secret], ["files", secret], ["printer", "pair"],
+        cases = [[secret], ["slots", secret], ["files", secret], ["printer", "pair"],
                  ["files", "upload", secret],
                  ["files", "upload", secret, "--execute", "--sha256", secret],
                  ["print", "start", secret, "--name", "a.gcode", "--slot", "1",

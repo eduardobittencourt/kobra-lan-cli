@@ -12,6 +12,7 @@ from contextlib import ExitStack
 from pathlib import Path
 
 from .config import ProtocolError
+from .filaments import inspect_gcode_filaments, parse_onboard_box
 from .mqtt import MQTT
 from .printer import payload_data, file_details, safe_file_details, sanitized
 from .profiles import open_directory, read_json
@@ -146,14 +147,12 @@ def build_plan(config, client, path, name, slot, auto_leveling, vibration, flow)
     if slot not in range(1, 5):
         raise ProtocolError("Slot must be 1..4 (human numbering)")
     data, manifest = describe(path, name)
-    paints = re.search(rb'^; paint_info = (.*)$', data, re.M)
-    if not paints:
+    filament_info = inspect_gcode_filaments(data)
+    if not filament_info["paint_info_present"]:
         raise ProtocolError("G-code has no paint mapping")
-    paints = json.loads(paints.group(1))
-    tools = set(re.findall(rb'^T(\d+)(?:\s|$)', data, re.M))
-    if (not isinstance(paints, list) or len(paints) != 1 or not isinstance(paints[0], dict)
-            or paints[0].get("paint_index") != 0 or tools - {b"0"}):
+    if not filament_info["single_filament_start_compatible"]:
         raise ProtocolError("Start currently supports only one filament, paint/tool index 0")
+    filament = filament_info["filaments"][0]
     info = payload_data(client.query("info"))
     if info.get("model") != "Anycubic Kobra X" or info.get("version") != "2.0.2.2":
         raise ProtocolError("Unqualified model/firmware for experimental start")
@@ -164,25 +163,19 @@ def build_plan(config, client, path, name, slot, auto_leveling, vibration, flow)
             or remote.get("printer_model") != "Anycubic Kobra X"):
         raise ProtocolError("Remote file metadata does not match the local G-code")
     boxes = payload_data(client.query("multiColorBox", "getInfo")).get("multi_color_box")
-    if not isinstance(boxes, list) or len(boxes) != 1 or boxes[0].get("id") != -1:
-        raise ProtocolError("Only the onboard four-slot configuration is supported")
-    slots = boxes[0].get("slots")
-    if not isinstance(slots, list) or len(slots) != 4:
-        raise ProtocolError("Unsupported filament box schema")
-    selected = [s for s in slots if s.get("index") == slot - 1]
-    if len(selected) != 1 or selected[0].get("status") != 5:
+    box = parse_onboard_box(boxes)
+    selected = box["slots"][slot - 1]
+    if selected["status"] != 5:
         raise ProtocolError("Selected slot is not loaded/available")
-    selected = selected[0]
-    material = paints[0].get("material_type")
+    material = filament["material_type"]
     # PLA High Speed is a PLA variant; PETG must never pass a PLA comparison.
-    slot_material = str(selected.get("type", "")).split()
-    if not isinstance(material, str) or not slot_material or slot_material[0].upper() != material.upper():
+    slot_material = (selected["material_type"] or "").split()
+    if not slot_material or slot_material[0].upper() != material.upper():
         raise ProtocolError("Selected slot material differs from the G-code")
-    color = paints[0].get("paint_color")
-    ams_color = selected.get("color")
-    for c in [color, ams_color]:
-        if not isinstance(c, list) or len(c) not in (3, 4) or not all(type(x) is int and 0 <= x <= 255 for x in c):
-            raise ProtocolError("Invalid filament color schema")
+    color = filament["color_rgb"]
+    ams_color = selected["color_rgb"]
+    if ams_color is None:
+        raise ProtocolError("Invalid filament color schema")
     if any(type(v) is not bool for v in [auto_leveling, vibration, flow]):
         raise ProtocolError("Preparation settings must be explicit booleans")
     payload = {
@@ -191,8 +184,8 @@ def build_plan(config, client, path, name, slot, auto_leveling, vibration, flow)
         "filesize": manifest["size_bytes"],
         "ams_settings": {"use_ams": True, "ams_box_mapping": [{
             "paint_index": 0, "ams_index": slot - 1,
-            "paint_color": color, "ams_color": ams_color + [255] if len(ams_color) == 3 else ams_color,
-            "material_type": selected["type"]}]},
+            "paint_color": color, "ams_color": ams_color + [255],
+            "material_type": selected["material_type"]}]},
         "task_settings": {"auto_leveling": int(auto_leveling), "vibration_compensation": int(vibration),
             "flow_calibration": int(flow), "dry_mode": 0,
             "ai_settings": {"status": 0, "count": 0, "type": 0},
@@ -200,7 +193,7 @@ def build_plan(config, client, path, name, slot, auto_leveling, vibration, flow)
             "drying_settings": {"status": 0, "target_temp": 0, "duration": 0, "remain_time": 0},
             "model_objects_skip_parts": []}}
     # Empty URL starts the stored file; observed on hardware for the cases below.
-    hardware_validated = (slot in (1, 2, 4) and selected["type"] == "PLA High Speed"
+    hardware_validated = (slot in (1, 2, 4) and selected["material_type"] == "PLA High Speed"
                           and auto_leveling and not vibration and not flow)
     plan = {"file_sha256": manifest["sha256"], "device_digest": hashlib.sha256(config.printer_id.encode()).hexdigest(),
             "model": info["model"], "firmware": info["version"], "payload": payload}

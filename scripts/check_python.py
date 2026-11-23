@@ -20,7 +20,7 @@ ENTRY_POINTS_FILE = "entry_points.txt"
 RUNTIME_LOCK = ROOT / "requirements-runtime.txt"
 
 MODULES = {f"kobra_lan/{name}.py" for name in
-           ("__init__", "cli", "cli_output", "completions", "config", "control", "jobs", "mqtt", "printer", "start",
+           ("__init__", "cli", "cli_output", "completions", "config", "control", "filaments", "jobs", "mqtt", "printer", "start",
             "upload", "provisioning", "pairing", "profiles", "diagnostics", "watch")}
 DOCS = {
     "README.md", "LICENSE", "NOTICE.md", "CHANGELOG.md", "ROADMAP.md", "CONTRIBUTING.md",
@@ -135,6 +135,12 @@ def main():
     empty_home = outside / "empty-home"
     empty_home.mkdir()
     probe_env = dict(env, HOME=str(empty_home))
+    slots_help = subprocess.check_output([str(command), "slots", "--help"],
+                                         cwd=outside, env=probe_env, text=True)
+    assert "list" in slots_help
+    slots_list_help = subprocess.check_output([str(command), "slots", "list", "--help"],
+                                              cwd=outside, env=probe_env, text=True)
+    assert "onboard" in slots_list_help.lower()
     print_help = subprocess.check_output([str(command), "print", "--help"],
                                          cwd=outside, env=probe_env, text=True)
     assert all(word in print_help for word in ("watch", "pause", "resume", "cancel"))
@@ -161,8 +167,9 @@ def main():
     for shell in ("bash", "zsh", "fish"):
         completion = subprocess.check_output([str(command), "completion", shell],
                                              cwd=outside, env=probe_env, text=True)
-        assert all(word in completion for word in ("kobra-lan", "watch", "timeout", "pause", "resume", "cancel",
+        assert all(word in completion for word in ("kobra-lan", "slots", "watch", "timeout", "pause", "resume", "cancel",
                                                    "execute", "filename", "jobs", "observation", "limit"))
+        assert "slots:list" in completion
         assert all(f"print {action}:--reprint-from" in completion for action in ("plan", "start"))
         assert all(f"print {action}:--filename" in completion for action in ("pause", "resume", "cancel"))
         assert "jobs list:--kind" in completion and "jobs list:--limit" in completion

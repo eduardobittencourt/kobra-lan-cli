@@ -36,10 +36,11 @@ cd kobra-lan-cli
 ./kobra-lan --help
 # Set up a named profile, with explicit initial trust on a terminal:
 ./kobra-lan printer pair --name bench --host 192.0.2.10 --default
-# Local inspection needs no configuration:
+# Local inspection needs no configuration (hashes, metadata, and filament/color info):
 ./kobra-lan gcode inspect /path/to/model.gcode --name agent-model.gcode
 # Read-only operations on the selected printer:
 ./kobra-lan status
+./kobra-lan slots list
 ./kobra-lan files list
 ./kobra-lan files info agent-model.gcode
 # Upload only when authorized, using the inspected SHA-256:
@@ -70,9 +71,16 @@ with `--reprint-from PREVIOUS_ATTEMPT_ID` on both commands. See the
 [reprint workflow](docs/usage.md#deliberately-reprint-a-stored-file) for eligibility and safety checks.
 
 The canonical tree is `printer pair|list|info|use|remove`, `doctor`, `status`,
-`files list|info|upload`, `gcode inspect`, `print plan|start|watch|pause|resume|cancel`,
-`jobs list|info`, and `completion bash|zsh|fish`. Group `--help` describes
+`slots list`, `files list|info|upload`, `gcode inspect`,
+`print plan|start|watch|pause|resume|cancel`, `jobs list|info`, and
+`completion bash|zsh|fish`. Group `--help` describes read-only inventory,
 local history inspection, observation, planning and execution controls.
+`slots list` inspects the qualified Kobra X onboard four-slot filament box
+(slots `1..4`, idle or printing) over one pinned MQTT session without writing
+local state; `gcode inspect` reports parsed `paint_info` filaments/colors,
+`T<n>` tool indices, optional weights, `multicolor`, and
+`single_filament_start_compatible` offline. Multicolor `print start` and
+external ACE units remain unqualified.
 Upload requires both execution controls and never starts a print. Inspection and
 job history are local and read-only; planning queries the printer without changing
 it. Text is the default; root `--json` selects the versioned machine contract.

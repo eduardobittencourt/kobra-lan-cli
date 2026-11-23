@@ -105,6 +105,22 @@ class StartTests(unittest.TestCase):
     def test_multiple_tools_rejected(self):
         self.file.write_bytes(GCODE + b'T1\n')
         with self.assertRaises(ProtocolError): self.plan()
+
+    def test_repeated_paint_info_agreement_and_conflict_rejection(self):
+        repeated = GCODE + b'; paint_info = [{"paint_index":0,"material_type":"PLA","paint_color":[138,148,158]}]\n'
+        self.file.write_bytes(repeated)
+        class SizedClient(Client):
+            def query(self, kind, action="query", data=None, *, require_fresh=False):
+                result = super().query(kind, action, data, require_fresh=require_fresh)
+                if kind == "file":
+                    result["data"]["file_details"]["file_size"] = len(repeated)
+                return result
+        plan = build_plan(config(), SizedClient(config()), self.file, "test.gcode", 1, True, False, False)
+        self.assertEqual(plan["payload"]["ams_settings"]["ams_box_mapping"][0]["paint_index"], 0)
+        conflicting = GCODE + b'; paint_info = [{"paint_index":0,"material_type":"PLA","paint_color":[255,0,0]}]\n'
+        self.file.write_bytes(conflicting)
+        with self.assertRaises(ProtocolError):
+            self.plan()
     def test_missing_or_changed_plan_blocks_execution(self):
         with patch("kobra_lan.start.MQTT", Client):
             with self.assertRaises(ProtocolError): self.run_start(True, "changed")
