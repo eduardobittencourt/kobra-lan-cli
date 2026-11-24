@@ -21,8 +21,8 @@ The CLI SHALL derive qualified printer identity, firmware versions, slicer profi
 The CLI SHALL compute `hardware_start_validated`, `hardware_control_validated`, and `hardware_delete_validated` from centralized hardware-evidence rules tied to qualified model and firmware records rather than scattered literals. Observed evidence boundaries SHALL remain conservative and never infer validation for unobserved slots, materials, preparations, or multicolor starts.
 
 #### Scenario: Start hardware validation matches observed evidence only
-- **WHEN** `print plan` or `print start` evaluates a single-filament `paint_index: 0` PLA High Speed job on onboard slot `1`, `2`, or `4` with `auto_leveling: on`, `vibration_compensation: off`, and `flow_calibration: off` versus slot `3`, another material, another preparation setting, a non-zero `paint_index`, or multicolor mapping
-- **THEN** only the observed single-filament case reports `hardware_start_validated: true`, and every unobserved combination reports `hardware_start_validated: false`
+- **WHEN** `print plan` or `print start` evaluates a `PLA High Speed` job with `auto_leveling: on`, `vibration_compensation: off`, and `flow_calibration: off` using either single-filament `paint_index: 0` on onboard slot `1`, `2`, or `4` or the observed 4-color contiguous 1:1 mapping `0=1, 1=2, 2=3, 3=4` versus single-filament slot `3`, another material, another preparation setting, a non-zero single `paint_index`, or any other multicolor mapping (2/3-color subset, cross-remapped `paint_index != ams_index`, sparse indices, or shared physical slot)
+- **THEN** only the observed single-filament and 4-color contiguous 1:1 cases report `hardware_start_validated: true`, and every unobserved combination reports `hardware_start_validated: false`
 
 #### Scenario: Control and delete hardware validation reflect recorded evidence
 - **WHEN** guarded `print pause|resume|cancel` and `files delete` build results on the qualified Kobra X model `20030` / firmware `2.0.2.2` target

@@ -4,7 +4,7 @@ A direct Anycubic Kobra X LAN client with readable text and opt-in JSON for auto
 
 **Status: experimental, under active development.** The CLI and its JSON automation interface are intended for testing and feedback. Commands, output and stored-state contracts can change during 0.x; read each version's [compatibility notes](https://github.com/eduardobittencourt/kobra-lan-cli/releases) before upgrading. A downloadable package does not imply stable or broadly qualified printer support.
 
-Upload, print start, reviewed intentional reprints (`--reprint-from`), read-only `print watch` observation persistence, offline `jobs list|info`, and guarded `print pause|resume|cancel` were observed on Kobra X hardware running firmware 2.0.2.2 for single-filament PLA High Speed prints using onboard slots 1, 2, and 4 with automatic leveling on, vibration compensation off, and flow calibration off. Starting the stored file with `url=""` worked across initial starts and operator-confirmed reprints. Slot 3, other materials/preparation settings, multicolor, and external ACE units remain unqualified.
+Upload, print start, reviewed intentional reprints (`--reprint-from`), read-only `print watch` observation persistence, offline `jobs list|info`, and guarded `print pause|resume|cancel` were observed on Kobra X hardware running firmware 2.0.2.2 for `PLA High Speed` prints with automatic leveling on, vibration compensation off, and flow calibration off: single-filament starts (`0=1|2|4`) and a 4-color contiguous 1:1 print (`0=1, 1=2, 2=3, 3=4`, exercising slot 3 as `2=3`). Starting the stored file with `url=""` worked across initial starts, operator-confirmed reprints, and the 4-color run. Single-filament slot 3, cross-remapped/sparse/shared/subset multicolor, non-zero single paint indices, other materials/preparation settings, and external ACE units remain unqualified.
 
 See the [compatibility matrix](docs/compatibility.md) for supported models, firmwares, materials, preparation flags and host platforms, the [roadmap](ROADMAP.md) for implemented capabilities and future work, and the [release guide](docs/releases.md) for supported installation targets, package checks and recovery.
 
@@ -87,8 +87,11 @@ For multicolor prints, use `gcode inspect` to get the file hash and paint
 indices, then `slots list` to find loaded, material-compatible slots. After
 `files upload`, use one `--slot-map PAINT_INDEX=SLOT` per declared index
 on both `print plan` and `print start`. For example, `--slot-map 0=1
---slot-map 2=4` maps two indices to onboard slots 1 and 4. Multicolor and
-single-filament non-zero-index starts report `hardware_start_validated: false`.
+--slot-map 2=4` maps two indices to onboard slots 1 and 4. Only the observed
+4-color contiguous 1:1 `PLA High Speed` combination (`0=1, 1=2, 2=3, 3=4`,
+`auto-leveling on`, vibration/flow off) reports `hardware_start_validated: true`
+among multicolor starts; other multicolor mappings and single-filament
+non-zero-index starts report `hardware_start_validated: false`.
 External ACE units remain outside the supported topology.
 See the [multicolor workflow](docs/usage.md#plan-and-start-a-multicolor-print).
 
