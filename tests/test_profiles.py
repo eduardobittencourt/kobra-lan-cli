@@ -358,8 +358,8 @@ class CLITests(StorageTests):
         atomic_json(directory/(manifest['sha256']+'.json'),{**manifest,'status':'uploaded_verified_by_listing_and_metadata'})
         starts = state/'starts'/device; starts.mkdir(parents=True, mode=0o700)
         (starts/(manifest['sha256']+'.attempt')).write_text('uncertain start')
-        plan = build_plan(cfg,Client(cfg),gcode,'test.gcode',1,True,False,False)
-        args = ['--state-dir',str(state),'print','start',str(gcode),'--name','test.gcode','--slot','1',
+        plan = build_plan(cfg,Client(cfg),gcode,'test.gcode',{0: 1},True,False,False)
+        args = ['--state-dir',str(state),'print','start',str(gcode),'--name','test.gcode','--slot-map','0=1',
                 '--auto-leveling','on','--vibration-compensation','off','--flow-calibration','off',
                 '--execute','--plan-sha256',plan['plan_sha256']]
         tracked = [self.registry.path('bancada'), self.registry.path('oficina'),
@@ -370,6 +370,13 @@ class CLITests(StorageTests):
             for name in ('bancada','oficina'):
                 code, result = self.invoke('--printer',name,*args)
                 self.assertEqual(code,2,result)
+                self.assertEqual(result['error']['code'], 'validation_failed')
+                self.assertIn('Start already attempted', result['error']['message'])
+        with patch.object(self.registry, 'access') as access:
+            code, result = self.invoke('--printer', 'oficina', *args, '--slot-map', '0=2')
+            self.assertEqual(code, 2)
+            self.assertEqual(result['error']['code'], 'invalid_arguments')
+            access.assert_not_called()
         self.assertEqual((starts/(manifest['sha256']+'.attempt')).read_text(),'uncertain start')
         self.assertEqual([(p.read_bytes(), p.stat().st_mode) for p in tracked], baseline)
         self.assertEqual(Client.starts, 0)

@@ -14,6 +14,8 @@ import socket
 import stat
 import subprocess
 
+from probe_completions import check_completion
+
 
 INSTALLED_COMMAND = "/usr/bin/kobra-lan"
 CLEAN_PATH = "PATH=/usr/bin:/bin"
@@ -83,7 +85,20 @@ def installed_probes(probe, version, home, work, before):
     assert all(word in print_help for word in ("watch", "pause", "resume", "cancel"))
     assert "--timeout SECONDS" in probe("print", "watch", "--help", probe_home=empty_home)
     for action in ("plan", "start"):
-        assert "--reprint-from PREVIOUS_ATTEMPT_ID" in probe("print", action, "--help", probe_home=empty_home)
+        help_text = probe("print", action, "--help", probe_home=empty_home)
+        assert "--reprint-from PREVIOUS_ATTEMPT_ID" in help_text
+        assert "--slot-map PAINT_INDEX=SLOT" in help_text and "--slot" not in help_text.split()
+        execution = ["--execute", "--plan-sha256", "a" * 64] if action == "start" else []
+        for mode in ([], ["--json"]):
+            output = probe(*mode, "print", action, str(gcode), "--name", "synthetic.gcode",
+                           "--slot-map", hostile, "--auto-leveling", "on",
+                           "--vibration-compensation", "off", "--flow-calibration", "off", *execution,
+                           code=2, probe_home=empty_home, quiet_stderr=True)
+            assert "SYNTHETIC_PRIVATE" not in output and "--slot-map" in output
+            if mode:
+                assert json.loads(output)["error"]["code"] == "invalid_arguments"
+            else:
+                assert output.count("Error (invalid_arguments):") == 1
     for action in ("pause", "resume", "cancel"):
         help_text = probe("print", action, "--help", probe_home=empty_home)
         assert "--execute" in help_text and "--filename" in help_text
@@ -94,17 +109,7 @@ def installed_probes(probe, version, home, work, before):
     assert "RECORD_ID" in probe("jobs", "info", "--help", probe_home=empty_home)
     for shell in ("bash", "zsh", "fish"):
         completion = probe("completion", shell, probe_home=empty_home)
-        assert all(word in completion for word in ("kobra-lan", "slots", "watch", "timeout", "pause", "resume", "cancel",
-                                                   "execute", "filename", "jobs", "observation", "limit"))
-        assert "slots:list" in completion
-        assert "files:delete" in completion
-        if shell == "fish":
-            assert any("xfiles delete" in line and line.endswith(" -l execute") for line in completion.splitlines())
-        else:
-            assert "'files delete') candidates='-h --help --execute'" in completion
-        assert all(f"print {action}:--reprint-from" in completion for action in ("plan", "start"))
-        assert all(f"print {action}:--filename" in completion for action in ("pause", "resume", "cancel"))
-        assert "jobs list:--kind" in completion and "jobs list:--limit" in completion
+        check_completion(completion, shell)
     assert not list(empty_home.iterdir())
     for mode in ([], ["--json"]):
         output = probe(*mode, "files", "upload", hostile, code=2)
@@ -179,13 +184,15 @@ def main():
         run("apt-get", "-y", *arguments, env=dict(os.environ, DEBIAN_FRONTEND="noninteractive"))
         assert snapshot(home) == before, f"Private data changed after {arguments}"
 
-    def probe(*arguments, code=0, probe_home=home):
+    def probe(*arguments, code=0, probe_home=home, quiet_stderr=False):
         # Explicit installed path, empty environment, no checkout, development launcher or PYTHONPATH.
         """Run the installed command as the fixture user outside the checkout."""
         result = subprocess.run(["runuser", "-u", "kobra-acceptance", "--", "env", "-i",
                                  f"HOME={probe_home}", CLEAN_PATH, INSTALLED_COMMAND, *arguments],
                                 cwd=work, text=True, capture_output=True)
         assert result.returncode == code, (arguments, result.returncode, result.stdout, result.stderr)
+        if quiet_stderr:
+            assert not result.stderr
         return result.stdout
 
     # Clean installation, then a controlled old package -> tested candidate upgrade.

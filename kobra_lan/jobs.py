@@ -7,6 +7,7 @@ import re
 
 from .cli_output import safe_text
 from .config import ProtocolError
+from .filaments import normalize_color
 from .profiles import ProfileLocalError, open_directory
 from .start import (
     ACTIVE,
@@ -127,23 +128,36 @@ def _extract_preparation(payload):
     return result
 
 
-def _extract_slot_and_material(receipt):
-    slot = receipt.get("selected_slot")
-    slot = slot if type(slot) is int and 1 <= slot <= 4 else None
-    material = None
+def _safe_color_hex(color):
+    try:
+        return normalize_color(color)[1]
+    except ProtocolError:
+        return None
+
+
+def _extract_slot_mapping(receipt):
     payload = receipt.get("payload")
-    if isinstance(payload, dict):
-        ams = payload.get("ams_settings")
-        if isinstance(ams, dict):
-            mapping = ams.get("ams_box_mapping")
-            if isinstance(mapping, list) and len(mapping) == 1 and isinstance(mapping[0], dict):
-                entry = mapping[0]
-                if slot is None:
-                    ams_index = entry.get("ams_index")
-                    if type(ams_index) is int and 0 <= ams_index <= 3:
-                        slot = ams_index + 1
-                material = _safe_short_text(entry.get("material_type"), limit=64)
-    return slot, material
+    ams = payload.get("ams_settings") if isinstance(payload, dict) else None
+    mapping = ams.get("ams_box_mapping") if isinstance(ams, dict) else None
+    if not isinstance(mapping, list) or not mapping:
+        return None
+    entries = {}
+    for entry in mapping:
+        if not isinstance(entry, dict):
+            return None
+        paint_index, ams_index = entry.get("paint_index"), entry.get("ams_index")
+        if (type(paint_index) is not int or paint_index < 0 or paint_index in entries
+                or type(ams_index) is not int or not 0 <= ams_index <= 3):
+            return None
+        entries[paint_index] = {
+            "paint_index": paint_index,
+            "slot": ams_index + 1,
+            "ams_index": ams_index,
+            "material_type": _safe_short_text(entry.get("material_type")),
+            "gcode_color_hex": _safe_color_hex(entry.get("paint_color")),
+            "slot_color_hex": _safe_color_hex(entry.get("ams_color")),
+        }
+    return [entries[index] for index in sorted(entries)]
 
 
 def _parse_start_candidate(record, storage_key, device_digest, *, is_marker):
@@ -262,8 +276,7 @@ def _build_unreadable_start(storage_key, device_digest, issues):
         "timestamp": None,
         "model": None,
         "firmware": None,
-        "selected_slot": None,
-        "material_type": None,
+        "slot_mapping": None,
         "preparation": None,
         "hardware_start_validated": None,
         "start_status": None,
@@ -341,8 +354,7 @@ def _reconstruct_start_entry(storage_key, marker, receipt, device_digest):
     timestamp = None
     model = None
     firmware = None
-    selected_slot = None
-    material_type = None
+    slot_mapping = None
     preparation = None
     hardware_validated = None
     start_status = None
@@ -356,7 +368,7 @@ def _reconstruct_start_entry(storage_key, marker, receipt, device_digest):
         model = _safe_short_text(receipt_dict.get("model"), limit=64)
         raw_fw = receipt_dict.get("firmware")
         firmware = raw_fw if isinstance(raw_fw, str) and VERSION_RE.fullmatch(raw_fw) else None
-        selected_slot, material_type = _extract_slot_and_material(receipt_dict)
+        slot_mapping = _extract_slot_mapping(receipt_dict)
         if type(receipt_dict.get("hardware_start_validated")) is bool:
             hardware_validated = receipt_dict["hardware_start_validated"]
         raw_status = receipt_dict.get("status")
@@ -394,8 +406,7 @@ def _reconstruct_start_entry(storage_key, marker, receipt, device_digest):
         "timestamp": timestamp,
         "model": model,
         "firmware": firmware,
-        "selected_slot": selected_slot,
-        "material_type": material_type,
+        "slot_mapping": slot_mapping,
         "preparation": preparation,
         "hardware_start_validated": hardware_validated,
         "start_status": start_status,

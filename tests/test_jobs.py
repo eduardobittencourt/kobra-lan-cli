@@ -108,9 +108,14 @@ class JobsStoreTests(unittest.TestCase):
 
     def _write_start(self, file_sha256, *, previous=None, legacy=False, status="start_observed_active",
                      filename="test.gcode", timestamp=1700000100, slot=1, active=True,
-                     write_marker=True, write_receipt=True, receipt_overrides=None, marker_overrides=None):
+                     write_marker=True, write_receipt=True, receipt_overrides=None, marker_overrides=None,
+                     mapping=None):
         starts_dir = self._private_dir(self.state_dir / "starts" / self.device16)
         plan = make_plan(self.device_digest, file_sha256, filename=filename, slot=slot)
+        if mapping is not None:
+            plan["payload"]["ams_settings"]["ams_box_mapping"] = mapping
+            plan.pop("selected_slot")
+            plan["hardware_start_validated"] = False
         identity = attempt_id(self.device_digest, file_sha256, previous)
         digest = review_digest(plan, previous)
         key = file_sha256 if previous is None else identity
@@ -228,6 +233,10 @@ class JobsStoreTests(unittest.TestCase):
         self.assertEqual(legacy_detail["terminal_outcome"], "unknown")
         self.assertTrue(legacy_detail["upload_provenance"]["verified"])
         self.assertFalse(legacy_detail["upload_provenance"]["remote_byte_hash_verified"])
+        self.assertEqual(legacy_detail["slot_mapping"], [{
+            "paint_index": 0, "slot": 1, "ams_index": 0, "material_type": "PLA High Speed",
+            "gcode_color_hex": "#8A949E", "slot_color_hex": "#FFFFFF",
+        }])
 
         root_detail = job_info(self.cfg, self.state_dir, root_id)
         self.assertEqual(root_detail["record_format"], "current")
@@ -238,15 +247,16 @@ class JobsStoreTests(unittest.TestCase):
         self.assertEqual(root_detail["preparation"], {
             "auto_leveling": True, "vibration_compensation": False, "flow_calibration": False
         })
-        self.assertEqual(root_detail["selected_slot"], 1)
-        self.assertEqual(root_detail["material_type"], "PLA High Speed")
+        self.assertEqual(root_detail["slot_mapping"], legacy_detail["slot_mapping"])
+        self.assertNotIn("selected_slot", root_detail)
+        self.assertNotIn("material_type", root_detail)
         self.assertTrue(root_detail["hardware_start_validated"])
 
         reprint1_detail = job_info(self.cfg, self.state_dir, reprint1_id)
         self.assertEqual(reprint1_detail["previous_attempt_id"], root_id)
         self.assertEqual(reprint1_detail["next_attempt_id"], reprint2_id)
         self.assertEqual(reprint1_detail["reprint_eligibility"], "superseded")
-        self.assertEqual(reprint1_detail["selected_slot"], 3)
+        self.assertEqual(reprint1_detail["slot_mapping"][0]["slot"], 3)
         self.assertFalse(reprint1_detail["hardware_start_validated"])
 
         reprint2_detail = job_info(self.cfg, self.state_dir, reprint2_id)
@@ -263,6 +273,56 @@ class JobsStoreTests(unittest.TestCase):
             "blocked_missing_upload_provenance",
         )
         self.assertEqual(self._snapshot(), before)
+
+    def test_multicolor_history_reconstructs_ordered_mixed_and_shared_mappings(self):
+        pla = {"paint_index": 0, "ams_index": 0, "material_type": "PLA High Speed",
+               "paint_color": [1, 2, 3], "ams_color": [255, 255, 255, 255]}
+        petg = {"paint_index": 2, "ams_index": 3, "material_type": "PETG",
+                "paint_color": [160, 176, 192, 128], "ams_color": [10, 20, 30, 40]}
+        expected_pla = {"paint_index": 0, "slot": 1, "ams_index": 0, "material_type": "PLA High Speed",
+                        "gcode_color_hex": "#010203", "slot_color_hex": "#FFFFFF"}
+        mixed_id, _, _ = self._write_start(
+            "1" * 64, mapping=[petg, pla], receipt_overrides={"slot_mapping": [{"slot": 2}]},
+        )
+        same_spool = {**pla, "paint_index": 1, "paint_color": [4, 5, 6]}
+        shared_id, _, _ = self._write_start("2" * 64, mapping=[same_spool, pla])
+        before = self._snapshot()
+
+        mixed = job_info(self.cfg, self.state_dir, mixed_id)
+        self.assertEqual(mixed["completeness"], "complete")
+        self.assertEqual(mixed["slot_mapping"], [expected_pla, {
+            "paint_index": 2, "slot": 4, "ams_index": 3, "material_type": "PETG",
+            "gcode_color_hex": "#A0B0C0", "slot_color_hex": "#0A141E",
+        }])
+        shared = job_info(self.cfg, self.state_dir, shared_id)
+        self.assertEqual(shared["slot_mapping"], [
+            expected_pla, {**expected_pla, "paint_index": 1, "gcode_color_hex": "#040506"},
+        ])
+        for summary in list_jobs(self.cfg, self.state_dir)["jobs"]:
+            self.assertFalse({"slot_mapping", "selected_slot", "material_type"} & summary.keys())
+        self.assertEqual(self._snapshot(), before)
+
+    def test_unavailable_mapping_and_unsafe_metadata_are_sanitized(self):
+        valid = {"paint_index": 0, "ams_index": 0}
+        invalid_mappings = ([], [None], [valid, valid], [{**valid, "paint_index": True}],
+                            [{**valid, "paint_index": -1}], [{**valid, "ams_index": True}],
+                            [{**valid, "ams_index": 4}], [{"ams_index": 0}])
+        for index, mapping in enumerate(invalid_mappings):
+            with self.subTest(mapping=mapping):
+                identity, _, _ = self._write_start(f"{index:064x}", mapping=mapping)
+                self.assertIsNone(job_info(self.cfg, self.state_dir, identity)["slot_mapping"])
+        missing, _, _ = self._write_start("a" * 64, receipt_overrides={"payload": {}})
+        unreadable, _, path = self._write_start("b" * 64)
+        path.write_text("{")
+        for identity in (missing, unreadable):
+            self.assertIsNone(job_info(self.cfg, self.state_dir, identity)["slot_mapping"])
+        unsafe, _, _ = self._write_start("c" * 64, mapping=[{
+            **valid, "material_type": "https://example.test/?token=SYNTHETIC_PRIVATE",
+            "paint_color": [True, 0, 0], "ams_color": [255, 256, 255],
+        }])
+        self.assertEqual(job_info(self.cfg, self.state_dir, unsafe)["slot_mapping"], [{
+            **valid, "slot": 1, "material_type": None, "gcode_color_hex": None, "slot_color_hex": None,
+        }])
 
     def test_incomplete_mismatched_orphan_cross_device_and_corrupt_starts(self):
         starts_dir = self._private_dir(self.state_dir / "starts" / self.device16)

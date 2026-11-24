@@ -13,11 +13,13 @@ import tarfile
 import venv
 import zipfile
 
+from probe_completions import check_completion
 from release_version import ROOT, source_version
 
 RUNTIME_REQUIREMENT = "cryptography>=41"
 ENTRY_POINTS_FILE = "entry_points.txt"
 RUNTIME_LOCK = ROOT / "requirements-runtime.txt"
+SYNTHETIC_HOSTILE_URL = "https://example.test/?token=SYNTHETIC_PRIVATE"
 
 MODULES = {f"kobra_lan/{name}.py" for name in
            ("__init__", "cli", "cli_output", "completions", "config", "control", "delete_file", "filaments",
@@ -126,7 +128,7 @@ def main():
             assert json.loads(text)["schema_version"] == 1
         else:
             assert "Sha256:" in text
-        failure = subprocess.run([str(command), *mode, "files", "upload", "https://example.test/?token=SYNTHETIC_PRIVATE"],
+        failure = subprocess.run([str(command), *mode, "files", "upload", SYNTHETIC_HOSTILE_URL],
                                  cwd=outside, env=env, text=True, capture_output=True)
         assert failure.returncode == 2 and not failure.stderr
         assert "SYNTHETIC_PRIVATE" not in failure.stdout
@@ -148,7 +150,7 @@ def main():
                                           cwd=outside, env=probe_env, text=True)
     assert "--execute" in delete_help and "idle printer" in " ".join(delete_help.split())
     for mode in ([], ["--json"]):
-        failure = subprocess.run([str(command), *mode, "files", "delete", "https://example.test/?token=SYNTHETIC_PRIVATE"],
+        failure = subprocess.run([str(command), *mode, "files", "delete", SYNTHETIC_HOSTILE_URL],
                                  cwd=outside, env=probe_env, text=True, capture_output=True)
         assert failure.returncode == 2 and not failure.stderr
         assert "SYNTHETIC_PRIVATE" not in failure.stdout
@@ -165,6 +167,21 @@ def main():
         help_text = subprocess.check_output([str(command), "print", action, "--help"],
                                             cwd=outside, env=probe_env, text=True)
         assert "--reprint-from PREVIOUS_ATTEMPT_ID" in help_text
+        assert "--slot-map PAINT_INDEX=SLOT" in help_text and "--slot" not in help_text.split()
+        execution = ["--execute", "--plan-sha256", "a" * 64] if action == "start" else []
+        for mode in ([], ["--json"]):
+            failure = subprocess.run(
+                [str(command), *mode, "print", action, str(gcode), "--name", "synthetic.gcode",
+                 "--slot-map", SYNTHETIC_HOSTILE_URL,
+                 "--auto-leveling", "on", "--vibration-compensation", "off", "--flow-calibration", "off", *execution],
+                cwd=outside, env=probe_env, text=True, capture_output=True,
+            )
+            assert failure.returncode == 2 and not failure.stderr
+            assert "SYNTHETIC_PRIVATE" not in failure.stdout and "--slot-map" in failure.stdout
+            if mode:
+                assert json.loads(failure.stdout)["error"]["code"] == "invalid_arguments"
+            else:
+                assert failure.stdout.count("Error (invalid_arguments):") == 1
     for action in ("pause", "resume", "cancel"):
         help_text = subprocess.check_output([str(command), "print", action, "--help"],
                                             cwd=outside, env=probe_env, text=True)
@@ -181,17 +198,7 @@ def main():
     for shell in ("bash", "zsh", "fish"):
         completion = subprocess.check_output([str(command), "completion", shell],
                                              cwd=outside, env=probe_env, text=True)
-        assert all(word in completion for word in ("kobra-lan", "slots", "watch", "timeout", "pause", "resume", "cancel",
-                                                   "execute", "filename", "jobs", "observation", "limit"))
-        assert "slots:list" in completion
-        assert "files:delete" in completion
-        if shell == "fish":
-            assert any("xfiles delete" in line and line.endswith(" -l execute") for line in completion.splitlines())
-        else:
-            assert "'files delete') candidates='-h --help --execute'" in completion
-        assert all(f"print {action}:--reprint-from" in completion for action in ("plan", "start"))
-        assert all(f"print {action}:--filename" in completion for action in ("pause", "resume", "cancel"))
-        assert "jobs list:--kind" in completion and "jobs list:--limit" in completion
+        check_completion(completion, shell)
     assert not list(empty_home.iterdir())
     print(f"Python archives and independent installation verified: {version}")
 

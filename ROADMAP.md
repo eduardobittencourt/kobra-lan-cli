@@ -94,22 +94,29 @@ The source CLI also includes read-only onboard four-slot filament inventory
 writing local state, plus multicolor-aware offline `gcode inspect` reporting
 validated `; paint_info =` filament/color entries, `T<n>` tool indices,
 optional filament weights, `multicolor`, and `single_filament_start_compatible`
-while keeping `files upload` compatible and byte-preserving. Multicolor
-`print plan`/`print start` slot mapping and external ACE units remain
-unqualified.
+while keeping `files upload` byte-preserving. The multicolor workflow
+uses `gcode inspect`, `slots list`, `files upload`, `print plan --slot-map`,
+and `print start --slot-map`. The 0.x interface replaces `--slot` with repeatable
+`--slot-map PAINT_INDEX=SLOT` and exposes `slot_mapping` in place of
+`selected_slot` on plan, start and job details. On `jobs info`, material is
+reported per entry in `slot_mapping`. Existing receipts and reprint chains are
+readable in place. Multicolor and non-zero single-filament paint indices report
+`hardware_start_validated: false`. See the
+[multicolor workflow](docs/usage.md#plan-and-start-a-multicolor-print).
 
 Remaining work:
 
 - Qualify attempt identity and terminal signals if future firmware exposes them (firmware 2.0.2.2 reports `task_id: "-1"` and empty `last_project` after both normal completion and cancellation).
 - Qualify stored-file deletion on a live Kobra X and verify the wire report, listing removal, and preserved local receipts. Investigate download support separately.
 - Expand hardware coverage beyond PLA High Speed on slots 1, 2, and 4 with `auto-leveling on` (slot 3, other materials, and other preparation settings).
+- Qualify multicolor and non-zero paint-index starts, including sparse paint indices and shared physical slots.
 
-Multicolor `print plan`/`print start`, external ACE units, discovery and other device controls also require separate work.
+External ACE units, discovery and other device controls require separate work.
 
 ## Milestone 4 — Broader compatibility and stable releases
 
 - Publish a model/firmware/material/preparation matrix that distinguishes implementation, offline validation and hardware observation.
-- Expand material and preparation evidence, then investigate multicolor and external ACE support. Do not infer other Anycubic model support from similar fields.
+- Expand material and preparation evidence, qualify onboard multicolor starts, and investigate external ACE support. Do not infer other Anycubic model support from similar fields.
 - Qualify additional platforms separately. Current package acceptance targets Linux on amd64; macOS, Windows and other architectures need their own evidence.
 - Maintain release notes, compatibility policy and explicit migration decisions for commands, JSON and persisted state.
 - Consider other slicers and optional orchestration while keeping the LAN client independently usable.

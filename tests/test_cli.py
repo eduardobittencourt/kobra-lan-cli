@@ -8,6 +8,15 @@ from kobra_lan.cli import ArgumentFailure, build_parser, main
 
 
 class CommandTreeTests(unittest.TestCase):
+    def test_print_plan_and_start_help_expose_only_slot_map(self):
+        for command in ("plan", "start"):
+            out = io.StringIO()
+            with self.subTest(command=command), contextlib.redirect_stdout(out), self.assertRaises(SystemExit) as caught:
+                main(["print", command, "--help"])
+            self.assertEqual(caught.exception.code, 0)
+            self.assertIn("--slot-map PAINT_INDEX=SLOT", out.getvalue())
+            self.assertNotIn("--slot", out.getvalue().split())
+
     def test_every_leaf_has_help_without_operations(self):
         leaves = [("printer", c) for c in ("pair", "list", "info", "use", "remove")]
         leaves += [("slots", "list")]
@@ -142,7 +151,7 @@ class SafeArgumentTests(unittest.TestCase):
                  ["files", "delete", "a" * 256, "--execute"],
                  ["files", "delete", "...", "--execute"],
                  ["files", "delete", "", "--execute"],
-                 ["print", "start", secret, "--name", "a.gcode", "--slot", "1",
+                 ["print", "start", secret, "--name", "a.gcode", "--slot-map", "0=1",
                   "--auto-leveling", "on", "--vibration-compensation", "off",
                   "--flow-calibration", "off", "--execute", "--plan-sha256", secret],
                  ["jobs", "list", "--kind", secret],
@@ -174,6 +183,39 @@ class SafeArgumentTests(unittest.TestCase):
         self.assertFalse(root_json(["--config", "--json", "status"]))
         self.assertFalse(root_json(["files", "info", "--json"]))
         self.assertTrue(root_json(["--config=unused", "--printer", "bench", "--json", "unknown"]))
+
+    def test_invalid_slot_mapping_never_echoes_or_opens_access(self):
+        import json
+        secret = "https://example.test/?token=SYNTHETIC_SLOT_VALUE\x1b[31m"
+        cases = [[], ["--slot", secret], ["--slot-map", "0=1", "--slot", secret],
+                 ["--slot-map", "0=1", "--slot-map", "00=2"], ["--slot-map"]]
+        cases += [["--slot-map", value] for value in
+                  (secret, "0=" + secret, "missing", "x=1", "0=x", "1=5", "1=01", "-1=2",
+                   "1=2\n", "1 =2", "+1=2", "１=2", "1=２")]
+        common = ["a.gcode", "--name", "a.gcode", "--auto-leveling", "on",
+                  "--vibration-compensation", "off", "--flow-calibration", "off"]
+        for command in ("plan", "start"):
+            execution = ["--execute", "--plan-sha256", "a" * 64] if command == "start" else []
+            for mode in ([], ["--json"]):
+                for case in cases:
+                    out, err = io.StringIO(), io.StringIO()
+                    with self.subTest(command=command, mode=mode, case=case), \
+                            patch("kobra_lan.cli.Registry") as registry, contextlib.redirect_stdout(out), \
+                            contextlib.redirect_stderr(err):
+                        self.assertEqual(main([*mode, "print", command, *common, *execution, *case]), 2)
+                        registry.assert_not_called()
+                        self.assertEqual(err.getvalue(), "")
+                        rendered = out.getvalue()
+                        self.assertNotIn("SYNTHETIC_SLOT_VALUE", rendered)
+                        self.assertIn("--slot-map", rendered)
+                        if mode:
+                            report = json.loads(rendered)
+                            self.assertEqual(set(report), {"schema_version", "ok", "error"})
+                            self.assertEqual(report["schema_version"], 1)
+                            self.assertFalse(report["ok"])
+                            self.assertEqual(report["error"]["code"], "invalid_arguments")
+                        else:
+                            self.assertEqual(rendered.count("Error (invalid_arguments):"), 1)
 
     def test_missing_execution_controls_direct_to_review_commands(self):
         for mode in ([], ["--json"]):
