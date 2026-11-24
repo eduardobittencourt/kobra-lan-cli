@@ -7,7 +7,7 @@ Provide a discoverable CLI for people and automation with deliberate commands, p
 ## Requirements
 
 ### Requirement: Canonical command tree
-The CLI SHALL expose `printer pair|list|info|use|remove`, `doctor`, `status`, `slots list`, `files list|info|upload`, `gcode inspect`, `print plan|start|watch|pause|resume|cancel`, `jobs list|info`, and `completion bash|zsh|fish`. It SHALL remove flat `file`, `upload`, `inspect`, `start` and executable bare `files` without aliases or deprecation shims. Bare `slots` without a subcommand SHALL fail with exit 2 and contextual help.
+The CLI SHALL expose `printer pair|list|info|use|remove`, `doctor`, `status`, `slots list`, `files list|info|upload|delete`, `gcode inspect`, `print plan|start|watch|pause|resume|cancel`, `jobs list|info`, and `completion bash|zsh|fish`. It SHALL remove flat `file`, `upload`, `inspect`, `start` and executable bare `files` without aliases or deprecation shims. Bare `slots` without a subcommand SHALL fail with exit 2 and contextual help.
 
 #### Scenario: Removed invocation
 - **WHEN** a superseded flat command or bare operational group (including bare `slots`) is invoked
@@ -15,7 +15,7 @@ The CLI SHALL expose `printer pair|list|info|use|remove`, `doctor`, `status`, `s
 
 #### Scenario: Group help
 - **WHEN** `files --help`, `slots --help`, `print --help`, or `jobs --help` is requested
-- **THEN** help lists the group's supported operations and distinguishes read-only inventory, local history inspection, network observation, planning, and execution controls
+- **THEN** help lists the group's supported operations and distinguishes read-only inventory, local history inspection, network observation, planning, and execution controls (including explicit `--execute` storage deletion under `files`)
 
 ### Requirement: Deterministic presentation
 Operational commands SHALL emit readable English text by default and one JSON document when global `--json` is supplied before the command. Piping SHALL NOT change the selected format. Prompts and progress SHALL use stderr. Help, version and completion SHALL retain their native textual formats.
@@ -77,7 +77,7 @@ Target-dependent commands SHALL share explicit selectors and a saved named defau
 - **THEN** canonical commands and options can be completed offline without contacting any printer
 
 ### Requirement: Discoverable installed workflow
-Help and English documentation SHALL show setup, target selection, diagnosis, filament slot inventory, inspection, upload, plan, start, watch, pause/resume/cancel lifecycle controls, and local job history examples, including global option placement and execution guards. Python and Debian packages SHALL expose the same help, formats and completion generator outside the checkout using declared dependencies.
+Help and English documentation SHALL show setup, target selection, diagnosis, filament slot inventory, inspection, upload, stored-file deletion, plan, start, watch, pause/resume/cancel lifecycle controls, and local job history examples, including global option placement and execution guards. Python and Debian packages SHALL expose the same help, formats and completion generator outside the checkout using declared dependencies.
 
 #### Scenario: Installed acceptance
 - **WHEN** clean supported installations exercise help, version, completion, local inspection, invalid commands and synthetic diagnosis
@@ -118,3 +118,10 @@ Installed help and English documentation SHALL expose `slots list` as a read-onl
 #### Scenario: Discover slots offline on clean installation
 - **WHEN** `slots --help`, `slots list --help`, or `completion bash|zsh|fish` runs without a printer configuration or state directory
 - **THEN** help and generated completions expose `slots` and `list` with no network access and no state writes
+
+### Requirement: Discover stored file deletion
+Installed help and English documentation SHALL expose `files delete <name> --execute` as an experimental single-shot storage deletion command, stating its idle-printer precondition, local receipt/marker preservation, and non-replay uncertainty guidance. Offline bash, zsh, and fish completion SHALL expose `delete` and `--execute` under `files` without configuration, state writes, or printer access.
+
+#### Scenario: Discover files delete offline on clean installation
+- **WHEN** `files --help`, `files delete --help`, or `completion bash|zsh|fish` runs without a printer configuration or state directory
+- **THEN** help and generated completions expose `delete` and `--execute` under `files` with no network access and no state writes

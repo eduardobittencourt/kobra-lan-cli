@@ -11,7 +11,7 @@ class CommandTreeTests(unittest.TestCase):
     def test_every_leaf_has_help_without_operations(self):
         leaves = [("printer", c) for c in ("pair", "list", "info", "use", "remove")]
         leaves += [("slots", "list")]
-        leaves += [("files", c) for c in ("list", "info", "upload")]
+        leaves += [("files", c) for c in ("list", "info", "upload", "delete")]
         leaves += [("gcode", "inspect"), ("print", "plan"), ("print", "start"), ("print", "watch"),
                    ("print", "pause"), ("print", "resume"), ("print", "cancel")]
         leaves += [("jobs", "list"), ("jobs", "info")]
@@ -42,10 +42,27 @@ class CommandTreeTests(unittest.TestCase):
         parser = build_parser()
         for argv in (["files", "upload", "a.gcode", "--sha256", "0" * 64, "--exec"],
                      ["files", "upload", "a.gcode", "--execute", "--sha", "0" * 64],
+                     ["files", "delete", "a.gcode", "--exec"],
                      ["print", "pause", "--exec"],
                      ["print", "cancel", "--execute", "--file", "a.gcode"]):
             with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(ArgumentFailure):
                 parser.parse_args(argv)
+
+    def test_delete_help_exposes_idle_requirement_preservation_and_uncertainty(self):
+        for argv, phrases in (
+            (["files"], ("delete", "read-only", "idle printer", "--execute")),
+            (["files", "delete"], ("idle printer", "no active job", "local receipts and markers",
+                                   "files list", "Do not resend blindly", "hardware_delete_validated: false", "--execute")),
+        ):
+            with self.subTest(argv=argv), patch("kobra_lan.cli.Registry") as registry:
+                out = io.StringIO()
+                with contextlib.redirect_stdout(out), self.assertRaises(SystemExit) as caught:
+                    main([*argv, "--help"])
+                self.assertEqual(caught.exception.code, 0)
+                normalized = " ".join(out.getvalue().split())
+                for phrase in phrases:
+                    self.assertIn(phrase, normalized)
+                registry.assert_not_called()
 
 
 class OutputTests(unittest.TestCase):
@@ -117,6 +134,14 @@ class SafeArgumentTests(unittest.TestCase):
         cases = [[secret], ["slots", secret], ["files", secret], ["printer", "pair"],
                  ["files", "upload", secret],
                  ["files", "upload", secret, "--execute", "--sha256", secret],
+                 ["files", "delete", secret],
+                 ["files", "delete", secret, "--execute"],
+                 ["files", "delete", "../a.gcode", "--execute"],
+                 ["files", "delete", "has\\separator", "--execute"],
+                 ["files", "delete", "control\ncharacter", "--execute"],
+                 ["files", "delete", "a" * 256, "--execute"],
+                 ["files", "delete", "...", "--execute"],
+                 ["files", "delete", "", "--execute"],
                  ["print", "start", secret, "--name", "a.gcode", "--slot", "1",
                   "--auto-leveling", "on", "--vibration-compensation", "off",
                   "--flow-calibration", "off", "--execute", "--plan-sha256", secret],
@@ -151,6 +176,14 @@ class SafeArgumentTests(unittest.TestCase):
         self.assertTrue(root_json(["--config=unused", "--printer", "bench", "--json", "unknown"]))
 
     def test_missing_execution_controls_direct_to_review_commands(self):
+        for mode in ([], ["--json"]):
+            out = io.StringIO()
+            with patch("kobra_lan.cli.Registry") as registry, contextlib.redirect_stdout(out):
+                self.assertEqual(main([*mode, "files", "delete", "a.gcode"]), 2)
+            self.assertIn("kobra-lan files list", out.getvalue())
+            self.assertIn("--execute", out.getvalue())
+            registry.assert_not_called()
+
         for argv, guidance in ((['files', 'upload', 'a.gcode'], 'gcode inspect'),
                                (['print', 'start', 'a.gcode'], 'print plan'),
                                (['print', 'pause'], '--execute'),

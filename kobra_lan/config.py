@@ -9,6 +9,15 @@ class ProtocolError(Exception):
     pass
 
 
+def validate_filename(value):
+    """Validate a remote basename without echoing unsafe input."""
+    if (not isinstance(value, str) or not value or not value.strip() or len(value) > 255
+            or not value.isprintable() or value in (".", "..")
+            or any(c in value for c in "/\\:?#")):
+        raise ProtocolError("Filename guard must be a safe printable filename without path separators or URL characters")
+    return value
+
+
 @dataclass(repr=False)
 class Config:
     host: str

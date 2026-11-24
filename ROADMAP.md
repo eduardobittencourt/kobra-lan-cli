@@ -82,6 +82,13 @@ observation persistence and `jobs list|info` chain inspection, and live
 [lifecycle controls](docs/usage.md#pause-resume-and-cancel-an-active-print),
 and [local job history](docs/usage.md#inspect-local-job-history).
 
+The source CLI includes `files delete <name> --execute` for an idle printer
+with no active job. It sends one request, checks removal with bounded listing
+polls, and preserves local receipts, attempt markers, and watch observations.
+It reports `experimental: true` and `hardware_delete_validated: false`.
+An uncertain result retains partial evidence for inspection with `files list`
+and never triggers a replay. See [stored-file deletion](docs/usage.md#delete-a-stored-file).
+
 The source CLI also includes read-only onboard four-slot filament inventory
 (`slots list`) over one pinned MQTT session without requiring idle state or
 writing local state, plus multicolor-aware offline `gcode inspect` reporting
@@ -94,10 +101,10 @@ unqualified.
 Remaining work:
 
 - Qualify attempt identity and terminal signals if future firmware exposes them (firmware 2.0.2.2 reports `task_id: "-1"` and empty `last_project` after both normal completion and cancellation).
-- Validate stored-file deletion and its interaction with active jobs and receipts. Investigate download support separately.
+- Qualify stored-file deletion on a live Kobra X and verify the wire report, listing removal, and preserved local receipts. Investigate download support separately.
 - Expand hardware coverage beyond PLA High Speed on slots 1, 2, and 4 with `auto-leveling on` (slot 3, other materials, and other preparation settings).
 
-Candidate commands include `files delete`. Multicolor `print plan`/`print start`, external ACE units, discovery and other device controls also require separate work.
+Multicolor `print plan`/`print start`, external ACE units, discovery and other device controls also require separate work.
 
 ## Milestone 4 — Broader compatibility and stable releases
 

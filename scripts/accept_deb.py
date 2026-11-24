@@ -69,6 +69,16 @@ def installed_probes(probe, version, home, work, before):
     slots_help = probe("slots", "--help", probe_home=empty_home)
     assert "list" in slots_help
     assert "onboard" in probe("slots", "list", "--help", probe_home=empty_home).lower()
+    assert "delete" in probe("files", "--help", probe_home=empty_home)
+    delete_help = probe("files", "delete", "--help", probe_home=empty_home)
+    assert "--execute" in delete_help and "idle printer" in " ".join(delete_help.split())
+    hostile = "https://example.test/?token=SYNTHETIC_PRIVATE"
+    for mode in ([], ["--json"]):
+        output = probe(*mode, "files", "delete", hostile, code=2, probe_home=empty_home)
+        assert "SYNTHETIC_PRIVATE" not in output
+        assert "files list" in output and "--execute" in output
+        if mode:
+            assert json.loads(output)["error"]["code"] == "invalid_arguments"
     print_help = probe("print", "--help", probe_home=empty_home)
     assert all(word in print_help for word in ("watch", "pause", "resume", "cancel"))
     assert "--timeout SECONDS" in probe("print", "watch", "--help", probe_home=empty_home)
@@ -87,11 +97,15 @@ def installed_probes(probe, version, home, work, before):
         assert all(word in completion for word in ("kobra-lan", "slots", "watch", "timeout", "pause", "resume", "cancel",
                                                    "execute", "filename", "jobs", "observation", "limit"))
         assert "slots:list" in completion
+        assert "files:delete" in completion
+        if shell == "fish":
+            assert any("xfiles delete" in line and line.endswith(" -l execute") for line in completion.splitlines())
+        else:
+            assert "'files delete') candidates='-h --help --execute'" in completion
         assert all(f"print {action}:--reprint-from" in completion for action in ("plan", "start"))
         assert all(f"print {action}:--filename" in completion for action in ("pause", "resume", "cancel"))
         assert "jobs list:--kind" in completion and "jobs list:--limit" in completion
     assert not list(empty_home.iterdir())
-    hostile = "https://example.test/?token=SYNTHETIC_PRIVATE"
     for mode in ([], ["--json"]):
         output = probe(*mode, "files", "upload", hostile, code=2)
         assert "SYNTHETIC_PRIVATE" not in output
