@@ -19,6 +19,7 @@ from release_version import ROOT, source_version
 RUNTIME_REQUIREMENT = "cryptography>=41"
 ENTRY_POINTS_FILE = "entry_points.txt"
 RUNTIME_LOCK = ROOT / "requirements-runtime.txt"
+SYNTHETIC_HOSTILE_URL = "https://example.test/?token=SYNTHETIC_PRIVATE"
 
 MODULES = {f"kobra_lan/{name}.py" for name in
            ("__init__", "cli", "cli_output", "completions", "config", "control", "delete_file", "filaments",
@@ -127,7 +128,7 @@ def main():
             assert json.loads(text)["schema_version"] == 1
         else:
             assert "Sha256:" in text
-        failure = subprocess.run([str(command), *mode, "files", "upload", "https://example.test/?token=SYNTHETIC_PRIVATE"],
+        failure = subprocess.run([str(command), *mode, "files", "upload", SYNTHETIC_HOSTILE_URL],
                                  cwd=outside, env=env, text=True, capture_output=True)
         assert failure.returncode == 2 and not failure.stderr
         assert "SYNTHETIC_PRIVATE" not in failure.stdout
@@ -149,7 +150,7 @@ def main():
                                           cwd=outside, env=probe_env, text=True)
     assert "--execute" in delete_help and "idle printer" in " ".join(delete_help.split())
     for mode in ([], ["--json"]):
-        failure = subprocess.run([str(command), *mode, "files", "delete", "https://example.test/?token=SYNTHETIC_PRIVATE"],
+        failure = subprocess.run([str(command), *mode, "files", "delete", SYNTHETIC_HOSTILE_URL],
                                  cwd=outside, env=probe_env, text=True, capture_output=True)
         assert failure.returncode == 2 and not failure.stderr
         assert "SYNTHETIC_PRIVATE" not in failure.stdout
@@ -171,7 +172,7 @@ def main():
         for mode in ([], ["--json"]):
             failure = subprocess.run(
                 [str(command), *mode, "print", action, str(gcode), "--name", "synthetic.gcode",
-                 "--slot-map", "https://example.test/?token=SYNTHETIC_PRIVATE",
+                 "--slot-map", SYNTHETIC_HOSTILE_URL,
                  "--auto-leveling", "on", "--vibration-compensation", "off", "--flow-calibration", "off", *execution],
                 cwd=outside, env=probe_env, text=True, capture_output=True,
             )

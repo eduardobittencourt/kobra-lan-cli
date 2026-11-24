@@ -91,7 +91,7 @@ def jobs_limit(value):
 
 
 def slot_map_entry(value):
-    match = re.fullmatch(r"([0-9]+)=([1-4])", value)
+    match = re.fullmatch(r"(\d+)=([1-4])", value, flags=re.ASCII)
     if match:
         try:
             return int(match[1].lstrip("0") or "0"), int(match[2])
