@@ -29,7 +29,7 @@ The source launcher and Python archives work outside a desktop, bridge, HA or cl
 
 The CLI and JSON automation interface remain subject to documented changes during 0.x. Version 0.5.0 intentionally replaces flat commands and JSON-default output, requires named pairing, and removes automatic root-config fallback without migration. Existing private credentials and device-based receipt/attempt identities remain protected in normal operations; never clear markers to make a retry work.
 
-Hardware evidence covers Kobra X model 20030 / firmware 2.0.2.2, Next-generated G-code, single-filament PLA High Speed prints using onboard slots 1, 2, and 4 (automatic leveling on, vibration compensation off, flow calibration off), reviewed intentional reprints (`--reprint-from`), read-only `print watch` observation persistence, offline `jobs list|info`, and live `print pause|resume|cancel` wire transitions (`pause`, `resume`, `stop`), with operator-confirmed completion of both runs in a two-slot reprint cycle. Slot 3, other materials and preparation combinations, multicolor, and external ACE units remain unqualified. Package acceptance and offline tests do not expand hardware evidence.
+Hardware evidence covers Kobra X model 20030 / firmware 2.0.2.2, Next-generated G-code, single-filament PLA High Speed prints using onboard slots 1, 2, and 4 (automatic leveling on, vibration compensation off, flow calibration off), reviewed intentional reprints (`--reprint-from`), read-only `print watch` observation persistence, offline `jobs list|info`, live `print pause|resume|cancel` wire transitions (`pause`, `resume`, `stop`), and live `files delete` wire confirmation (`deleteBatch` `success`/200 and follow-up `files list` removal, with byte-for-byte local state preservation verified offline), with operator-confirmed completion of both runs in a two-slot reprint cycle. Slot 3, other materials and preparation combinations, multicolor, and external ACE units remain unqualified. Package acceptance and offline tests do not expand hardware evidence.
 
 ## Milestone 1 — Independent onboarding
 
@@ -85,9 +85,14 @@ and [local job history](docs/usage.md#inspect-local-job-history).
 The source CLI includes `files delete <name> --execute` for an idle printer
 with no active job. It sends one request, checks removal with bounded listing
 polls, and preserves local receipts, attempt markers, and watch observations.
-It reports `experimental: true` and `hardware_delete_validated: false`.
+A live Kobra X test on 2026-11-23 confirmed the correlated ACK (`code 0`),
+`deleteBatch` report (`success` / `200`), `delete_observed_removed` (exit 0),
+and absence in a follow-up `files list`; byte-for-byte preservation of local
+receipts and markers was verified offline with synthetic state, so results
+currently keep `experimental: true` and `hardware_delete_validated: false`.
 An uncertain result retains partial evidence for inspection with `files list`
-and never triggers a replay. See [stored-file deletion](docs/usage.md#delete-a-stored-file).
+and never triggers a replay. See [stored-file deletion](docs/usage.md#delete-a-stored-file)
+and [validation evidence](docs/usage.md#validation-evidence).
 
 The source CLI also includes read-only onboard four-slot filament inventory
 (`slots list`) over one pinned MQTT session without requiring idle state or
@@ -107,7 +112,7 @@ readable in place. Multicolor and non-zero single-filament paint indices report
 Remaining work:
 
 - Qualify attempt identity and terminal signals if future firmware exposes them (firmware 2.0.2.2 reports `task_id: "-1"` and empty `last_project` after both normal completion and cancellation).
-- Qualify stored-file deletion on a live Kobra X and verify the wire report, listing removal, and preserved local receipts. Investigate download support separately.
+- Investigate stored-file download support separately (live Kobra X stored-file deletion wire report and `files list` removal were verified on 2026-11-23; `hardware_delete_validated` remains `false` because byte-for-byte local state preservation was verified offline).
 - Expand hardware coverage beyond PLA High Speed on slots 1, 2, and 4 with `auto-leveling on` (slot 3, other materials, and other preparation settings).
 - Qualify multicolor and non-zero paint-index starts, including sparse paint indices and shared physical slots.
 

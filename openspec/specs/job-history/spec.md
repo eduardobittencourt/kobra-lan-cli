@@ -26,7 +26,7 @@ Expose offline, read-only local job history (`jobs list` and `jobs info`) backed
 - **THEN** the CLI exits 2 before target selection with one safe error and does not echo arbitrary input values
 
 ### Requirement: Detailed local job inspection
-`jobs info <record-id>` SHALL inspect one start attempt, watch observation, or unreadable start-state reference for the selected device under `--state-dir` without network access or state writes. Malformed IDs SHALL exit 2 before target selection; unknown or cross-device IDs SHALL exit 2. Start details SHALL include chain links, hashes, settings, start status, reprint eligibility, upload provenance, issues, and matching unattributed observations.
+`jobs info <record-id>` SHALL inspect one start attempt, watch observation, or unreadable start-state reference for the selected device under `--state-dir` without network access or state writes. Malformed, unknown, or cross-device IDs SHALL exit 2. Start details SHALL include chain links, hashes, settings (including sanitized `slot_mapping`), start status, reprint eligibility, upload provenance, issues, and matching unattributed observations.
 
 #### Scenario: Inspect an eligible start attempt with reprint chain
 - **WHEN** `jobs info <attempt-id>` inspects a start attempt that has verified upload provenance, `start_observed_active`, and a successor reprint
@@ -76,3 +76,18 @@ History reads SHALL walk state directories without following symlinks and requir
 #### Scenario: Non-private individual receipt file inside a valid directory
 - **WHEN** one receipt file inside a private `0700` device directory has mode `0644` or is a symlink
 - **THEN** `jobs list` refuses to read that file, marks its record incomplete with an unreadable issue code, preserves permissions, and still lists valid sibling records
+
+### Requirement: Multicolor start slot-mapping visibility
+`jobs info` SHALL replace scalar `selected_slot` and `material_type` on start records with sanitized `slot_mapping` reconstructed from `payload.ams_settings.ams_box_mapping` ordered by `paint_index` (or `null` for unreadable/missing-mapping records) without modifying stored files. `jobs list` SHALL retain its compact summary shape.
+
+#### Scenario: Inspect a multicolor start attempt with mixed materials
+- **WHEN** `jobs info <attempt-id>` reads a valid multicolor start receipt mapping `paint_index` `0` to slot `1` (`PLA High Speed`) and `paint_index` `2` to slot `4` (`PETG`)
+- **THEN** it exits 0 without modifying files and reports two ordered `slot_mapping` entries covering both `paint_index` values, slots, `ams_index` values, sanitized materials, and sanitized colors
+
+#### Scenario: Inspect a multicolor start attempt sharing one physical slot
+- **WHEN** `jobs info <attempt-id>` reads a valid multicolor start receipt mapping `paint_index` `0` and `1` to slot `1` (`PLA High Speed`)
+- **THEN** it reports both entries ordered by `paint_index` under `slot_mapping` with `slot: 1`, `ams_index: 0`, and sanitized material/color metadata
+
+#### Scenario: Legacy single-filament start receipt remains readable in place
+- **WHEN** `jobs info <attempt-id>` reads a legacy file-keyed single-filament receipt whose `ams_box_mapping` has one entry
+- **THEN** it reconstructs the one-entry `slot_mapping` from `payload.ams_settings.ams_box_mapping` and leaves the legacy files byte-for-byte unchanged
