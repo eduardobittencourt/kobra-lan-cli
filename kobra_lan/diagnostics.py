@@ -6,9 +6,9 @@ import time
 
 from .config import ProtocolError
 from .mqtt import MQTT, MQTTFailure, MQTTIOFailure
-from .pairing import QUALIFIED_FIRMWARE
 from .printer import payload_data
 from .profiles import ProfileSelectionError
+from .qualification import KOBRA_X, QUALIFICATION_SUMMARY, QUALIFIED_FIRMWARE, info_compatibility_issue
 
 STAGES = ('configuration', 'dependencies', 'http_tcp', 'mqtt_tcp', 'tls_pin', 'mqtt_auth', 'status', 'compatibility')
 STAGE_TIMEOUT = 12
@@ -21,7 +21,7 @@ MESSAGES = {
     'tls_pin': 'Server certificate matches the saved fingerprint',
     'mqtt_auth': 'Pinned MQTT authentication and subscription succeeded',
     'status': 'A fresh correlated info report was received',
-    'compatibility': 'Pinned authenticated target reports qualified Kobra X model / firmware 2.0.2.2',
+    'compatibility': f'Pinned authenticated target reports qualified {KOBRA_X.short_name} model / firmware {QUALIFIED_FIRMWARE}',
 }
 MQTT_STAGES = ('tls_pin', 'mqtt_auth', 'status')
 
@@ -37,17 +37,7 @@ def dependencies():
 
 def compatibility_issue(cfg, info):
     """Match pairing's report evidence; optional IDs may be absent, never contradictory."""
-    state = info.get('state')
-    if (any(info.get(key) is not None and info[key] != expected for key, expected in
-            (('model', 'Anycubic Kobra X'), ('version', QUALIFIED_FIRMWARE)))
-            or any(str(info[key]) != str(cfg.type_id) for key in ('modelId', 'modeId') if key in info)
-            or ('deviceId' in info and info['deviceId'] != cfg.printer_id)
-            or (state is not None and not (isinstance(state, str) and 0 < len(state) <= 80
-                                          and state.isascii() and state.isprintable()))):
-        return 'outside_qualification'
-    if any(info.get(key) is None for key in ('model', 'version', 'state')):
-        return 'qualification_incomplete'
-    return None
+    return info_compatibility_issue(cfg.type_id, cfg.printer_id, info)
 
 
 def budget(end):
@@ -127,7 +117,7 @@ class DiagnosticReport:
         else:
             self.failed('compatibility', issue, 2,
                         'Observed model, firmware, identity or state conflicts with qualification',
-                        'Verify the target locally; only matching Kobra X model 20030 / firmware 2.0.2.2 is qualified')
+                        f'Verify the target locally; only matching {QUALIFICATION_SUMMARY} is qualified')
 
     def pending_mqtt_stage(self):
         return next((stage for stage in MQTT_STAGES if self.checks[stage]['status'] != 'passed'), 'status')

@@ -4,6 +4,8 @@ import stat
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .qualification import KOBRA_X, qualification_for_model_id
+
 
 class ProtocolError(Exception):
     pass
@@ -46,8 +48,8 @@ class Config:
                 or any(type(port) is not int or not 1 <= port <= 65535 for port in (config.mqtt_port, config.http_port))):
             raise ValueError('Invalid configuration field types or ports')
         ipaddress.IPv4Address(config.host)
-        if config.type_id != 20030:
-            raise ProtocolError("Only Kobra X model 20030 is qualified")
+        if qualification_for_model_id(config.type_id) is None:
+            raise ProtocolError(f"Only {KOBRA_X.short_name} model {KOBRA_X.model_id} is qualified")
         if not config.printer_id.isalnum():
             raise ProtocolError("Invalid device identity")
         if len(config.tls_sha256) != 64:

@@ -5,9 +5,9 @@ import math
 import re
 
 from .config import ProtocolError
-from .diagnostics import compatibility_issue
 from .mqtt import MQTT, MQTTClosed
 from .printer import payload_data
+from .qualification import KOBRA_X, info_compatibility_issue, onboard_topology
 
 PAINT_INFO_RE = re.compile(rb"^; paint_info = (.*)$", re.M)
 TOOL_RE = re.compile(rb"^T(\d+)(?:[\s;]|$)", re.M)
@@ -179,31 +179,32 @@ def _parse_onboard_slot(ams_index, raw):
     }
 
 
-def _index_onboard_slots(raw_slots):
-    if not isinstance(raw_slots, list) or len(raw_slots) != 4 or not all(isinstance(s, dict) for s in raw_slots):
+def _index_onboard_slots(raw_slots, slot_count):
+    if not isinstance(raw_slots, list) or len(raw_slots) != slot_count or not all(isinstance(s, dict) for s in raw_slots):
         raise ProtocolError(UNSUPPORTED_BOX_SCHEMA)
     by_index = {}
     for raw in raw_slots:
         ams_index = raw.get("index")
-        if type(ams_index) is not int or ams_index not in (0, 1, 2, 3) or ams_index in by_index:
+        if type(ams_index) is not int or ams_index not in range(slot_count) or ams_index in by_index:
             raise ProtocolError(UNSUPPORTED_BOX_SCHEMA)
         by_index[ams_index] = raw
     return by_index
 
 
-def parse_onboard_box(boxes):
+def parse_onboard_box(boxes, *, model_id=KOBRA_X.model_id):
     """Validate and sanitize the qualified Kobra X onboard four-slot box payload."""
-    if not isinstance(boxes, list) or len(boxes) != 1 or not isinstance(boxes[0], dict):
+    topology = onboard_topology(model_id)
+    if topology is None or not isinstance(boxes, list) or len(boxes) != 1 or not isinstance(boxes[0], dict):
         raise ProtocolError("Only the onboard four-slot configuration is supported")
     box_id = boxes[0].get("id")
-    if type(box_id) is not int or box_id != -1:
+    if type(box_id) is not int or box_id != topology.box_id:
         raise ProtocolError("Only the onboard four-slot configuration is supported")
-    by_index = _index_onboard_slots(boxes[0].get("slots"))
-    slots = [_parse_onboard_slot(ams_index, by_index[ams_index]) for ams_index in range(4)]
+    by_index = _index_onboard_slots(boxes[0].get("slots"), topology.slot_count)
+    slots = [_parse_onboard_slot(ams_index, by_index[ams_index]) for ams_index in range(topology.slot_count)]
     return {
-        "box_id": -1,
-        "box_kind": "onboard",
-        "slot_count": 4,
+        "box_id": topology.box_id,
+        "box_kind": topology.box_kind,
+        "slot_count": topology.slot_count,
         "loaded_count": sum(1 for item in slots if item["status_label"] == "loaded"),
         "slots": slots,
     }
@@ -214,10 +215,10 @@ def list_slots(config):
     try:
         with MQTT(config) as client:
             info = payload_data(client.query("info", require_fresh=True))
-            if compatibility_issue(config, info) is not None:
+            if info_compatibility_issue(config.type_id, config.printer_id, info) is not None:
                 raise ProtocolError("Fresh status could not establish qualified Kobra X identity and firmware")
             box_data = payload_data(client.query("multiColorBox", "getInfo"))
-            box = parse_onboard_box(box_data.get("multi_color_box"))
+            box = parse_onboard_box(box_data.get("multi_color_box"), model_id=config.type_id)
     except MQTTClosed as error:
         raise ConnectionError("MQTT connection closed") from error
     return {

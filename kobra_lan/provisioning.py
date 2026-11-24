@@ -21,6 +21,7 @@ from cryptography.hazmat.primitives import padding, serialization
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
 from .config import ProtocolError
+from .qualification import KOBRA_X, normalize_qualified_model_id
 
 MAX_RESPONSE = 1024 * 1024
 
@@ -120,9 +121,10 @@ class Bundle:
 def model_id(data):
     """Normalize the two firmware field spellings while rejecting unqualified models."""
     values = [data[k] for k in ("modelId", "modeId") if k in data]
-    if not values or any(type(v) not in (str, int) or str(v) != "20030" for v in values):
-        raise ProtocolError("Response validation: only model 20030 is qualified")
-    return 20030
+    normalized = normalize_qualified_model_id(values)
+    if normalized is None:
+        raise ProtocolError(f"Response validation: only model {KOBRA_X.model_id} is qualified")
+    return normalized
 
 
 def decrypt_object(token, data):

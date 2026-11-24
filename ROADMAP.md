@@ -120,7 +120,10 @@ External ACE units, discovery and other device controls require separate work.
 
 ## Milestone 4 — Broader compatibility and stable releases
 
-- Publish a model/firmware/material/preparation matrix that distinguishes implementation, offline validation and hardware observation.
+Implemented: centralized hardware qualification rules in `kobra_lan/qualification.py` and the published [compatibility matrix](docs/compatibility.md) separating implemented, offline-validated, and hardware-observed evidence across models, firmwares, slicers, filament-box topology, slots, materials, preparation flags, operations, and host platforms.
+
+Remaining work:
+
 - Expand material and preparation evidence, qualify onboard multicolor starts, and investigate external ACE support. Do not infer other Anycubic model support from similar fields.
 - Qualify additional platforms separately. Current package acceptance targets Linux on amd64; macOS, Windows and other architectures need their own evidence.
 - Maintain release notes, compatibility policy and explicit migration decisions for commands, JSON and persisted state.
