@@ -7,9 +7,10 @@ from . import __version__
 from .cli_output import emit
 from .config import ProtocolError
 from .control import control_print, validate_filename
+from .delete_file import delete_file
 from .filaments import inspect_gcode_filaments, list_slots
 from .jobs import DEFAULT_LIMIT, KINDS, MAX_LIMIT, job_info, list_jobs, valid_record_id
-from .mqtt import MQTT
+from .mqtt import MQTT, validate_delete_filename
 from .printer import snapshot, file_details, safe_file_details, list_files
 from .upload import describe, execute
 from .start import start, valid_attempt_id
@@ -31,6 +32,7 @@ class Parser(argparse.ArgumentParser):
         guidance = {
             "kobra-lan printer pair": "; supply --name NAME and --host IPv4",
             "kobra-lan files upload": "; review first with kobra-lan gcode inspect",
+            "kobra-lan files delete": "; find a root filename with kobra-lan files list and supply --execute",
             "kobra-lan print start": "; review first with kobra-lan print plan",
             "kobra-lan print watch": f"; --timeout accepts whole seconds from 1 to {MAX_TIMEOUT}",
             "kobra-lan print pause": "; inspect kobra-lan status first and supply --execute (optional --filename NAME)",
@@ -110,8 +112,9 @@ def build_parser():
     slots.add_parser("list", help="List onboard filament slots (1..4); read-only",
                      description="Read-only onboard four-slot inventory on Kobra X model 20030 / firmware 2.0.2.2 "
                                  "(idle or printing). Reports slot numbering, status, material, color, and start availability.")
-    p = sub.add_parser("files", help="Observe storage or explicitly upload; never starts prints",
-                       description="list/info are read-only; upload requires reviewed hash and --execute")
+    p = sub.add_parser("files", help="Inspect storage, upload, or delete a stored file",
+                       description="list/info are read-only. upload requires a reviewed hash and --execute. "
+                                   "Experimental delete requires an idle printer and --execute.")
     files = p.add_subparsers(dest="files_command", required=True)
     files.add_parser("list", help="List printer storage; read-only")
     p = files.add_parser("info", help="Read remote metadata; no upload")
@@ -121,6 +124,13 @@ def build_parser():
     p.add_argument("--name")
     p.add_argument("--execute", action="store_true", required=True)
     p.add_argument("--sha256", required=True, help="Reviewed file SHA-256 from gcode inspect")
+    p = files.add_parser("delete", help="Experimental removal of one root file; requires --execute",
+                         description="Experimental single-shot deletion on Kobra X model 20030 / firmware 2.0.2.2 "
+                                     "(hardware_delete_validated: false). Requires an idle printer with no active job. "
+                                     "Preserves local receipts and markers. If the outcome is uncertain, inspect "
+                                     "files list before taking further action. Do not resend blindly.")
+    p.add_argument("name", help="Root filename from files list")
+    p.add_argument("--execute", action="store_true", required=True, help="Explicitly execute one delete command")
     p = sub.add_parser("gcode", help="Local inspection; no target or network")
     gcode = p.add_subparsers(dest="gcode_command", required=True)
     p = gcode.add_parser("inspect", help="Inspect immutable local G-code; no state writes")
@@ -212,6 +222,11 @@ def main(argv=None):
             _, manifest = describe(args.file, args.name)
             if manifest["sha256"] != args.sha256:
                 raise ProtocolError("File SHA-256 differs from reviewed manifest; use gcode inspect")
+        if args.command == "files" and args.files_command == "delete":
+            try:
+                validate_delete_filename(args.name)
+            except ProtocolError:
+                raise ArgumentFailure("Invalid filename. Supply one safe root filename from kobra-lan files list.") from None
         if getattr(args, "reprint_from", None) is not None and not valid_attempt_id(args.reprint_from):
             raise ArgumentFailure("--reprint-from requires a full lowercase local attempt ID from print plan")
         if args.command == "print" and args.print_command == "start":
@@ -318,6 +333,8 @@ def _operate_files(args, config):
     if args.files_command == "info":
         with MQTT(config) as client:
             return safe_file_details(file_details(client, args.name))
+    if args.files_command == "delete":
+        return delete_file(config, args.name, args.state_dir)
     if not args.sha256:
         raise ProtocolError("--sha256 is required for an actual upload")
     return execute(config, args.file, args.sha256, args.state_dir, args.name)

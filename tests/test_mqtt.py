@@ -119,5 +119,132 @@ class MQTTControlOnceTests(unittest.TestCase):
                 self.assertEqual(client.sock.sendall.call_count, 1)
 
 
+class MQTTDeleteOnceTests(unittest.TestCase):
+    def setUp(self):
+        self.client = MQTT(config())
+        self.client.sock = Mock()
+        self.on_ack = Mock()
+
+    def publish(self, topic, data, *, qos=0, retained=False):
+        pid = b"\x00\x07" if qos else b""
+        header = 0x30 | (qos << 1) | retained
+        return header, string(topic) + pid + json.dumps(data).encode()
+
+    def ack(self, **fields):
+        request = sent_publish_payload(self.client.sock)
+        return self.publish("root/response", {"msgid": request["msgid"], "code": 0, **fields})
+
+    def report(self, *, qos=0, retained=False, **fields):
+        request = sent_publish_payload(self.client.sock)
+        data = {"type": "file", "action": "deleteBatch", "state": "success", "msgid": request["msgid"],
+                "data": None, "unexpected": "secret", **fields}
+        return self.publish("root/file/report", data, qos=qos, retained=retained)
+
+    def test_single_publish_with_correlated_report_and_qos1_puback(self):
+        def receive(deadline):
+            yield self.ack(msgid="unrelated")
+            yield self.ack()
+            self.on_ack.assert_called_once_with({"code": 0, "msgid": sent_publish_payload(self.client.sock)["msgid"]})
+            yield self.report(qos=1, code=200)
+
+        packets = receive(None)
+        with patch.object(self.client, "receive", side_effect=lambda _: next(packets)):
+            result = self.client.delete_file_once("model.gcode", on_ack=self.on_ack)
+        request = sent_publish_payload(self.client.sock)
+        self.assertEqual(request["type"], "file")
+        self.assertEqual(request["action"], "deleteBatch")
+        self.assertEqual(request["data"], {"root": "local", "files": [{"path": "/", "filename": "model.gcode"}]})
+        cfg = self.client.config
+        sent = [call.args[0] for call in self.client.sock.sendall.call_args_list]
+        self.assertIn(string(f"{BASE}/slicer/printer/{cfg.type_id}/{cfg.printer_id}/file"), sent[0])
+        self.assertEqual(sent[1:], [packet(0x40, b"\x00\x07")])
+        self.assertEqual(result, {"ack": {"code": 0, "msgid": request["msgid"]},
+                                  "report": {"action": "deleteBatch", "state": "success", "code": 200}})
+
+    def test_uncorrelated_report_requires_ack_and_fresh_timestamp_and_ignores_retained(self):
+        def receive():
+            stamp = sent_publish_payload(self.client.sock)["timestamp"]
+            yield self.report(msgid="other", timestamp=stamp, state="failed")
+            yield self.report(retained=True, state="failed")
+            mid = sent_publish_payload(self.client.sock)["msgid"]
+            yield self.publish("root/response", {"msgid": mid, "code": 9}, retained=True)
+            yield self.ack()
+            yield self.report(msgid="other", timestamp=stamp - 1, state="failed")
+            yield self.report(msgid="other", timestamp=stamp + 6000, state="failed")
+            yield self.report(msgid="other", timestamp=stamp)
+
+        packets = receive()
+        with patch.object(self.client, "receive", side_effect=lambda _: next(packets)):
+            result = self.client.delete_file_once("model.gcode", on_ack=self.on_ack)
+        self.on_ack.assert_called_once_with(result["ack"])
+        self.assertEqual(result["report"], {"action": "deleteBatch", "state": "success"})
+        self.client.sock.sendall.assert_called_once()
+
+    def test_correlated_report_before_ack_still_waits_for_ack(self):
+        def receive():
+            yield self.report()
+            self.on_ack.assert_not_called()
+            yield self.ack()
+
+        packets = receive()
+        with patch.object(self.client, "receive", side_effect=lambda _: next(packets)):
+            result = self.client.delete_file_once("model.gcode", on_ack=self.on_ack)
+        self.on_ack.assert_called_once_with(result["ack"])
+
+    def test_ack_rejection_failure_report_and_malformed_packets_never_republish(self):
+        cases = (
+            (lambda: self.ack(code=1), "rejected"),
+            (lambda: self.ack(code=False), "rejected"),
+            (lambda: self.report(state="failed"), "rejected"),
+            (lambda: self.report(code=500), "rejected"),
+            (lambda: (0x32, b"\x00"), "Malformed MQTT publish"),
+            (lambda: (0x30, string("root/file/report") + b"{"), "Malformed MQTT file deletion response"),
+        )
+        for receive, message in cases:
+            with self.subTest(message=message):
+                self.client.sock.reset_mock()
+                with patch.object(self.client, "receive", side_effect=lambda _: receive()):
+                    with self.assertRaisesRegex(ProtocolError, message):
+                        self.client.delete_file_once("model.gcode")
+                self.client.sock.sendall.assert_called_once()
+
+    def test_timeout_after_ack_preserves_callback_evidence(self):
+        def receive():
+            yield self.ack()
+            raise self.client._timeout()
+
+        packets = receive()
+        with patch.object(self.client, "receive", side_effect=lambda _: next(packets)):
+            with self.assertRaises(MQTTFailure) as caught:
+                self.client.delete_file_once("model.gcode", on_ack=self.on_ack)
+        self.assertEqual(caught.exception.exit_code, 3)
+        self.on_ack.assert_called_once_with({"code": 0, "msgid": sent_publish_payload(self.client.sock)["msgid"]})
+        self.client.sock.sendall.assert_called_once()
+
+    def test_timeout_after_correlated_report_preserves_callback_evidence(self):
+        on_report = Mock()
+
+        def receive():
+            yield self.report(code=200)
+            on_report.assert_called_once_with({"action": "deleteBatch", "state": "success", "code": 200})
+            raise self.client._timeout()
+
+        packets = receive()
+        with patch.object(self.client, "receive", side_effect=lambda _: next(packets)):
+            with self.assertRaises(MQTTFailure) as caught:
+                self.client.delete_file_once("model.gcode", on_ack=self.on_ack, on_report=on_report)
+        self.assertEqual(caught.exception.exit_code, 3)
+        self.on_ack.assert_not_called()
+        self.client.sock.sendall.assert_called_once()
+
+    def test_query_and_invalid_delete_filename_refuse_before_publish(self):
+        with self.assertRaises(ProtocolError):
+            self.client.query("file", "deleteBatch")
+        for name in ("...", "../model.gcode", "https://example.test?token=secret"):
+            with self.subTest(name=name), self.assertRaises(ProtocolError):
+                self.client.delete_file_once(name)
+        self.client.sock.sendall.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()

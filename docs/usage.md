@@ -24,11 +24,11 @@ The output envelope does not change private receipt or registry schemas.
 
 | Error code | Exit | Meaning |
 | --- | --- | --- |
-| `invalid_arguments` | 2 | Parser failure or malformed required execution hash or `--filename` guard |
+| `invalid_arguments` | 2 | Parser failure or malformed execution hash, filename guard, or deletion filename |
 | `validation_failed` | 2 | Selection, trust, protocol, qualification or reviewed-content refusal |
 | `operation_failed` | 3 | Configuration, dependency, I/O or network failure; may retain local partial outcome |
 | `diagnostic_failed` | 2 or 3 | Failed ordered doctor checks; exit 3 takes precedence |
-| `interrupted` | 130 | User interrupted print observation |
+| `interrupted` | 130 | User interrupted print observation or a lifecycle control or deletion after publish |
 
 Every result also includes a `qualification` string with the narrow model/firmware and experimental-start boundary. The `result` payloads retain these command-specific fields. Consumers should
 allow additional safe fields and inspect outcome flags rather than infer success
@@ -48,6 +48,7 @@ from a filename or network acknowledgement.
 | `files info` | `filename` and available safe file details |
 | `gcode inspect` | `sha256`, `md5`, `size_bytes`, `remote_filename`, nullable `layer_count`, `slicer_version`, filament/color metadata (`paint_info_present`, ordered `filaments`, `filament_count`, `multicolor`, `tool_indices`, nullable `total_filament_used_g`, `single_filament_start_compatible`), operation/qualification flags |
 | `files upload` | Manifest, verification/status flags, timestamp and `receipt_path` |
+| `files delete` | `filename`, `device_digest`, model/firmware, `status`, `dry_run: false`, `experimental: true`, `hardware_delete_validated: false`, `local_state`, sanitized `before`/`before_listing`, `ack`/`report`, and `after`/`after_listing` when available |
 | `print plan` | `file_sha256`, `device_digest`, model/firmware, canonical `payload`, `plan_sha256`, slot and qualification flags; latest local `attempt_id` and `start_status` when available; `previous_attempt_id` for a reprint review |
 | `print start` | Plan fields, `dry_run: false`, local `attempt_id`, `previous_attempt_id` for a reprint, status/ack/observation evidence and `receipt_path`; an uncertain error may return a subset of that evidence |
 | `print watch` | `outcome`, `reason`, verified `phase`, `progress` (percent), `current_layer`, `total_layers` when available, plus `observation_recorded` and `observation_id` when an active job was observed |
@@ -124,6 +125,44 @@ means bounded observation saw the selected project active. Uncertain results
 retain durable reservations and explicitly forbid automatic resend. No outcome
 here claims completed printing or physical quality. Existing configs, receipts
 and device/file markers, including under `--state-dir`, remain authoritative.
+
+## Delete a stored file
+
+```sh
+kobra-lan --printer bench files list
+kobra-lan --printer bench files delete old-model.gcode --execute
+```
+
+Choose one root-level filename from `files list`. The command requires
+`--execute` and checks fresh identity and status on a pinned MQTT session for
+Kobra X model 20030 / firmware 2.0.2.2. It requires state `free` with no active
+project and refuses an active target, a directory, or a name that is missing
+or appears more than once. The result carries `dry_run: false`,
+`experimental: true` and `hardware_delete_validated: false`.
+
+The command sends once and waits for a correlated ACK and a successful delete
+report. It checks the root listing up to three times, waiting one second
+between polls, then requests fresh qualified status on the same session.
+
+| Status | Exit | Meaning |
+| --- | --- | --- |
+| `delete_observed_removed` | 0 | The file was absent from a post-delete listing and fresh status passed qualification. |
+| `delete_acknowledged_not_confirmed` | 0 | The printer reported success and the file still appeared at the end of polling. |
+| `delete_uncertain_no_retry` | 2, 3 or 130 | A protocol failure, communication failure, or interrupt occurred after sending began. The result retains evidence collected so far. |
+
+Inspect `files list` after an unconfirmed or uncertain result before taking
+further action. The CLI never reconnects or resends the deletion automatically.
+The per-device lease under `--state-dir` serializes cooperating CLI operations.
+The touchscreen and mobile app can still change printer state or replace the
+file between inspection and publish.
+
+Deletion preserves local profiles, upload and start receipts and attempt
+markers, and watch observations. The read-only `local_state` summary counts
+matching upload and start receipts. `jobs list` and `jobs info` still read
+the historical records. A preserved upload marker continues to block
+uploading identical bytes under the same device and state directory. A file
+with a new SHA-256 can use the freed filename after the normal upload checks.
+`print plan` and `print start` still require current remote metadata.
 
 ## Experimental print start
 
@@ -232,7 +271,7 @@ completes the transition shortly afterward.
   acquire the shared private per-device lease (`.device.lock`) under
   `--state-dir` across pre-flight inspection, publish, and bounded observation,
   verifying directory binding before publish without following symlinks or
-  changing permissions. Concurrent `files upload`, `print start`, and
+  changing permissions. Concurrent `files upload`, `files delete`, `print start`, and
   `print pause|resume|cancel` invocations targeting the same device and
   `--state-dir` fail before printer access. Existing profiles, upload receipts,
   start receipts, `.attempt` markers, and watch observations remain
@@ -354,7 +393,7 @@ the same `printer_id` and `--state-dir` see identical local history.
 - Upload is currently qualified only for model 20030 / firmware 2.0.2.2, Next-generated G-code, and the Kobra X profile. It requires an idle printer with no active project.
 - Hashing and multipart construction use the same bytes in memory. No G-code translation, `print=true` flag, or HTTP redirects.
 - Exclusive reservations are persisted with fsync in `~/.local/share/kobra-lan/uploads/`. Upload and first start use separate device/file markers. A reprint adds an attempt-keyed successor without modifying the original. Each predecessor can be consumed at most once across processes and restarts.
-- Mutating device commands (`files upload`, `print start`, and `print pause|resume|cancel`) sharing a device state directory hold a private shared per-device lease (`.device.lock`, alongside `.upload.lock`/`.start.lock` for upload and start compatibility) from before printer access until post-action observation ends. A concurrent contender fails before printer access, including for different hashes, operations, or profile names. After an ambiguous response, inspect status/files/receipts and preserve all markers. Different state directories, older binaries and other clients do not share this lease.
+- Mutating device commands (`files upload`, `files delete`, `print start`, and `print pause|resume|cancel`) sharing a device state directory hold a private shared per-device lease (`.device.lock`, alongside `.upload.lock`/`.start.lock` for upload and start compatibility) from before printer access until post-action observation ends. A concurrent contender fails before printer access, including for different hashes, operations, or profile names. After an ambiguous response, inspect status/files/receipts and preserve all markers. Different state directories, older binaries and other clients do not share this lease.
 - Uploads keep listing, reservation, POST and verification inside that device lease.
   The lock files are retained; closing their descriptors releases the lease.
   State paths are walked without following symlinks; an existing device directory
@@ -378,6 +417,15 @@ Manual upload validation: one actual POST of an Autodesk FDM Test generated by N
 
 End-to-end validation on 2026-10-07: Autodesk FDM Test sliced with Next Linux 2.0.0.5 and official Kobra X / 0.20mm Standard / PLA High Speed profiles, using one CPU and preserving model position/orientation. Output: 6,835,381 bytes, 460 layers, estimated 1h44m12s and approximately 31.74 g. One upload was verified, followed by one MQTT start using the reviewed plan. Telemetry confirmed the correct active file, preparation phases, and printing at layer 1/460 with bed/nozzle targets of 60°C/220°C. No upload or start was repeated. Completion and physical quality were not assessed in this validation.
 
+
+Live stored-file deletion on 2026-11-23 used a lifecycle-test G-code file on
+Kobra X model 20030 / firmware 2.0.2.2. The printer reported `free` before and
+after the operation. One delete request received a correlated ACK (code 0)
+and a `deleteBatch` report with state `success` and code 200. The CLI returned
+`delete_observed_removed` (exit 0), and a separate `files list` request confirmed
+the file was absent. The local summary counted one matching upload receipt
+and one matching start receipt. Byte-for-byte preservation was verified in
+offline tests with synthetic state.
 
 ## Saved target selection
 

@@ -20,8 +20,8 @@ ENTRY_POINTS_FILE = "entry_points.txt"
 RUNTIME_LOCK = ROOT / "requirements-runtime.txt"
 
 MODULES = {f"kobra_lan/{name}.py" for name in
-           ("__init__", "cli", "cli_output", "completions", "config", "control", "filaments", "jobs", "mqtt", "printer", "start",
-            "upload", "provisioning", "pairing", "profiles", "diagnostics", "watch")}
+           ("__init__", "cli", "cli_output", "completions", "config", "control", "delete_file", "filaments",
+            "jobs", "mqtt", "printer", "start", "upload", "provisioning", "pairing", "profiles", "diagnostics", "watch")}
 DOCS = {
     "README.md", "LICENSE", "NOTICE.md", "CHANGELOG.md", "ROADMAP.md", "CONTRIBUTING.md",
     "AGENTS.md", "SECURITY.md", "CODE_OF_CONDUCT.md", "docs/README.md", "docs/pairing.md",
@@ -141,6 +141,20 @@ def main():
     slots_list_help = subprocess.check_output([str(command), "slots", "list", "--help"],
                                               cwd=outside, env=probe_env, text=True)
     assert "onboard" in slots_list_help.lower()
+    files_help = subprocess.check_output([str(command), "files", "--help"],
+                                         cwd=outside, env=probe_env, text=True)
+    assert "delete" in files_help
+    delete_help = subprocess.check_output([str(command), "files", "delete", "--help"],
+                                          cwd=outside, env=probe_env, text=True)
+    assert "--execute" in delete_help and "idle printer" in " ".join(delete_help.split())
+    for mode in ([], ["--json"]):
+        failure = subprocess.run([str(command), *mode, "files", "delete", "https://example.test/?token=SYNTHETIC_PRIVATE"],
+                                 cwd=outside, env=probe_env, text=True, capture_output=True)
+        assert failure.returncode == 2 and not failure.stderr
+        assert "SYNTHETIC_PRIVATE" not in failure.stdout
+        assert "files list" in failure.stdout and "--execute" in failure.stdout
+        if mode:
+            assert json.loads(failure.stdout)["error"]["code"] == "invalid_arguments"
     print_help = subprocess.check_output([str(command), "print", "--help"],
                                          cwd=outside, env=probe_env, text=True)
     assert all(word in print_help for word in ("watch", "pause", "resume", "cancel"))
@@ -170,6 +184,11 @@ def main():
         assert all(word in completion for word in ("kobra-lan", "slots", "watch", "timeout", "pause", "resume", "cancel",
                                                    "execute", "filename", "jobs", "observation", "limit"))
         assert "slots:list" in completion
+        assert "files:delete" in completion
+        if shell == "fish":
+            assert any("xfiles delete" in line and line.endswith(" -l execute") for line in completion.splitlines())
+        else:
+            assert "'files delete') candidates='-h --help --execute'" in completion
         assert all(f"print {action}:--reprint-from" in completion for action in ("plan", "start"))
         assert all(f"print {action}:--filename" in completion for action in ("pause", "resume", "cancel"))
         assert "jobs list:--kind" in completion and "jobs list:--limit" in completion

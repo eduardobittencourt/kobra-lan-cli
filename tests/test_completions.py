@@ -43,6 +43,12 @@ class CompletionTests(unittest.TestCase):
                 self.assertEqual(main(['--json', 'completion', shell]), 0)
             registry.assert_not_called()
             script = out.getvalue()
+            self.assertIn('files:delete', script)
+            if shell == 'fish':
+                self.assertTrue(any('xfiles delete' in line and line.endswith(' -l execute')
+                                    for line in script.splitlines()))
+            else:
+                self.assertIn("'files delete') candidates='-h --help --execute'", script)
             for node in nodes.values():
                 for name in node['commands']:
                     self.assertIn(name, script)
@@ -60,6 +66,9 @@ class CompletionTests(unittest.TestCase):
 compopt() { printf 'filename-mode:%s\\n' "$*"; }
 COMP_WORDS=(kobra-lan --json --printer bench files ''); COMP_CWORD=5
 _kobra_lan; printf '%s\\n' "${COMPREPLY[@]}"
+printf 'files:%s\\n' "${COMPREPLY[@]}"
+COMP_WORDS=(kobra-lan files delete a.gcode --ex); COMP_CWORD=4
+_kobra_lan; printf 'files delete:%s\\n' "${COMPREPLY[@]}"
 COMP_WORDS=(kobra-lan sl); COMP_CWORD=1
 _kobra_lan; printf 'root:%s\\n' "${COMPREPLY[@]}"
 COMP_WORDS=(kobra-lan slots ''); COMP_CWORD=2
@@ -97,7 +106,7 @@ _kobra_lan; printf '%s\\n' "${COMPREPLY[@]}"
         self.assertEqual(process.returncode, 0, process.stderr)
         self.assertEqual(process.stderr, '')
         for expected in ('list', 'info', 'upload', 'on', 'off', 'watch', '--timeout', '--json', 'pyproject.toml',
-                         'root:slots', 'slots:list',
+                         'root:slots', 'slots:list', 'files:delete', 'files delete:--execute',
                          'plan:--reprint-from', 'start:--reprint-from',
                          'print:pause', 'print:resume', 'print:cancel',
                          'pause:--execute', 'pause:--filename', 'resume:--execute', 'resume:--filename',
@@ -141,6 +150,12 @@ _kobra_lan; printf '%s\\n' "${COMPREPLY[@]}"
         script = generate(build_parser(), 'fish')
         script += '''
 complete -C 'kobra-lan --json --printer bench files '
+for item in (complete -C 'kobra-lan files ')
+  printf 'files:%s\\n' $item
+end
+for item in (complete -C 'kobra-lan files delete a.gcode --ex')
+  printf 'files delete:%s\\n' $item
+end
 for item in (complete -C 'kobra-lan sl')
   printf 'root:%s\\n' $item
 end
@@ -173,7 +188,7 @@ complete -C 'kobra-lan --j'
         self.assertEqual(process.returncode, 0, process.stderr)
         self.assertEqual(process.stderr, '')
         for expected in ('list', 'info', 'upload', 'on', 'off', 'watch', '--timeout', '--json',
-                         'root:slots', 'slots:list',
+                         'root:slots', 'slots:list', 'files:delete', 'files delete:--execute',
                          'plan:--reprint-from', 'start:--reprint-from',
                          'print:pause', 'print:resume', 'print:cancel',
                          'pause:--execute', 'pause:--filename', 'resume:--execute', 'resume:--filename',
@@ -191,6 +206,9 @@ compadd() { print -l -- "$@"; }
 _files() { print local-files; }
 words=(kobra-lan --json files ''); CURRENT=4
 _kobra_lan
+for candidate in $(_kobra_lan); do print -r -- "files:$candidate"; done
+words=(kobra-lan files delete a.gcode --ex); CURRENT=5
+for candidate in $(_kobra_lan); do print -r -- "files delete:$candidate"; done
 words=(kobra-lan sl); CURRENT=2
 for candidate in $(_kobra_lan); do print -r -- "root:$candidate"; done
 words=(kobra-lan slots ''); CURRENT=3
@@ -226,7 +244,7 @@ _kobra_lan
         self.assertEqual(process.returncode, 0, process.stderr)
         self.assertEqual(process.stderr, '')
         for expected in ('list', 'info', 'upload', 'on', 'off', 'watch', '--timeout', '--json',
-                         'root:slots', 'slots:list',
+                         'root:slots', 'slots:list', 'files:delete', 'files delete:--execute',
                          'plan:--reprint-from', 'start:--reprint-from',
                          'print:pause', 'print:resume', 'print:cancel',
                          'pause:--execute', 'pause:--filename', 'resume:--execute', 'resume:--filename',

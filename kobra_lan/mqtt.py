@@ -13,12 +13,19 @@ import struct
 import time
 import uuid
 
-from .config import ProtocolError
+from .config import ProtocolError, validate_filename
 
 MAX_PACKET = 4 * 1024 * 1024
 BASE = "anycubic/anycubicCloud/v1"
 CONTROL_ACTIONS = frozenset({"pause", "resume", "stop"})
 TASKID_RE = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
+
+
+def validate_delete_filename(value):
+    filename = validate_filename(value)
+    if not filename.strip("."):
+        raise ProtocolError("Filename must contain a character other than a dot")
+    return filename
 
 
 def string(value):
@@ -56,6 +63,14 @@ class MQTTIOFailure(OSError):
 
 class MQTTClosed(MQTTFailure):
     """Peer closed the transport before the next packet was complete."""
+
+
+def mqtt_failure_exit_code(error):
+    if isinstance(error, (MQTTClosed, OSError)):
+        return 3
+    if isinstance(error, MQTTFailure) and (error.exit_code == 3 or error.code == "timeout"):
+        return 3
+    return 2
 
 
 class MQTT:
@@ -300,28 +315,9 @@ class MQTT:
             header, body = self.receive(deadline)
             if header >> 4 != 3:
                 continue
-            if len(body) < 2:
-                raise ProtocolError("Malformed MQTT publish")
-            length = struct.unpack("!H", body[:2])[0]
-            if length + 2 > len(body):
-                raise ProtocolError("Malformed MQTT topic")
+            response_topic, data = self._publish_fields(header, body)
             try:
-                response_topic = body[2:2 + length].decode()
-            except UnicodeDecodeError:
-                raise ProtocolError("Malformed MQTT topic") from None
-            offset = 2 + length
-            qos = (header >> 1) & 3
-            if qos not in (0, 1):
-                raise ProtocolError("Unsupported MQTT QoS")
-            if qos == 1:
-                pid = body[offset:offset + 2]
-                if len(pid) != 2:
-                    raise ProtocolError("Malformed MQTT packet identifier")
-                offset += 2
-                self.sock.settimeout(self.remaining())
-                self.sock.sendall(packet(0x40, pid))
-            try:
-                response = json.loads(body[offset:])
+                response = json.loads(data)
             except (ValueError, UnicodeDecodeError):
                 if response_topic.endswith("/response"):
                     raise ProtocolError("Malformed MQTT control response") from None
@@ -335,3 +331,88 @@ class MQTT:
                 if type(code) is not int or code != 0:
                     raise ProtocolError("Print control was rejected; do not retry automatically")
                 return {"code": 0, "msgid": msgid}
+
+    def _publish_fields(self, header, body):
+        if len(body) < 2:
+            raise ProtocolError("Malformed MQTT publish")
+        length = struct.unpack("!H", body[:2])[0]
+        offset = 2 + length
+        if offset > len(body):
+            raise ProtocolError("Malformed MQTT topic")
+        try:
+            topic = body[2:offset].decode()
+        except UnicodeDecodeError:
+            raise ProtocolError("Malformed MQTT topic") from None
+        qos = (header >> 1) & 3
+        if qos not in (0, 1):
+            raise ProtocolError("Unsupported MQTT QoS")
+        if qos == 1:
+            pid = body[offset:offset + 2]
+            if len(pid) != 2:
+                raise ProtocolError("Malformed MQTT packet identifier")
+            offset += 2
+            self.sock.settimeout(self.remaining())
+            self.sock.sendall(packet(0x40, pid))
+        return topic, body[offset:]
+
+    def delete_file_once(self, filename, *, on_ack=None, on_report=None):
+        """Send one storage deletion request and wait for both ACK and report."""
+        filename = validate_delete_filename(filename)
+        self.begin_stage("file_delete")
+        msgid = str(uuid.uuid4())
+        sent_timestamp = int(time.time() * 1000)
+        message = {
+            "type": "file",
+            "action": "deleteBatch",
+            "msgid": msgid,
+            "timestamp": sent_timestamp,
+            "data": {"root": "local", "files": [{"path": "/", "filename": filename}]},
+        }
+        topic = f"{BASE}/slicer/printer/{self.config.type_id}/{self.config.printer_id}/file"
+        self.sock.settimeout(self.remaining())
+        self.sock.sendall(packet(0x30, string(topic) + json.dumps(message, separators=(",", ":")).encode()))
+        ack = report = None
+        while ack is None or report is None:
+            header, body = self.receive(self.stage_deadline)
+            if header >> 4 != 3:
+                continue
+            response_topic, data = self._publish_fields(header, body)
+            if header & 1:
+                continue
+            is_ack = response_topic.endswith("/response")
+            if not is_ack and not response_topic.endswith("/file/report"):
+                continue
+            try:
+                result = json.loads(data)
+            except (ValueError, RecursionError):
+                raise ProtocolError("Malformed MQTT file deletion response") from None
+            if not isinstance(result, dict):
+                raise ProtocolError("Malformed MQTT file deletion response")
+            correlated = result.get("msgid") == msgid
+            if is_ack:
+                if not correlated:
+                    continue
+                code = result.get("code")
+                if type(code) is not int or code != 0:
+                    raise ProtocolError("File deletion was rejected; do not retry automatically")
+                if ack is None:
+                    ack = {"code": 0, "msgid": msgid}
+                    if on_ack is not None:
+                        on_ack(ack)
+                continue
+            if result.get("type") != "file" or result.get("action") != "deleteBatch":
+                continue
+            stamp = result.get("timestamp")
+            fresh = (type(stamp) in (int, float)
+                     and sent_timestamp <= stamp <= int(time.time() * 1000) + 5000)
+            if not correlated and not (ack is not None and fresh):
+                continue
+            code = result.get("code", 0)
+            if result.get("state") != "success" or type(code) is not int or code not in (0, 200):
+                raise ProtocolError("File deletion was rejected; do not retry automatically")
+            report = {"action": "deleteBatch", "state": "success"}
+            if "code" in result:
+                report["code"] = code
+            if on_report is not None:
+                on_report(report)
+        return {"ack": ack, "report": report}

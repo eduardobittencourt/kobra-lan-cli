@@ -13,9 +13,9 @@ import hashlib
 from pathlib import Path
 import time
 
-from .config import ProtocolError
+from .config import ProtocolError, validate_filename
 from .diagnostics import compatibility_issue
-from .mqtt import MQTT, MQTTClosed, MQTTFailure, MQTTIOFailure, TASKID_RE
+from .mqtt import MQTT, TASKID_RE, mqtt_failure_exit_code
 from .printer import payload_data, sanitized
 from .upload import device_lock, ensure_directory_bound
 from .watch import PREPARATION_STATES, project_filename
@@ -54,15 +54,6 @@ class ControlUncertain(ProtocolError):
         self.exit_code = exit_code if exit_code in (2, 3, 130) else 2
 
 
-def validate_filename(value):
-    """Validate an optional remote filename guard without echoing unsafe input."""
-    if (not isinstance(value, str) or not value or not value.strip() or len(value) > 255
-            or not value.isprintable() or value in (".", "..")
-            or any(c in value for c in "/\\:?#")):
-        raise ProtocolError("Filename guard must be a safe printable filename without path separators or URL characters")
-    return value
-
-
 def extract_taskid(project):
     if isinstance(project, dict):
         for key in ("task_id", "taskid"):
@@ -90,14 +81,6 @@ def transition_confirmed(action, info):
             isinstance(project_state, str) and project_state in CANCEL_CONFIRMED_STATES
         )
     return False
-
-
-def _failure_exit_code(error):
-    if isinstance(error, (MQTTIOFailure, MQTTClosed, OSError)):
-        return 3
-    if isinstance(error, MQTTFailure):
-        return 3 if error.exit_code == 3 or error.code == "timeout" else 2
-    return 2
 
 
 def control_print(config, action, state_dir, *, expected_filename=None):
@@ -175,5 +158,5 @@ def control_print(config, action, state_dir, *, expected_filename=None):
             ) from None
         except Exception as error:
             result["status"] = "control_uncertain_no_retry"
-            raise ControlUncertain(result, exit_code=_failure_exit_code(error)) from None
+            raise ControlUncertain(result, exit_code=mqtt_failure_exit_code(error)) from None
         return result

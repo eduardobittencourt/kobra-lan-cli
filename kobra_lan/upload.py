@@ -197,7 +197,7 @@ def device_lock(directory, operation):
     parent = open_directory(directory, create=True)
     fds = []
     try:
-        if operation != "control":
+        if operation not in ("control", "delete"):
             fds.append(_open_lock_file(parent, f'.{operation}.lock', operation.capitalize()))
         fds.append(_open_lock_file(parent, '.device.lock', "Device operation"))
         yield parent

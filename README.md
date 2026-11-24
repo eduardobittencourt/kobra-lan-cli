@@ -61,6 +61,8 @@ cd kobra-lan-cli
 # Inspect local job history offline (start receipts/markers and saved watch observations):
 ./kobra-lan --printer bench jobs list --kind all --limit 20
 ./kobra-lan --printer bench jobs info RECORD_ID
+# Delete a stored file once the printer is idle:
+./kobra-lan --printer bench files delete old-model.gcode --execute
 ./kobra-lan --json --printer bench status
 ./kobra-lan completion fish
 ```
@@ -71,7 +73,7 @@ with `--reprint-from PREVIOUS_ATTEMPT_ID` on both commands. See the
 [reprint workflow](docs/usage.md#deliberately-reprint-a-stored-file) for eligibility and safety checks.
 
 The canonical tree is `printer pair|list|info|use|remove`, `doctor`, `status`,
-`slots list`, `files list|info|upload`, `gcode inspect`,
+`slots list`, `files list|info|upload|delete`, `gcode inspect`,
 `print plan|start|watch|pause|resume|cancel`, `jobs list|info`, and
 `completion bash|zsh|fish`. Group `--help` describes read-only inventory,
 local history inspection, observation, planning and execution controls.
@@ -85,9 +87,17 @@ Upload requires both execution controls and never starts a print. Inspection and
 job history are local and read-only; planning queries the printer without changing
 it. Text is the default; root `--json` selects the versioned machine contract.
 Exit codes are 0 (success), 2 (arguments/protocol/validation), 3
-(configuration/network failure), and 130 (interrupted print observation).
+(configuration/network failure), and 130 (interrupted print observation,
+lifecycle control, or stored-file deletion after publish).
 Global `--config`, `--printer`, `--state-dir` and `--json` precede the command.
 These examples describe the workflow; automated checks use synthetic fixtures.
+
+`files delete <name> --execute` removes one root-level file from an idle
+Kobra X with no active job. It preserves local receipts, attempt markers, and
+watch observations. Results include `experimental: true` and
+`hardware_delete_validated: false`. After an uncertain or unconfirmed result,
+inspect `files list` before taking further action. The CLI never resends the
+delete command automatically. See [stored-file deletion](docs/usage.md#delete-a-stored-file).
 
 `print pause`, `print resume`, and `print cancel` are experimental single-shot
 lifecycle controls (`experimental: true`, `hardware_control_validated: true` on

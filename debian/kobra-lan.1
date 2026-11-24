@@ -46,6 +46,17 @@ T<n> tool indices, optional weights, multicolor, and
 single_filament_start_compatible). Multicolor print start remains unqualified.
 .B files upload FILE [--name NAME] --sha256 HASH --execute
 uploads inspected bytes once; never starts a print and has no implicit dry run.
+.B files delete NAME --execute
+deletes one root-level file on Kobra X model 20030 / firmware 2.0.2.2 after
+checking for an idle printer with no active project. Use files list to select
+the name. The command preserves local profiles, upload and start receipts,
+attempt markers, and watch observations. Results include experimental: true
+and hardware_delete_validated: false. Bounded listing checks and fresh status
+report delete_observed_removed or delete_acknowledged_not_confirmed (exit 0).
+A failure after sending begins reports delete_uncertain_no_retry with
+available partial evidence (exit 2 for protocol failure, 3 for communication
+failure, or 130 for interrupt). Inspect files list before proceeding after
+an unconfirmed or uncertain result. The CLI never resends deletion automatically.
 .B print plan FILE --name NAME --slot N --auto-leveling on|off --vibration-compensation on|off --flow-calibration on|off [--reprint-from PREVIOUS_ATTEMPT_ID]
 reviews a stored print without writes.
 .B print start
@@ -114,7 +125,8 @@ Removing an isolated config and only its unreferenced PEM directory does not
 revoke access on the printer. Never remove operational attempt markers.
 .SH EXIT STATUS
 0 indicates success; 2 indicates protocol/validation failure; 3 indicates
-configuration/network failure. Interrupting print watch returns 130.
+configuration/network failure. Interrupting print watch or an in-flight
+lifecycle control or stored-file deletion returns 130.
 Exit 0 for print watch means a result was returned, which can include an
 unknown print outcome. Operations are never retried automatically.
 .SH FILES
