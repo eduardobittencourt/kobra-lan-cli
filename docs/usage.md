@@ -191,14 +191,15 @@ reports `paint_index`, `slot`, `ams_index`, `gcode_material_type`,
 `gcode_color_hex`, `slot_material_type`, and `slot_color_hex`. Changing the
 order of the `--slot-map` arguments preserves the hash.
 
-Plans and starts report `experimental: true`. The only case that reports
-`hardware_start_validated: true` is the observed Kobra X firmware `2.0.2.2`
-configuration with one filament at paint index 0, PLA High Speed in slot 1, 2
-or 4, `--auto-leveling on`, `--vibration-compensation off`, and
-`--flow-calibration off`. Multicolor, non-zero single-filament paint indices,
-and other slot, material or preparation combinations report
-`hardware_start_validated: false`. External ACE and multi-box configurations
-are rejected.
+Plans and starts report `experimental: true`. `hardware_start_validated: true`
+applies only to observed Kobra X firmware `2.0.2.2` configurations with
+`PLA High Speed`, `--auto-leveling on`, `--vibration-compensation off`, and
+`--flow-calibration off`: single-filament `paint_index: 0` on slot 1, 2, or 4,
+and 4-color contiguous 1:1 mapping `0=1, 1=2, 2=3, 3=4`. Single-filament slot 3,
+cross-remapped (`paint_index != ams_index`), subset, sparse, or shared-slot
+multicolor mappings, non-zero single-filament paint indices, and other material
+or preparation combinations report `hardware_start_validated: false`. External
+ACE and multi-box configurations are rejected.
 
 To request execution later, use `print start` with the same explicit arguments plus `--execute --plan-sha256 REVIEWED_PLAN_HASH`. This is a physical action: run it only when printing is authorized and the printer is prepared. It requires a verified upload receipt from this CLI, rechecks the file/state/material, and writes a durable reservation before publishing **one** MQTT `print/start` command. It does not upload again. An ACK is not treated as proof of physical printing; the client subsequently queries the active project and distinguishes observed activity from an uncertain result. It never automatically repeats the command.
 
@@ -481,6 +482,23 @@ and a `deleteBatch` report with state `success` and code 200. The CLI returned
 the file was absent. The local summary counted one matching upload receipt
 and one matching start receipt. Byte-for-byte preservation was verified in
 offline tests with synthetic state.
+
+End-to-end 4-color validation on 2026-11-24 used a `by object` Cool Plate
+G-code sliced with Anycubic Slicer Next Linux `2.0.0.6` for Kobra X (9,257,439
+bytes, 207 layers, estimated ~60.68 g, four `PLA` paint entries `0..3` with
+three filament changes). Executed end-to-end via the CLI (`slots list`,
+`gcode inspect`, `files upload`, `print plan`, `print start`, and `status`)
+with `--slot-map 0=1 --slot-map 1=2 --slot-map 2=3 --slot-map 3=4` across all
+four onboard `PLA High Speed` slots (`1..4`, including slot 3 at `ams_index: 2`),
+`--auto-leveling on`, `--vibration-compensation off`, and
+`--flow-calibration off`. Upload returned
+`uploaded_verified_by_listing_and_metadata`, start returned
+`start_observed_active` (ACK code 0), status confirmed `busy` /
+`nozzle_heating` with 35°C/220°C targets, and the operator confirmed physical
+completion with all four colors and slots matching. Because this run used an
+identity 1:1 mapping (`paint_index == ams_index`), cross-remapped, sparse,
+subset, shared-slot, non-zero single-filament, and single-filament slot 3
+starts remain `hardware_start_validated: false`.
 
 ## Saved target selection
 

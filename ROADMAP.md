@@ -29,7 +29,7 @@ The source launcher and Python archives work outside a desktop, bridge, HA or cl
 
 The CLI and JSON automation interface remain subject to documented changes during 0.x. Version 0.5.0 intentionally replaces flat commands and JSON-default output, requires named pairing, and removes automatic root-config fallback without migration. Existing private credentials and device-based receipt/attempt identities remain protected in normal operations; never clear markers to make a retry work.
 
-Hardware evidence covers Kobra X model 20030 / firmware 2.0.2.2, Next-generated G-code, single-filament PLA High Speed prints using onboard slots 1, 2, and 4 (automatic leveling on, vibration compensation off, flow calibration off), reviewed intentional reprints (`--reprint-from`), read-only `print watch` observation persistence, offline `jobs list|info`, live `print pause|resume|cancel` wire transitions (`pause`, `resume`, `stop`), and live `files delete` wire confirmation (`deleteBatch` `success`/200 and follow-up `files list` removal, with byte-for-byte local state preservation verified offline), with operator-confirmed completion of both runs in a two-slot reprint cycle. Slot 3, other materials and preparation combinations, multicolor, and external ACE units remain unqualified. Package acceptance and offline tests do not expand hardware evidence.
+Hardware evidence covers Kobra X model 20030 / firmware 2.0.2.2, Next-generated G-code (Linux `2.0.0.3`, `2.0.0.5`, `2.0.0.6`), `PLA High Speed` prints with automatic leveling on, vibration compensation off, and flow calibration off — both single-filament starts on onboard slots 1, 2, and 4 (`0=1|2|4`) and an operator-confirmed 4-color contiguous 1:1 print (`0=1, 1=2, 2=3, 3=4`, exercising slot 3 at `ams_index: 2`) — plus reviewed intentional reprints (`--reprint-from`), read-only `print watch` observation persistence, offline `jobs list|info`, live `print pause|resume|cancel` wire transitions (`pause`, `resume`, `stop`), and live `files delete` wire confirmation (`deleteBatch` `success`/200 and follow-up `files list` removal, with byte-for-byte local state preservation verified offline), with operator-confirmed completion of both runs in a two-slot reprint cycle and the 4-color run. Single-filament slot 3, cross-remapped/sparse/shared/subset multicolor, non-zero single paint indices, other materials and preparation combinations, and external ACE units remain unqualified. Package acceptance and offline tests do not expand hardware evidence.
 
 ## Milestone 1 — Independent onboarding
 
@@ -105,16 +105,22 @@ and `print start --slot-map`. The 0.x interface replaces `--slot` with repeatabl
 `--slot-map PAINT_INDEX=SLOT` and exposes `slot_mapping` in place of
 `selected_slot` on plan, start and job details. On `jobs info`, material is
 reported per entry in `slot_mapping`. Existing receipts and reprint chains are
-readable in place. Multicolor and non-zero single-filament paint indices report
-`hardware_start_validated: false`. See the
+readable in place. A live end-to-end 4-color CLI print on 2026-11-24
+(`--slot-map 0=1 --slot-map 1=2 --slot-map 2=3 --slot-map 3=4`, `PLA High Speed`,
+`auto-leveling on`, vibration/flow off, `AnycubicSlicerNext 2.0.0.6`) completed
+with operator-confirmed physical quality across all four slots (including slot 3
+as `2=3`), so that exact 4-color contiguous 1:1 combination now reports
+`hardware_start_validated: true`; cross-remapped (`paint_index != ams_index`),
+subset, sparse, and shared-slot multicolor mappings and non-zero single-filament
+paint indices continue to report `hardware_start_validated: false`. See the
 [multicolor workflow](docs/usage.md#plan-and-start-a-multicolor-print).
 
 Remaining work:
 
 - Qualify attempt identity and terminal signals if future firmware exposes them (firmware 2.0.2.2 reports `task_id: "-1"` and empty `last_project` after both normal completion and cancellation).
 - Investigate stored-file download support separately (live Kobra X stored-file deletion wire report and `files list` removal were verified on 2026-11-23; `hardware_delete_validated` remains `false` because byte-for-byte local state preservation was verified offline).
-- Expand hardware coverage beyond PLA High Speed on slots 1, 2, and 4 with `auto-leveling on` (slot 3, other materials, and other preparation settings).
-- Qualify multicolor and non-zero paint-index starts, including sparse paint indices and shared physical slots.
+- Expand hardware coverage beyond `PLA High Speed` with `auto-leveling on` and vibration/flow off (single-filament slot 3 `0=3`, other materials, and other preparation settings).
+- Qualify non-identity multicolor and non-zero paint-index starts: cross-remapped mappings (`paint_index != ams_index`), 2/3-color subsets, sparse paint indices, and shared physical slots.
 
 External ACE units, discovery and other device controls require separate work.
 
@@ -124,7 +130,7 @@ Implemented: centralized hardware qualification rules in `kobra_lan/qualificatio
 
 Remaining work:
 
-- Expand material and preparation evidence, qualify onboard multicolor starts, and investigate external ACE support. Do not infer other Anycubic model support from similar fields.
+- Expand material and preparation evidence, qualify non-identity multicolor mappings (`paint_index != ams_index`, sparse, and shared slots), and investigate external ACE support. Do not infer other Anycubic model support from similar fields.
 - Qualify additional platforms separately. Current package acceptance targets Linux on amd64; macOS, Windows and other architectures need their own evidence.
 - Maintain release notes, compatibility policy and explicit migration decisions for commands, JSON and persisted state.
 - Consider other slicers and optional orchestration while keeping the LAN client independently usable.

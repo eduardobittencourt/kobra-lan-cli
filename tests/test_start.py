@@ -216,6 +216,46 @@ class StartTests(unittest.TestCase):
         self.assertFalse(self.plan(slot=3)["hardware_start_validated"])
         p = build_plan(config(), Client(config()), self.file, "test.gcode", {0: 1}, True, True, False)
         self.assertFalse(p["hardware_start_validated"])
+
+        # Observed 4-color contiguous 1:1 PLA High Speed start vs unobserved multicolor cases.
+        class FourSlotPlaClient(Client):
+            def query(self, kind, action="query", data=None, *, require_fresh=False):
+                result = super().query(kind, action, data, require_fresh=require_fresh)
+                if kind == "file":
+                    result["data"]["file_details"]["file_size"] = self.file_size
+                return result
+
+        self.mapped_gcode([(0, "PLA"), (1, "PLA"), (2, "PLA"), (3, "PLA")])
+        four_slot = FourSlotPlaClient(config())
+        four_slot.file_size = self.file.stat().st_size
+        validated = build_plan(
+            config(), four_slot, self.file, "test.gcode",
+            {3: 4, 0: 1, 2: 3, 1: 2}, True, False, False,
+        )
+        self.assertTrue(validated["multicolor"])
+        self.assertTrue(validated["hardware_start_validated"])
+        for slot_map, flags in (
+            ({0: 2, 1: 1, 2: 3, 3: 4}, (True, False, False)),
+            ({0: 1, 1: 1, 2: 3, 3: 4}, (True, False, False)),
+            ({0: 1, 1: 2, 2: 3, 3: 4}, (False, False, False)),
+            ({0: 1, 1: 2, 2: 3, 3: 4}, (True, True, False)),
+            ({0: 1, 1: 2, 2: 3, 3: 4}, (True, False, True)),
+        ):
+            with self.subTest(slot_map=slot_map, flags=flags):
+                plan = build_plan(config(), four_slot, self.file, "test.gcode", slot_map, *flags)
+                self.assertFalse(plan["hardware_start_validated"])
+
+        self.mapped_gcode([(0, "PLA"), (1, "PLA")])
+        four_slot.file_size = self.file.stat().st_size
+        subset = build_plan(config(), four_slot, self.file, "test.gcode", {0: 1, 1: 2}, True, False, False)
+        self.assertFalse(subset["hardware_start_validated"])
+
+        mixed_client = self.mapped_gcode([(0, "PLA"), (1, "PLA"), (2, "PLA"), (3, "PETG")])
+        mixed = build_plan(
+            config(), mixed_client, self.file, "test.gcode",
+            {0: 1, 1: 2, 2: 3, 3: 4}, True, False, False,
+        )
+        self.assertFalse(mixed["hardware_start_validated"])
     def test_material_mismatch_blocks_plan(self):
         Client.material = "PETG"
         with self.assertRaises(ProtocolError): self.plan()

@@ -113,14 +113,14 @@ The CLI SHALL preserve configuration, credentials, existing device-based receipt
 - **THEN** both ordinary start and explicit reprint refuse to send a print command for that device and file
 
 ### Requirement: Evidence stays qualified
-Both formats SHALL distinguish upload listing/metadata verification from remote byte-hash verification, start acknowledgement from observed activity, and activity from completion or physical quality. Qualification SHALL remain Kobra X model 20030 / firmware 2.0.2.2 and the existing narrower material/preparation evidence; multicolor and non-zero `paint_index` starts SHALL report `hardware_start_validated: false`.
+Both formats SHALL distinguish upload listing/metadata verification from remote byte-hash verification, start acknowledgement from observed activity, and activity from completion or physical quality. Qualification SHALL remain Kobra X model 20030 / firmware 2.0.2.2 and the recorded material/preparation evidence (single-filament `0 -> 1|2|4` and 4-color contiguous 1:1 `0..3 -> 1..4` in `PLA High Speed` with `auto-leveling on`, vibration/flow off); unobserved multicolor mappings and non-zero single `paint_index` starts SHALL report `hardware_start_validated: false`.
 
 #### Scenario: Successful submission
 - **WHEN** an upload is metadata-verified or a start is observed active
 - **THEN** output labels that evidence accurately without claiming remote byte equality, completed printing, or assessed part quality
 
 #### Scenario: Multicolor or non-zero paint_index qualification boundary
-- **WHEN** `print plan` or `print start` succeeds for a multicolor mapping or a single-filament G-code whose `paint_index` is not `0` (even when using PLA High Speed in slots 1, 2, or 4 with auto-leveling on and vibration/flow calibration off)
+- **WHEN** `print plan` or `print start` succeeds for an unobserved multicolor mapping (such as a 2/3-color subset, cross-remapped `paint_index != ams_index`, sparse indices, or shared physical slot) or a single-filament G-code whose `paint_index` is not `0` (even when using PLA High Speed with auto-leveling on and vibration/flow calibration off)
 - **THEN** output reports `experimental: true` and `hardware_start_validated: false`
 
 ### Requirement: Local identity for each start attempt

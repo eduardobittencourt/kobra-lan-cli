@@ -22,7 +22,7 @@ class QualificationRegistryTests(unittest.TestCase):
         with self.assertRaises(FrozenInstanceError):
             q.KOBRA_X.onboard_box.slot_count = 8
         with self.assertRaises(FrozenInstanceError):
-            q.KOBRA_X.start_evidence[0].paint_index = 1
+            q.KOBRA_X.start_evidence[0].slot_maps = frozenset()
 
     def test_model_id_lookup_and_normalization(self):
         self.assertIs(q.qualification_for_model_id(20030), q.KOBRA_X)
@@ -159,16 +159,43 @@ class QualificationRegistryTests(unittest.TestCase):
                     )
                 )
 
+        # Observed 4-color contiguous 1:1 PLA High Speed on slots 1..4 (order-independent).
+        four_color_materials = {0: "PLA High Speed", 1: "PLA High Speed", 2: "PLA High Speed", 3: "PLA High Speed"}
+        for slot_map in (
+            {0: 1, 1: 2, 2: 3, 3: 4},
+            {3: 4, 0: 1, 2: 3, 1: 2},
+        ):
+            with self.subTest(slot_map=slot_map):
+                self.assertTrue(
+                    q.is_start_hardware_validated(
+                        20030,
+                        "2.0.2.2",
+                        slot_map=slot_map,
+                        materials=four_color_materials,
+                        auto_leveling=True,
+                        vibration_compensation=False,
+                        flow_calibration=False,
+                    )
+                )
+
         # Unobserved combinations must remain False.
         negative_cases = (
-            ("slot 3", dict(model_id=20030, firmware="2.0.2.2", slot_map={0: 3}, materials={0: "PLA High Speed"}, auto_leveling=True, vibration_compensation=False, flow_calibration=False)),
+            ("slot 3 single", dict(model_id=20030, firmware="2.0.2.2", slot_map={0: 3}, materials={0: "PLA High Speed"}, auto_leveling=True, vibration_compensation=False, flow_calibration=False)),
             ("material PETG", dict(model_id=20030, firmware="2.0.2.2", slot_map={0: 1}, materials={0: "PETG"}, auto_leveling=True, vibration_compensation=False, flow_calibration=False)),
             ("material plain PLA", dict(model_id=20030, firmware="2.0.2.2", slot_map={0: 1}, materials={0: "PLA"}, auto_leveling=True, vibration_compensation=False, flow_calibration=False)),
             ("auto_leveling off", dict(model_id=20030, firmware="2.0.2.2", slot_map={0: 1}, materials={0: "PLA High Speed"}, auto_leveling=False, vibration_compensation=False, flow_calibration=False)),
             ("vibration on", dict(model_id=20030, firmware="2.0.2.2", slot_map={0: 1}, materials={0: "PLA High Speed"}, auto_leveling=True, vibration_compensation=True, flow_calibration=False)),
             ("flow on", dict(model_id=20030, firmware="2.0.2.2", slot_map={0: 1}, materials={0: "PLA High Speed"}, auto_leveling=True, vibration_compensation=False, flow_calibration=True)),
             ("non-zero paint_index", dict(model_id=20030, firmware="2.0.2.2", slot_map={1: 1}, materials={1: "PLA High Speed"}, auto_leveling=True, vibration_compensation=False, flow_calibration=False)),
-            ("multicolor", dict(model_id=20030, firmware="2.0.2.2", slot_map={0: 1, 1: 2}, materials={0: "PLA High Speed", 1: "PLA High Speed"}, auto_leveling=True, vibration_compensation=False, flow_calibration=False)),
+            ("multicolor 2-color subset", dict(model_id=20030, firmware="2.0.2.2", slot_map={0: 1, 1: 2}, materials={0: "PLA High Speed", 1: "PLA High Speed"}, auto_leveling=True, vibration_compensation=False, flow_calibration=False)),
+            ("multicolor cross-remapped", dict(model_id=20030, firmware="2.0.2.2", slot_map={0: 2, 1: 1, 2: 3, 3: 4}, materials=four_color_materials, auto_leveling=True, vibration_compensation=False, flow_calibration=False)),
+            ("multicolor shared slot", dict(model_id=20030, firmware="2.0.2.2", slot_map={0: 1, 1: 1, 2: 3, 3: 4}, materials=four_color_materials, auto_leveling=True, vibration_compensation=False, flow_calibration=False)),
+            ("multicolor sparse indices", dict(model_id=20030, firmware="2.0.2.2", slot_map={1: 2, 3: 4}, materials={1: "PLA High Speed", 3: "PLA High Speed"}, auto_leveling=True, vibration_compensation=False, flow_calibration=False)),
+            ("multicolor mixed material", dict(model_id=20030, firmware="2.0.2.2", slot_map={0: 1, 1: 2, 2: 3, 3: 4}, materials={0: "PLA High Speed", 1: "PLA High Speed", 2: "PLA High Speed", 3: "PLA"}, auto_leveling=True, vibration_compensation=False, flow_calibration=False)),
+            ("multicolor leveling off", dict(model_id=20030, firmware="2.0.2.2", slot_map={0: 1, 1: 2, 2: 3, 3: 4}, materials=four_color_materials, auto_leveling=False, vibration_compensation=False, flow_calibration=False)),
+            ("multicolor vibration on", dict(model_id=20030, firmware="2.0.2.2", slot_map={0: 1, 1: 2, 2: 3, 3: 4}, materials=four_color_materials, auto_leveling=True, vibration_compensation=True, flow_calibration=False)),
+            ("multicolor flow on", dict(model_id=20030, firmware="2.0.2.2", slot_map={0: 1, 1: 2, 2: 3, 3: 4}, materials=four_color_materials, auto_leveling=True, vibration_compensation=False, flow_calibration=True)),
+            ("multicolor unqualified firmware", dict(model_id=20030, firmware="2.0.2.3", slot_map={0: 1, 1: 2, 2: 3, 3: 4}, materials=four_color_materials, auto_leveling=True, vibration_compensation=False, flow_calibration=False)),
             ("empty mapping", dict(model_id=20030, firmware="2.0.2.2", slot_map={}, materials={}, auto_leveling=True, vibration_compensation=False, flow_calibration=False)),
             ("mismatched keys", dict(model_id=20030, firmware="2.0.2.2", slot_map={0: 1}, materials={1: "PLA High Speed"}, auto_leveling=True, vibration_compensation=False, flow_calibration=False)),
             ("unqualified firmware", dict(model_id=20030, firmware="2.0.2.3", slot_map={0: 1}, materials={0: "PLA High Speed"}, auto_leveling=True, vibration_compensation=False, flow_calibration=False)),

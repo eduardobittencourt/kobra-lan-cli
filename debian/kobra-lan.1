@@ -43,7 +43,9 @@ state writes; external ACE and multi-box topologies remain unqualified and exit 
 inspects local immutable bytes without configuration or network, reporting
 hashes, layer/slicer metadata, and filament/color metadata (paint_info entries,
 T<n> tool indices, optional weights, multicolor, and
-single_filament_start_compatible). Multicolor print start remains unqualified.
+single_filament_start_compatible). Only recorded single-filament and 4-color
+contiguous 1:1 PLA High Speed combinations are hardware-validated; see
+compatibility.md.
 .B files upload FILE [--name NAME] --sha256 HASH --execute
 uploads inspected bytes once; never starts a print and has no implicit dry run.
 .B files delete NAME --execute

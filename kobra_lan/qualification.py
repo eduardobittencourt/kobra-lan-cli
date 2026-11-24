@@ -20,8 +20,7 @@ class OnboardBoxTopology:
 
 @dataclass(frozen=True)
 class StartHardwareEvidence:
-    slots: frozenset[int]
-    paint_index: int
+    slot_maps: frozenset[tuple[tuple[int, int], ...]]
     materials: frozenset[str]
     auto_leveling: bool
     vibration_compensation: bool
@@ -52,8 +51,14 @@ KOBRA_X = PrinterQualification(
     onboard_box=OnboardBoxTopology(box_id=-1, box_kind="onboard", slot_count=4),
     start_evidence=(
         StartHardwareEvidence(
-            slots=frozenset({1, 2, 4}),
-            paint_index=0,
+            slot_maps=frozenset({((0, 1),), ((0, 2),), ((0, 4),)}),
+            materials=frozenset({"PLA High Speed"}),
+            auto_leveling=True,
+            vibration_compensation=False,
+            flow_calibration=False,
+        ),
+        StartHardwareEvidence(
+            slot_maps=frozenset({((0, 1), (1, 2), (2, 3), (3, 4))}),
             materials=frozenset({"PLA High Speed"}),
             auto_leveling=True,
             vibration_compensation=False,
@@ -193,19 +198,22 @@ def is_start_hardware_validated(
         or firmware not in profile.firmware_versions
         or any(type(flag) is not bool for flag in (auto_leveling, vibration_compensation, flow_calibration))
         or not isinstance(slot_map, Mapping)
-        or len(slot_map) != 1
+        or not slot_map
         or not isinstance(materials, Mapping)
         or set(materials.keys()) != set(slot_map.keys())
     ):
         return False
-    [(paint_index, slot)] = slot_map.items()
-    material = materials[paint_index]
-    if type(paint_index) is not int or not is_valid_onboard_slot(model_id, slot) or type(material) is not str:
-        return False
+    for paint_index, slot in slot_map.items():
+        if (
+            type(paint_index) is not int
+            or not is_valid_onboard_slot(model_id, slot)
+            or type(materials[paint_index]) is not str
+        ):
+            return False
+    normalized_map = tuple(sorted(slot_map.items()))
     return any(
-        paint_index == evidence.paint_index
-        and slot in evidence.slots
-        and material in evidence.materials
+        normalized_map in evidence.slot_maps
+        and all(materials[paint_index] in evidence.materials for paint_index in slot_map)
         and auto_leveling is evidence.auto_leveling
         and vibration_compensation is evidence.vibration_compensation
         and flow_calibration is evidence.flow_calibration
