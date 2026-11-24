@@ -221,6 +221,22 @@ class MQTTDeleteOnceTests(unittest.TestCase):
         self.on_ack.assert_called_once_with({"code": 0, "msgid": sent_publish_payload(self.client.sock)["msgid"]})
         self.client.sock.sendall.assert_called_once()
 
+    def test_timeout_after_correlated_report_preserves_callback_evidence(self):
+        on_report = Mock()
+
+        def receive():
+            yield self.report(code=200)
+            on_report.assert_called_once_with({"action": "deleteBatch", "state": "success", "code": 200})
+            raise self.client._timeout()
+
+        packets = receive()
+        with patch.object(self.client, "receive", side_effect=lambda _: next(packets)):
+            with self.assertRaises(MQTTFailure) as caught:
+                self.client.delete_file_once("model.gcode", on_ack=self.on_ack, on_report=on_report)
+        self.assertEqual(caught.exception.exit_code, 3)
+        self.on_ack.assert_not_called()
+        self.client.sock.sendall.assert_called_once()
+
     def test_query_and_invalid_delete_filename_refuse_before_publish(self):
         with self.assertRaises(ProtocolError):
             self.client.query("file", "deleteBatch")

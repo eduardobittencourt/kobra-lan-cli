@@ -122,7 +122,10 @@ def delete_file(config, filename, state_dir):
                     raise ProtocolError("Target file was not found in printer storage")
                 if len(matches) != 1:
                     raise ProtocolError("Target file is ambiguous in the printer listing")
-                if matches[0].get("is_dir"):
+                directory_flag = matches[0].get("is_dir")
+                if type(directory_flag) not in (bool, int) or directory_flag not in (0, 1):
+                    raise ProtocolError("Printer listing did not establish whether the target is a directory")
+                if directory_flag:
                     raise ProtocolError("Stored file deletion does not accept directories")
                 ensure_directory_bound(device_dir, device_fd, "delete")
                 result = {
@@ -142,7 +145,10 @@ def delete_file(config, filename, state_dir):
                 def record_ack(ack):
                     result["ack"] = ack
 
-                result.update(client.delete_file_once(filename, on_ack=record_ack))
+                def record_report(report):
+                    result["report"] = report
+
+                result.update(client.delete_file_once(filename, on_ack=record_ack, on_report=record_report))
                 for poll in range(POLL_COUNT):
                     matches = _matching_files(client, filename)
                     result["after_listing"] = matches

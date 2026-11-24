@@ -45,7 +45,8 @@ class DeleteLeaseTests(unittest.TestCase):
                 self.fail("Symlink acquired the lease")
         self.assertEqual(list(actual.iterdir()), [])
         self.device_dir.unlink()
-        self.device_dir.mkdir(mode=0o755)
+        self.device_dir.mkdir()
+        self.device_dir.chmod(0o755)
         with self.assertRaises(ProfileLocalError):
             with device_lock(self.device_dir, "delete"):
                 self.fail("Non-private device directory acquired the lease")
@@ -141,6 +142,7 @@ class DeleteFileTests(unittest.TestCase):
             ((report_with("free", deviceId="Different"),), "qualified Kobra X"),
             ((self.before, self.listing()), "not found"),
             ((self.before, self.listing({**self.entry, "is_dir": True})), "does not accept directories"),
+            ((self.before, self.listing({**self.entry, "is_dir": 1})), "does not accept directories"),
             ((self.before, self.listing(self.entry, self.entry)), "ambiguous"),
         )
         for responses, message in cases:
@@ -149,6 +151,21 @@ class DeleteFileTests(unittest.TestCase):
                     self.run_delete(*responses)
                 self.assertNotIsInstance(caught.exception, DeleteUncertain)
                 self.client.delete_file_once.assert_not_called()
+
+    def test_preflight_refuses_unknown_directory_status(self):
+        unknown_entries = (
+            {"filename": self.filename},
+            *({**self.entry, "is_dir": value} for value in (None, "", "0", [], 0.0, 2)),
+        )
+        for entry in unknown_entries:
+            with self.subTest(entry=entry), self.assertRaisesRegex(ProtocolError, "did not establish"):
+                self.run_delete(self.before, self.listing(entry))
+        self.client.delete_file_once.assert_not_called()
+
+    def test_preflight_accepts_integer_zero_for_a_regular_file(self):
+        result = self.run_delete(self.before, self.listing({**self.entry, "is_dir": 0}), self.listing(), self.before)
+        self.assertEqual(result["status"], "delete_observed_removed")
+        self.client.delete_file_once.assert_called_once()
 
     def test_replaced_device_directory_refused_before_delete_publish(self):
         def responses():
@@ -184,7 +201,7 @@ class DeleteFileTests(unittest.TestCase):
             with self.subTest(error=error):
                 self.client.reset_mock()
 
-                def fail(filename, *, on_ack):
+                def fail(filename, *, on_ack, on_report):
                     on_ack(self.ack)
                     raise error
 
@@ -200,6 +217,22 @@ class DeleteFileTests(unittest.TestCase):
                 self.assertNotIn("report", failure.result)
                 self.client.delete_file_once.assert_called_once()
                 self.assertEqual(self.client.query.call_count, 2)
+
+    def test_timeout_after_report_retains_evidence_without_ack_or_replay(self):
+        def fail(filename, *, on_ack, on_report):
+            on_report(self.report)
+            raise TimeoutError()
+
+        self.client.delete_file_once.side_effect = fail
+        with self.assertRaises(DeleteUncertain) as caught:
+            self.run_delete(self.before, self.listing(self.entry))
+        failure = caught.exception
+        self.assertEqual(failure.exit_code, 3)
+        self.assertEqual(failure.result["status"], "delete_uncertain_no_retry")
+        self.assertEqual(failure.result["report"], self.report)
+        self.assertNotIn("ack", failure.result)
+        self.client.delete_file_once.assert_called_once()
+        self.assertEqual(self.client.query.call_count, 2)
 
     def test_failed_post_delete_qualification_preserves_listing_and_report(self):
         with self.assertRaises(DeleteUncertain) as caught:
@@ -222,7 +255,7 @@ class DeleteFileTests(unittest.TestCase):
                     self.client.reset_mock()
                     self.client.query.side_effect = [self.before, self.listing(self.entry), self.listing(), self.before]
 
-                    def send(filename, *, on_ack):
+                    def send(filename, *, on_ack, on_report):
                         self.assertEqual(filename, self.filename)
                         on_ack(self.ack)
                         if error is not None:

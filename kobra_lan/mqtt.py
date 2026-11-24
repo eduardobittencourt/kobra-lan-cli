@@ -355,7 +355,7 @@ class MQTT:
             self.sock.sendall(packet(0x40, pid))
         return topic, body[offset:]
 
-    def delete_file_once(self, filename, *, on_ack=None):
+    def delete_file_once(self, filename, *, on_ack=None, on_report=None):
         """Send one storage deletion request and wait for both ACK and report."""
         filename = validate_delete_filename(filename)
         self.begin_stage("file_delete")
@@ -413,4 +413,6 @@ class MQTT:
             report = {"action": "deleteBatch", "state": "success"}
             if "code" in result:
                 report["code"] = code
+            if on_report is not None:
+                on_report(report)
         return {"ack": ack, "report": report}
