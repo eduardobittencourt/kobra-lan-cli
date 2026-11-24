@@ -5,10 +5,10 @@ from pathlib import Path
 import time
 
 from .config import ProtocolError
-from .diagnostics import compatibility_issue
 from .mqtt import MQTT, mqtt_failure_exit_code, validate_delete_filename
 from .printer import list_files, payload_data, sanitized
 from .profiles import open_directory, read_json
+from .qualification import info_compatibility_issue, is_delete_hardware_validated
 from .start import RECEIPT_SUFFIX, STATUSES, attempt_id, review_digest, valid_attempt_id
 from .upload import device_lock, ensure_directory_bound
 from .watch import project_filename
@@ -90,7 +90,7 @@ def summarize_local_state(device_fd, state_dir, device_prefix, filename):
 
 def _qualified_info(config, client):
     info = payload_data(client.query("info", require_fresh=True))
-    if config.type_id != 20030 or compatibility_issue(config, info) is not None:
+    if info_compatibility_issue(config.type_id, config.printer_id, info) is not None:
         raise ProtocolError("Fresh status could not establish qualified Kobra X identity and firmware")
     return info
 
@@ -136,7 +136,7 @@ def delete_file(config, filename, state_dir):
                     "status": "delete_uncertain_no_retry",
                     "dry_run": False,
                     "experimental": True,
-                    "hardware_delete_validated": False,
+                    "hardware_delete_validated": is_delete_hardware_validated(config.type_id, info["version"]),
                     "before": sanitized(info),
                     "before_listing": matches[0],
                     "local_state": local_state,

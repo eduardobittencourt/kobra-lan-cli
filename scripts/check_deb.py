@@ -31,7 +31,7 @@ def check(deb, version):
     doc_names = {"copyright", "changelog.Debian.gz", "changelog.gz"}
     public_docs = [
         "README.md", "NOTICE.md", "ROADMAP.md", "CONTRIBUTING.md", "AGENTS.md", "SECURITY.md",
-        "CODE_OF_CONDUCT.md", "docs/README.md", "docs/pairing.md", "docs/usage.md",
+        "CODE_OF_CONDUCT.md", "docs/README.md", "docs/compatibility.md", "docs/pairing.md", "docs/usage.md",
         "docs/development.md", "docs/releases.md", "docs/pairing-security-review.md", "docs/maintenance.md",
     ]
     doc_names.update(public_docs)

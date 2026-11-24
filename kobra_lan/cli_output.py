@@ -3,7 +3,9 @@ import json
 import re
 import unicodedata
 
-QUALIFICATION = "Qualified: Kobra X model 20030 / firmware 2.0.2.2; print start remains experimental."
+from .qualification import QUALIFICATION_SUMMARY
+
+QUALIFICATION = f"Qualified: {QUALIFICATION_SUMMARY}; print start remains experimental."
 
 
 def safe_text(value):

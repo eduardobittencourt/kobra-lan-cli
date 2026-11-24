@@ -23,10 +23,11 @@ SYNTHETIC_HOSTILE_URL = "https://example.test/?token=SYNTHETIC_PRIVATE"
 
 MODULES = {f"kobra_lan/{name}.py" for name in
            ("__init__", "cli", "cli_output", "completions", "config", "control", "delete_file", "filaments",
-            "jobs", "mqtt", "printer", "start", "upload", "provisioning", "pairing", "profiles", "diagnostics", "watch")}
+            "jobs", "mqtt", "printer", "qualification", "start", "upload", "provisioning", "pairing", "profiles",
+            "diagnostics", "watch")}
 DOCS = {
     "README.md", "LICENSE", "NOTICE.md", "CHANGELOG.md", "ROADMAP.md", "CONTRIBUTING.md",
-    "AGENTS.md", "SECURITY.md", "CODE_OF_CONDUCT.md", "docs/README.md", "docs/pairing.md",
+    "AGENTS.md", "SECURITY.md", "CODE_OF_CONDUCT.md", "docs/README.md", "docs/compatibility.md", "docs/pairing.md",
     "docs/usage.md", "docs/development.md", "docs/releases.md", "docs/pairing-security-review.md",
     "docs/maintenance.md",
 }

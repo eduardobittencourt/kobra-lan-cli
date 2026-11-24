@@ -6,7 +6,7 @@ A direct Anycubic Kobra X LAN client with readable text and opt-in JSON for auto
 
 Upload, print start, reviewed intentional reprints (`--reprint-from`), read-only `print watch` observation persistence, offline `jobs list|info`, and guarded `print pause|resume|cancel` were observed on Kobra X hardware running firmware 2.0.2.2 for single-filament PLA High Speed prints using onboard slots 1, 2, and 4 with automatic leveling on, vibration compensation off, and flow calibration off. Starting the stored file with `url=""` worked across initial starts and operator-confirmed reprints. Slot 3, other materials/preparation settings, multicolor, and external ACE units remain unqualified.
 
-See the [roadmap](ROADMAP.md) for implemented capabilities and future work, and the [release guide](docs/releases.md) for supported installation targets, package checks and recovery.
+See the [compatibility matrix](docs/compatibility.md) for supported models, firmwares, materials, preparation flags and host platforms, the [roadmap](ROADMAP.md) for implemented capabilities and future work, and the [release guide](docs/releases.md) for supported installation targets, package checks and recovery.
 
 ## Experimental packages
 

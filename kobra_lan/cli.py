@@ -16,6 +16,15 @@ from .upload import describe, execute
 from .start import start, valid_attempt_id
 from .pairing import PairingLocalError
 from .profiles import Registry, ProfileLocalError, validate_name
+from .qualification import (
+    KOBRA_X,
+    QUALIFICATION_SUMMARY,
+    QUALIFIED_FIRMWARE,
+    is_control_hardware_validated,
+    is_delete_hardware_validated,
+    is_valid_onboard_slot,
+    onboard_topology,
+)
 from .watch import DEFAULT_TIMEOUT, MAX_TIMEOUT, WatchProgress, observe
 
 
@@ -91,17 +100,27 @@ def jobs_limit(value):
 
 
 def slot_map_entry(value):
-    match = re.fullmatch(r"(\d+)=([1-4])", value, flags=re.ASCII)
+    topology = onboard_topology()
+    match = re.fullmatch(r"(\d+)=([1-9]\d*)", value, flags=re.ASCII)
     if match:
         try:
-            return int(match[1].lstrip("0") or "0"), int(match[2])
+            paint_index = int(match[1].lstrip("0") or "0")
+            slot = int(match[2])
         except ValueError:
             pass
-    raise argparse.ArgumentTypeError("Invalid slot mapping. Use PAINT_INDEX=SLOT with an onboard slot from 1 to 4.")
+        else:
+            if is_valid_onboard_slot(KOBRA_X.model_id, slot):
+                return paint_index, slot
+    raise argparse.ArgumentTypeError(
+        f"Invalid slot mapping. Use PAINT_INDEX=SLOT with an onboard slot from 1 to {topology.slot_count}."
+    )
 
 
 def build_parser():
     """Build the canonical command metadata without opening access or state."""
+    slot_count = onboard_topology().slot_count
+    control_validated = "true" if is_control_hardware_validated(KOBRA_X.model_id, QUALIFIED_FIRMWARE) else "false"
+    delete_validated = "true" if is_delete_hardware_validated(KOBRA_X.model_id, QUALIFIED_FIRMWARE) else "false"
     parser = Parser(prog="kobra-lan", description="Direct Kobra X LAN client; global options precede commands")
     parser.add_argument("--json", action="store_true", help="Version-1 machine result; place before command")
     parser.add_argument("--version", action="version", version=__version__)
@@ -130,8 +149,8 @@ def build_parser():
                        description="Read-only inspection of the qualified Kobra X onboard four-slot filament box. "
                                    "Does not modify slots, credentials, or local state; external ACE units remain unqualified.")
     slots = p.add_subparsers(dest="slots_command", required=True)
-    slots.add_parser("list", help="List onboard filament slots (1..4); read-only",
-                     description="Read-only onboard four-slot inventory on Kobra X model 20030 / firmware 2.0.2.2 "
+    slots.add_parser("list", help=f"List onboard filament slots (1..{slot_count}); read-only",
+                     description=f"Read-only onboard four-slot inventory on {QUALIFICATION_SUMMARY} "
                                  "(idle or printing). Reports slot numbering, status, material, color, and start availability.")
     p = sub.add_parser("files", help="Inspect storage, upload, or delete a stored file",
                        description="list/info are read-only. upload requires a reviewed hash and --execute. "
@@ -146,8 +165,8 @@ def build_parser():
     p.add_argument("--execute", action="store_true", required=True)
     p.add_argument("--sha256", required=True, help="Reviewed file SHA-256 from gcode inspect")
     p = files.add_parser("delete", help="Experimental removal of one root file; requires --execute",
-                         description="Experimental single-shot deletion on Kobra X model 20030 / firmware 2.0.2.2 "
-                                     "(hardware_delete_validated: false). Requires an idle printer with no active job. "
+                         description=f"Experimental single-shot deletion on {QUALIFICATION_SUMMARY} "
+                                     f"(hardware_delete_validated: {delete_validated}). Requires an idle printer with no active job. "
                                      "Preserves local receipts and markers. If the outcome is uncertain, inspect "
                                      "files list before taking further action. Do not resend blindly.")
     p.add_argument("name", help="Root filename from files list")
@@ -166,7 +185,7 @@ def build_parser():
         p.add_argument("file", type=Path, help="Local copy of the previously uploaded G-code")
         p.add_argument("--name", required=True, help="Existing remote filename")
         p.add_argument("--slot-map", action="append", required=True, type=slot_map_entry, metavar="PAINT_INDEX=SLOT",
-                       help="Map a G-code paint index to an onboard slot (1..4). Repeat for each declared index.")
+                       help=f"Map a G-code paint index to an onboard slot (1..{slot_count}). Repeat for each declared index.")
         p.add_argument("--reprint-from", metavar="PREVIOUS_ATTEMPT_ID",
                        help="Reprint after observed activity; find the latest local attempt ID with print plan or jobs list")
         for flag in ["auto-leveling", "vibration-compensation", "flow-calibration"]:
@@ -175,27 +194,27 @@ def build_parser():
             p.add_argument("--execute", action="store_true", required=True)
             p.add_argument("--plan-sha256", required=True, help="Reviewed hash from print plan")
     p = printing.add_parser("watch", help="Observe the active print without controlling it",
-                            description="Read-only observation on Kobra X model 20030 / firmware 2.0.2.2. "
+                            description=f"Read-only observation on {QUALIFICATION_SUMMARY}. "
                                         "Reports an unknown outcome when telemetry cannot establish it.")
     p.add_argument("--timeout", type=watch_timeout, default=DEFAULT_TIMEOUT, metavar="SECONDS",
                    help=f"Observation deadline in seconds (1 to {MAX_TIMEOUT}, default {DEFAULT_TIMEOUT})")
     control_docs = {
         "pause": (
             "Experimental guarded pause of an active print; requires --execute",
-            "Experimental single-shot pause on Kobra X model 20030 / firmware 2.0.2.2 "
-            "(hardware_control_validated: true). Requires active printing state and --execute; "
+            f"Experimental single-shot pause on {QUALIFICATION_SUMMARY} "
+            f"(hardware_control_validated: {control_validated}). Requires active printing state and --execute; "
             "never retries uncertain commands automatically.",
         ),
         "resume": (
             "Experimental guarded resume of a paused print; requires --execute",
-            "Experimental single-shot resume on Kobra X model 20030 / firmware 2.0.2.2 "
-            "(hardware_control_validated: true). Requires paused state and --execute; "
+            f"Experimental single-shot resume on {QUALIFICATION_SUMMARY} "
+            f"(hardware_control_validated: {control_validated}). Requires paused state and --execute; "
             "never retries uncertain commands automatically.",
         ),
         "cancel": (
             "Experimental guarded cancel of an active or paused print; requires --execute",
-            "Experimental single-shot cancel on Kobra X model 20030 / firmware 2.0.2.2 "
-            "(hardware_control_validated: true). Requires printing, recognized preparation phase, "
+            f"Experimental single-shot cancel on {QUALIFICATION_SUMMARY} "
+            f"(hardware_control_validated: {control_validated}). Requires printing, recognized preparation phase, "
             "or paused state and --execute; never retries uncertain commands automatically.",
         ),
     }

@@ -15,9 +15,9 @@ from pathlib import Path
 from .config import Config, ProtocolError
 from .mqtt import MQTT
 from .printer import payload_data
+from .qualification import KOBRA_X, QUALIFIED_FIRMWARE, info_compatibility_issue
 
 CANDIDATE_FILE = "candidate.json"
-QUALIFIED_FIRMWARE = "2.0.2.2"
 
 
 def provision(host):
@@ -54,14 +54,13 @@ def verify_status(config):
             info = payload_data(client.query("info"))
     except ProtocolError:
         raise ProtocolError("Authentication/status: pinned connection or fresh info query failed") from None
-    if (info.get("model") != "Anycubic Kobra X" or info.get("version") != QUALIFIED_FIRMWARE
-            or any(str(info[k]) != str(config.type_id) for k in ("modelId", "modeId") if k in info)
-            or ("deviceId" in info and info["deviceId"] != config.printer_id)):
-        raise ProtocolError("Status qualification: only matching model 20030 / firmware 2.0.2.2 is qualified")
-    state = info.get("state")
-    if not isinstance(state, str) or not state or len(state) > 80 or not state.isascii() or not state.isprintable():
-        raise ProtocolError("Status qualification: missing or invalid printer state")
-    return {"firmware": QUALIFIED_FIRMWARE, "state": state}
+    if info_compatibility_issue(config.type_id, config.printer_id, info) is not None:
+        if info_compatibility_issue(config.type_id, config.printer_id, {**info, "state": "free"}) is None:
+            raise ProtocolError("Status qualification: missing or invalid printer state")
+        raise ProtocolError(
+            f"Status qualification: only matching model {KOBRA_X.model_id} / firmware {QUALIFIED_FIRMWARE} is qualified"
+        )
+    return {"firmware": info["version"], "state": info["state"]}
 
 
 

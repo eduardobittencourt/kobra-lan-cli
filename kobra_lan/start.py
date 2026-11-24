@@ -16,6 +16,13 @@ from .filaments import inspect_gcode_filaments, parse_onboard_box, validate_colo
 from .mqtt import MQTT
 from .printer import payload_data, file_details, safe_file_details, sanitized
 from .profiles import open_directory, read_json
+from .qualification import (
+    info_compatibility_issue,
+    is_qualified_remote_model,
+    is_start_hardware_validated,
+    is_valid_onboard_slot,
+    onboard_topology,
+)
 from .upload import ATTEMPT_SUFFIX, describe, atomic_json, device_lock, ensure_directory_bound, reserve_at
 
 PLAN_FIELDS = ("file_sha256", "device_digest", "model", "firmware", "payload")
@@ -144,11 +151,13 @@ def reviewed_attempt(plan, directory_fd, previous, execute):
 
 
 def build_plan(config, client, path, name, slot_map, auto_leveling, vibration, flow):
+    topology = onboard_topology(config.type_id)
+    max_slot = topology.slot_count if topology is not None else 0
     if not isinstance(slot_map, dict) or not slot_map or any(
-        type(index) is not int or index < 0 or type(slot) is not int or not 1 <= slot <= 4
+        type(index) is not int or index < 0 or not is_valid_onboard_slot(config.type_id, slot)
         for index, slot in slot_map.items()
     ):
-        raise ProtocolError("Slot mapping requires non-negative paint indices and onboard slots 1..4")
+        raise ProtocolError(f"Slot mapping requires non-negative paint indices and onboard slots 1..{max_slot}")
     data, manifest = describe(path, name)
     filament_info, raw_paint_colors = inspect_gcode_filaments(data, return_raw_colors=True)
     if not filament_info["paint_info_present"]:
@@ -160,16 +169,16 @@ def build_plan(config, client, path, name, slot_map, auto_leveling, vibration, f
     if slot_map.keys() != declared_indices:
         raise ProtocolError("Slot mapping must cover exactly the paint indices declared in paint_info")
     info = payload_data(client.query("info"))
-    if info.get("model") != "Anycubic Kobra X" or info.get("version") != "2.0.2.2":
+    if info_compatibility_issue(config.type_id, config.printer_id, info) is not None:
         raise ProtocolError("Unqualified model/firmware for experimental start")
     if info.get("state") != "free" or info.get("project"):
         raise ProtocolError("Printer is not idle")
     remote = safe_file_details(file_details(client, manifest["remote_filename"]))
     if (remote.get("file_size") != manifest["size_bytes"] or remote.get("layer_count") != manifest["layer_count"]
-            or remote.get("printer_model") != "Anycubic Kobra X"):
+            or not is_qualified_remote_model(config.type_id, remote.get("printer_model"))):
         raise ProtocolError("Remote file metadata does not match the local G-code")
     boxes = payload_data(client.query("multiColorBox", "getInfo")).get("multi_color_box")
-    box = parse_onboard_box(boxes)
+    box = parse_onboard_box(boxes, model_id=config.type_id)
     ams_box_mapping, slot_mapping = build_slot_mappings(
         slot_map, filaments, raw_paint_colors, box["slots"], boxes[0]["slots"],
     )
@@ -188,9 +197,15 @@ def build_plan(config, client, path, name, slot_map, auto_leveling, vibration, f
             "model_objects_skip_parts": []}}
     # Empty URL starts the stored file; observed on hardware for the cases below.
     multicolor = len(ams_box_mapping) > 1
-    hardware_validated = (not multicolor and slot_map.get(0) in (1, 2, 4)
-                          and ams_box_mapping[0]["material_type"] == "PLA High Speed"
-                          and auto_leveling and not vibration and not flow)
+    hardware_validated = is_start_hardware_validated(
+        config.type_id,
+        info["version"],
+        slot_map=slot_map,
+        materials={entry["paint_index"]: entry["material_type"] for entry in ams_box_mapping},
+        auto_leveling=auto_leveling,
+        vibration_compensation=vibration,
+        flow_calibration=flow,
+    )
     plan = {"file_sha256": manifest["sha256"], "device_digest": hashlib.sha256(config.printer_id.encode()).hexdigest(),
             "model": info["model"], "firmware": info["version"], "payload": payload}
     return {**plan, "plan_sha256": review_digest(plan), "dry_run": True,

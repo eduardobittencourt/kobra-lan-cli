@@ -8,10 +8,10 @@ import time
 import uuid
 
 from .config import ProtocolError
-from .diagnostics import compatibility_issue
 from .mqtt import MQTT, MQTTClosed, MQTTFailure, MQTTIOFailure
 from .printer import payload_data
 from .profiles import open_directory
+from .qualification import info_compatibility_issue
 from .upload import atomic_json_at
 
 DEFAULT_TIMEOUT = 86400
@@ -182,7 +182,7 @@ def observe(registry, config, name, timeout, on_report, *, on_target=None):
                 info = payload_data(client.query("info", require_fresh=True))
                 if time.monotonic() >= deadline:
                     break
-                if compatibility_issue(cfg, info):
+                if info_compatibility_issue(cfg.type_id, cfg.printer_id, info):
                     raise ProtocolError("Fresh status could not establish qualified Kobra X identity and firmware")
                 result = on_report(info)
                 if result is not None:

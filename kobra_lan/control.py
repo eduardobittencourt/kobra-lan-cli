@@ -14,9 +14,9 @@ from pathlib import Path
 import time
 
 from .config import ProtocolError, validate_filename
-from .diagnostics import compatibility_issue
 from .mqtt import MQTT, TASKID_RE, mqtt_failure_exit_code
 from .printer import payload_data, sanitized
+from .qualification import info_compatibility_issue, is_control_hardware_validated
 from .upload import device_lock, ensure_directory_bound
 from .watch import PREPARATION_STATES, project_filename
 
@@ -96,7 +96,7 @@ def control_print(config, action, state_dir, *, expected_filename=None):
         ensure_directory_bound(device_dir, device_fd, action)
         client = resources.enter_context(MQTT(config))
         info = payload_data(client.query("info", require_fresh=True))
-        if compatibility_issue(config, info) is not None:
+        if info_compatibility_issue(config.type_id, config.printer_id, info) is not None:
             raise ProtocolError("Fresh status could not establish qualified Kobra X identity and firmware")
         info_state = info.get("state")
         project = info.get("project")
@@ -121,7 +121,7 @@ def control_print(config, action, state_dir, *, expected_filename=None):
             "status": "control_uncertain_no_retry",
             "dry_run": False,
             "experimental": True,
-            "hardware_control_validated": True,
+            "hardware_control_validated": is_control_hardware_validated(config.type_id, info["version"]),
             "taskid": taskid,
             "before": sanitized(info),
             "before_project": sanitized(project),
@@ -133,7 +133,7 @@ def control_print(config, action, state_dir, *, expected_filename=None):
             confirmed = False
             for poll in range(POLL_COUNT):
                 after_info = payload_data(client.query("info", require_fresh=True))
-                if compatibility_issue(config, after_info) is not None:
+                if info_compatibility_issue(config.type_id, config.printer_id, after_info) is not None:
                     raise ProtocolError("Post-control status failed qualification check")
                 after_project = after_info.get("project") if isinstance(after_info.get("project"), dict) else {}
                 result["after"] = sanitized(after_info)

@@ -10,6 +10,7 @@ import time
 import uuid
 
 from .config import Config, ProtocolError
+from .qualification import is_qualified_profile_firmware
 
 CONFIG_FILE = 'config.json'
 REGISTRY_FILE = 'profiles.json'
@@ -105,7 +106,7 @@ class Registry:
         for relative in entry['owned_files']:
             if not isinstance(relative, str) or not self._owned_name(relative):
                 raise ValueError
-        if entry.get('firmware') not in (None, '2.0.2.2'):
+        if not is_qualified_profile_firmware(entry.get('firmware')):
             raise ValueError
 
     def _validate_index(self, data):
