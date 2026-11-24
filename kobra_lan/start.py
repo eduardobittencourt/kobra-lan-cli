@@ -1,4 +1,4 @@
-"""Experimental local-file print/start, single filament, onboard four-slot box.
+"""Experimental local-file print/start using the onboard four-slot box.
 
 Hardware start observed on FW 2.0.2.2, PLA High Speed in slots 1, 2, and 4,
 leveling on, vibration/flow calibration off. Other combinations remain unqualified.
@@ -143,16 +143,22 @@ def reviewed_attempt(plan, directory_fd, previous, execute):
         plan["plan_sha256"] = review_digest(plan, previous)
 
 
-def build_plan(config, client, path, name, slot, auto_leveling, vibration, flow):
-    if slot not in range(1, 5):
-        raise ProtocolError("Slot must be 1..4 (human numbering)")
+def build_plan(config, client, path, name, slot_map, auto_leveling, vibration, flow):
+    if not isinstance(slot_map, dict) or not slot_map or any(
+        type(index) is not int or index < 0 or type(slot) is not int or not 1 <= slot <= 4
+        for index, slot in slot_map.items()
+    ):
+        raise ProtocolError("Slot mapping requires non-negative paint indices and onboard slots 1..4")
     data, manifest = describe(path, name)
     filament_info, raw_paint_colors = inspect_gcode_filaments(data, return_raw_colors=True)
     if not filament_info["paint_info_present"]:
         raise ProtocolError("G-code has no paint mapping")
-    if not filament_info["single_filament_start_compatible"]:
-        raise ProtocolError("Start currently supports only one filament, paint/tool index 0")
-    filament = filament_info["filaments"][0]
+    filaments = filament_info["filaments"]
+    declared_indices = {filament["paint_index"] for filament in filaments}
+    if not set(filament_info["tool_indices"]) <= declared_indices:
+        raise ProtocolError("G-code uses a tool index absent from paint_info")
+    if slot_map.keys() != declared_indices:
+        raise ProtocolError("Slot mapping must cover exactly the paint indices declared in paint_info")
     info = payload_data(client.query("info"))
     if info.get("model") != "Anycubic Kobra X" or info.get("version") != "2.0.2.2":
         raise ProtocolError("Unqualified model/firmware for experimental start")
@@ -164,27 +170,16 @@ def build_plan(config, client, path, name, slot, auto_leveling, vibration, flow)
         raise ProtocolError("Remote file metadata does not match the local G-code")
     boxes = payload_data(client.query("multiColorBox", "getInfo")).get("multi_color_box")
     box = parse_onboard_box(boxes)
-    selected = box["slots"][slot - 1]
-    if selected["status"] != 5:
-        raise ProtocolError("Selected slot is not loaded/available")
-    material = filament["material_type"]
-    # PLA High Speed is a PLA variant; PETG must never pass a PLA comparison.
-    slot_material = (selected["material_type"] or "").split()
-    if not slot_material or slot_material[0].upper() != material.upper():
-        raise ProtocolError("Selected slot material differs from the G-code")
-    raw_slot = next(raw for raw in boxes[0]["slots"] if raw.get("index") == slot - 1)
-    color = raw_paint_colors[0]
-    ams_color = validate_color_channels(raw_slot.get("color"))
+    ams_box_mapping, slot_mapping = build_slot_mappings(
+        slot_map, filaments, raw_paint_colors, box["slots"], boxes[0]["slots"],
+    )
     if any(type(v) is not bool for v in [auto_leveling, vibration, flow]):
         raise ProtocolError("Preparation settings must be explicit booleans")
     payload = {
         "taskid": "-1", "url": "", "filename": manifest["remote_filename"],
         "md5": manifest["md5"], "filepath": None, "filetype": 1, "project_type": 1,
         "filesize": manifest["size_bytes"],
-        "ams_settings": {"use_ams": True, "ams_box_mapping": [{
-            "paint_index": 0, "ams_index": slot - 1,
-            "paint_color": color, "ams_color": ams_color + [255] if len(ams_color) == 3 else ams_color,
-            "material_type": selected["material_type"]}]},
+        "ams_settings": {"use_ams": True, "ams_box_mapping": ams_box_mapping},
         "task_settings": {"auto_leveling": int(auto_leveling), "vibration_compensation": int(vibration),
             "flow_calibration": int(flow), "dry_mode": 0,
             "ai_settings": {"status": 0, "count": 0, "type": 0},
@@ -192,16 +187,50 @@ def build_plan(config, client, path, name, slot, auto_leveling, vibration, flow)
             "drying_settings": {"status": 0, "target_temp": 0, "duration": 0, "remain_time": 0},
             "model_objects_skip_parts": []}}
     # Empty URL starts the stored file; observed on hardware for the cases below.
-    hardware_validated = (slot in (1, 2, 4) and selected["material_type"] == "PLA High Speed"
+    multicolor = len(ams_box_mapping) > 1
+    hardware_validated = (not multicolor and slot_map.get(0) in (1, 2, 4)
+                          and ams_box_mapping[0]["material_type"] == "PLA High Speed"
                           and auto_leveling and not vibration and not flow)
     plan = {"file_sha256": manifest["sha256"], "device_digest": hashlib.sha256(config.printer_id.encode()).hexdigest(),
             "model": info["model"], "firmware": info["version"], "payload": payload}
     return {**plan, "plan_sha256": review_digest(plan), "dry_run": True,
             "experimental": True, "hardware_start_validated": hardware_validated,
-            "selected_slot": slot, "upload_performed": False}
+            "slot_mapping": slot_mapping, "multicolor": multicolor, "upload_performed": False}
 
 
-def start(config, path, name, slot, auto_leveling, vibration, flow, state_dir,
+def build_slot_mappings(slot_map, filaments, raw_paint_colors, slots, raw_slots):
+    raw_by_index = {raw["index"]: raw for raw in raw_slots}
+    ams_box_mapping = []
+    slot_mapping = []
+    # The G-code parser supplies filaments in ascending paint_index order.
+    for filament in filaments:
+        paint_index = filament["paint_index"]
+        slot = slot_map[paint_index]
+        ams_index = slot - 1
+        selected = slots[ams_index]
+        if selected["status"] != 5 or not selected["available_for_start"]:
+            raise ProtocolError(f"Mapped slot {slot} is not loaded/available")
+        gcode_material = filament["material_type"]
+        slot_material = selected["material_type"]
+        if slot_material.split()[0].upper() != gcode_material.upper():
+            raise ProtocolError(f"Mapped slot {slot} material differs from the G-code")
+        ams_color = validate_color_channels(raw_by_index[ams_index].get("color"))
+        if len(ams_color) == 3:
+            ams_color.append(255)
+        ams_box_mapping.append({
+            "paint_index": paint_index, "ams_index": ams_index,
+            "paint_color": raw_paint_colors[paint_index], "ams_color": ams_color,
+            "material_type": slot_material,
+        })
+        slot_mapping.append({
+            "paint_index": paint_index, "slot": slot, "ams_index": ams_index,
+            "gcode_material_type": gcode_material, "gcode_color_hex": filament["color_hex"],
+            "slot_material_type": slot_material, "slot_color_hex": selected["color_hex"],
+        })
+    return ams_box_mapping, slot_mapping
+
+
+def start(config, path, name, slot_map, auto_leveling, vibration, flow, state_dir,
           execute=False, expected_plan=None, reprint_from=None):
     if reprint_from is not None and not valid_attempt_id(reprint_from):
         raise ProtocolError("Reprint requires a full local attempt ID from print plan")
@@ -215,7 +244,7 @@ def start(config, path, name, slot, auto_leveling, vibration, flow, state_dir,
         if execute:
             ensure_directory_bound(device_dir, device_fd, "start")
         client = resources.enter_context(MQTT(config))
-        plan = build_plan(config, client, path, name, slot, auto_leveling, vibration, flow)
+        plan = build_plan(config, client, path, name, slot_map, auto_leveling, vibration, flow)
         reviewed_attempt(plan, starts_fd, reprint_from, execute)
         if not execute:
             return plan

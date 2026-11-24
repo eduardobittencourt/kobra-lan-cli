@@ -27,21 +27,32 @@ class Parser(argparse.ArgumentParser):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, allow_abbrev=False, **kwargs)
 
-    def error(self, message):
+    def parse_args(self, args=None, namespace=None):
+        parsed, extras = self.parse_known_args(args, namespace)
+        if extras:
+            prog = self.prog
+            if getattr(parsed, "command", None) == "print" and parsed.print_command in ("plan", "start"):
+                prog = f"{prog} print {parsed.print_command}"
+            self.error("Unrecognized arguments", prog=prog)
+        return parsed
+
+    def error(self, message, *, prog=None):
         # argparse interpolates arbitrary supplied values; never publish its message.
+        prog = prog or self.prog
         guidance = {
             "kobra-lan printer pair": "; supply --name NAME and --host IPv4",
             "kobra-lan files upload": "; review first with kobra-lan gcode inspect",
             "kobra-lan files delete": "; find a root filename with kobra-lan files list and supply --execute",
-            "kobra-lan print start": "; review first with kobra-lan print plan",
+            "kobra-lan print plan": ". Supply --slot-map PAINT_INDEX=SLOT for each G-code paint index.",
+            "kobra-lan print start": ". Supply --slot-map PAINT_INDEX=SLOT and review first with kobra-lan print plan.",
             "kobra-lan print watch": f"; --timeout accepts whole seconds from 1 to {MAX_TIMEOUT}",
             "kobra-lan print pause": "; inspect kobra-lan status first and supply --execute (optional --filename NAME)",
             "kobra-lan print resume": "; inspect kobra-lan status first and supply --execute (optional --filename NAME)",
             "kobra-lan print cancel": "; inspect kobra-lan status first and supply --execute (optional --filename NAME)",
             "kobra-lan jobs list": f"; --kind accepts all, start, or observation and --limit accepts 1 to {MAX_LIMIT}",
             "kobra-lan jobs info": "; supply a local attempt_id, obs-<32hex>, or unreadable-<64hex> record ID",
-        }.get(self.prog, "")
-        raise ArgumentFailure("Invalid arguments; use " + self.prog + " --help for supported commands and required options" + guidance)
+        }.get(prog, "")
+        raise ArgumentFailure("Invalid arguments; use " + prog + " --help for supported commands and required options" + guidance)
 
 
 def root_json(argv):
@@ -77,6 +88,16 @@ def jobs_limit(value):
         if 1 <= limit <= MAX_LIMIT:
             return limit
     raise argparse.ArgumentTypeError("Invalid history limit")
+
+
+def slot_map_entry(value):
+    match = re.fullmatch(r"([0-9]+)=([1-4])", value)
+    if match:
+        try:
+            return int(match[1].lstrip("0") or "0"), int(match[2])
+        except ValueError:
+            pass
+    raise argparse.ArgumentTypeError("Invalid slot mapping. Use PAINT_INDEX=SLOT with an onboard slot from 1 to 4.")
 
 
 def build_parser():
@@ -144,7 +165,8 @@ def build_parser():
         p = printing.add_parser(command, help="Read-only plan" if command == "plan" else "Experimental guarded execution")
         p.add_argument("file", type=Path, help="Local copy of the previously uploaded G-code")
         p.add_argument("--name", required=True, help="Existing remote filename")
-        p.add_argument("--slot", type=int, choices=range(1, 5), required=True)
+        p.add_argument("--slot-map", action="append", required=True, type=slot_map_entry, metavar="PAINT_INDEX=SLOT",
+                       help="Map a G-code paint index to an onboard slot (1..4). Repeat for each declared index.")
         p.add_argument("--reprint-from", metavar="PREVIOUS_ATTEMPT_ID",
                        help="Reprint after observed activity; find the latest local attempt ID with print plan or jobs list")
         for flag in ["auto-leveling", "vibration-compensation", "flow-calibration"]:
@@ -229,6 +251,11 @@ def main(argv=None):
                 raise ArgumentFailure("Invalid filename. Supply one safe root filename from kobra-lan files list.") from None
         if getattr(args, "reprint_from", None) is not None and not valid_attempt_id(args.reprint_from):
             raise ArgumentFailure("--reprint-from requires a full lowercase local attempt ID from print plan")
+        if args.command == "print" and args.print_command in ("plan", "start"):
+            slot_map = dict(args.slot_map)
+            if len(slot_map) != len(args.slot_map):
+                raise ArgumentFailure("Duplicate paint index. Supply --slot-map PAINT_INDEX=SLOT once for each index.")
+            args.slot_map = slot_map
         if args.command == "print" and args.print_command == "start":
             if not re.fullmatch(r"[0-9a-fA-F]{64}", args.plan_sha256):
                 raise ArgumentFailure("Start requires a full --plan-sha256 from print plan and --execute")
@@ -343,7 +370,7 @@ def _operate_files(args, config):
 def _operate_print(args, config):
     if args.print_command in ("pause", "resume", "cancel"):
         return control_print(config, args.print_command, args.state_dir, expected_filename=args.filename)
-    return start(config, args.file, args.name, args.slot,
+    return start(config, args.file, args.name, args.slot_map,
         args.auto_leveling == "on", args.vibration_compensation == "on", args.flow_calibration == "on",
         args.state_dir, args.print_command == "start", getattr(args, "plan_sha256", None), args.reprint_from)
 

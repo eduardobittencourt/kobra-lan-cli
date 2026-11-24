@@ -49,6 +49,18 @@ class CompletionTests(unittest.TestCase):
                                     for line in script.splitlines()))
             else:
                 self.assertIn("'files delete') candidates='-h --help --execute'", script)
+            for command in ('plan', 'start'):
+                if shell == 'fish':
+                    lines = [line for line in script.splitlines()
+                             if line.startswith('complete ') and f'xprint {command}' in line]
+                    self.assertTrue(any(' -l slot-map -r' in line for line in lines))
+                    self.assertFalse(any(' -l slot ' in line + ' ' for line in lines))
+                else:
+                    line, = (line for line in script.splitlines()
+                             if f"'print {command}') candidates=" in line)
+                    options = line.split("'")[3].split()
+                    self.assertIn('--slot-map', options)
+                    self.assertNotIn('--slot', options)
             for node in nodes.values():
                 for name in node['commands']:
                     self.assertIn(name, script)

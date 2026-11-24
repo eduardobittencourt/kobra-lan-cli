@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 import pwd
+import re
 import socket
 import stat
 import subprocess
@@ -83,7 +84,20 @@ def installed_probes(probe, version, home, work, before):
     assert all(word in print_help for word in ("watch", "pause", "resume", "cancel"))
     assert "--timeout SECONDS" in probe("print", "watch", "--help", probe_home=empty_home)
     for action in ("plan", "start"):
-        assert "--reprint-from PREVIOUS_ATTEMPT_ID" in probe("print", action, "--help", probe_home=empty_home)
+        help_text = probe("print", action, "--help", probe_home=empty_home)
+        assert "--reprint-from PREVIOUS_ATTEMPT_ID" in help_text
+        assert "--slot-map PAINT_INDEX=SLOT" in help_text and "--slot" not in help_text.split()
+        execution = ["--execute", "--plan-sha256", "a" * 64] if action == "start" else []
+        for mode in ([], ["--json"]):
+            output = probe(*mode, "print", action, str(gcode), "--name", "synthetic.gcode",
+                           "--slot-map", hostile, "--auto-leveling", "on",
+                           "--vibration-compensation", "off", "--flow-calibration", "off", *execution,
+                           code=2, probe_home=empty_home, quiet_stderr=True)
+            assert "SYNTHETIC_PRIVATE" not in output and "--slot-map" in output
+            if mode:
+                assert json.loads(output)["error"]["code"] == "invalid_arguments"
+            else:
+                assert output.count("Error (invalid_arguments):") == 1
     for action in ("pause", "resume", "cancel"):
         help_text = probe("print", action, "--help", probe_home=empty_home)
         assert "--execute" in help_text and "--filename" in help_text
@@ -103,6 +117,15 @@ def installed_probes(probe, version, home, work, before):
         else:
             assert "'files delete') candidates='-h --help --execute'" in completion
         assert all(f"print {action}:--reprint-from" in completion for action in ("plan", "start"))
+        assert all(f"print {action}:--slot-map" in completion for action in ("plan", "start"))
+        assert not re.search(r"--slot(?![\w-])| -l slot(?:\s|$)", completion)
+        for action in ("plan", "start"):
+            if shell == "fish":
+                assert any(f"xprint {action}" in line and " -l slot-map -r" in line
+                           for line in completion.splitlines())
+            else:
+                assert any(f"'print {action}') candidates=" in line and "--slot-map" in line
+                           for line in completion.splitlines())
         assert all(f"print {action}:--filename" in completion for action in ("pause", "resume", "cancel"))
         assert "jobs list:--kind" in completion and "jobs list:--limit" in completion
     assert not list(empty_home.iterdir())
@@ -179,13 +202,15 @@ def main():
         run("apt-get", "-y", *arguments, env=dict(os.environ, DEBIAN_FRONTEND="noninteractive"))
         assert snapshot(home) == before, f"Private data changed after {arguments}"
 
-    def probe(*arguments, code=0, probe_home=home):
+    def probe(*arguments, code=0, probe_home=home, quiet_stderr=False):
         # Explicit installed path, empty environment, no checkout, development launcher or PYTHONPATH.
         """Run the installed command as the fixture user outside the checkout."""
         result = subprocess.run(["runuser", "-u", "kobra-acceptance", "--", "env", "-i",
                                  f"HOME={probe_home}", CLEAN_PATH, INSTALLED_COMMAND, *arguments],
                                 cwd=work, text=True, capture_output=True)
         assert result.returncode == code, (arguments, result.returncode, result.stdout, result.stderr)
+        if quiet_stderr:
+            assert not result.stderr
         return result.stdout
 
     # Clean installation, then a controlled old package -> tested candidate upgrade.

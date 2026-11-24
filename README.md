@@ -46,10 +46,10 @@ cd kobra-lan-cli
 # Upload only when authorized, using the inspected SHA-256:
 ./kobra-lan files upload /path/to/model.gcode --name agent-model.gcode --sha256 FILE_HASH --execute
 # Review a read-only experimental start plan:
-./kobra-lan print plan /path/to/model.gcode --name agent-model.gcode --slot 1 \
+./kobra-lan print plan /path/to/model.gcode --name agent-model.gcode --slot-map 0=1 \
   --auto-leveling on --vibration-compensation off --flow-calibration off
 # Physical start only when separately authorized, using the reviewed plan hash:
-./kobra-lan print start /path/to/model.gcode --name agent-model.gcode --slot 1 \
+./kobra-lan print start /path/to/model.gcode --name agent-model.gcode --slot-map 0=1 \
   --auto-leveling on --vibration-compensation off --flow-calibration off \
   --plan-sha256 PLAN_HASH --execute
 # Observe a job already active on the selected printer:
@@ -81,8 +81,21 @@ local history inspection, observation, planning and execution controls.
 (slots `1..4`, idle or printing) over one pinned MQTT session without writing
 local state; `gcode inspect` reports parsed `paint_info` filaments/colors,
 `T<n>` tool indices, optional weights, `multicolor`, and
-`single_filament_start_compatible` offline. Multicolor `print start` and
-external ACE units remain unqualified.
+`single_filament_start_compatible` offline.
+
+For multicolor prints, use `gcode inspect` to get the file hash and paint
+indices, then `slots list` to find loaded, material-compatible slots. After
+`files upload`, use one `--slot-map PAINT_INDEX=SLOT` per declared index
+on both `print plan` and `print start`. For example, `--slot-map 0=1
+--slot-map 2=4` maps two indices to onboard slots 1 and 4. Multicolor and
+single-filament non-zero-index starts report `hardware_start_validated: false`.
+External ACE units remain outside the supported topology.
+See the [multicolor workflow](docs/usage.md#plan-and-start-a-multicolor-print).
+
+This 0.x change replaces `--slot` with `--slot-map`. Read `slot_mapping`
+in place of `selected_slot` on `print plan`, `print start` and `jobs info`,
+and read `material_type` per mapping entry on `jobs info`.
+
 Upload requires both execution controls and never starts a print. Inspection and
 job history are local and read-only; planning queries the printer without changing
 it. Text is the default; root `--json` selects the versioned machine contract.
