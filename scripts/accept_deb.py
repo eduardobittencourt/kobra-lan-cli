@@ -10,10 +10,11 @@ import json
 import os
 from pathlib import Path
 import pwd
-import re
 import socket
 import stat
 import subprocess
+
+from probe_completions import check_completion
 
 
 INSTALLED_COMMAND = "/usr/bin/kobra-lan"
@@ -108,26 +109,7 @@ def installed_probes(probe, version, home, work, before):
     assert "RECORD_ID" in probe("jobs", "info", "--help", probe_home=empty_home)
     for shell in ("bash", "zsh", "fish"):
         completion = probe("completion", shell, probe_home=empty_home)
-        assert all(word in completion for word in ("kobra-lan", "slots", "watch", "timeout", "pause", "resume", "cancel",
-                                                   "execute", "filename", "jobs", "observation", "limit"))
-        assert "slots:list" in completion
-        assert "files:delete" in completion
-        if shell == "fish":
-            assert any("xfiles delete" in line and line.endswith(" -l execute") for line in completion.splitlines())
-        else:
-            assert "'files delete') candidates='-h --help --execute'" in completion
-        assert all(f"print {action}:--reprint-from" in completion for action in ("plan", "start"))
-        assert all(f"print {action}:--slot-map" in completion for action in ("plan", "start"))
-        assert not re.search(r"--slot(?![\w-])| -l slot(?:\s|$)", completion)
-        for action in ("plan", "start"):
-            if shell == "fish":
-                assert any(f"xprint {action}" in line and " -l slot-map -r" in line
-                           for line in completion.splitlines())
-            else:
-                assert any(f"'print {action}') candidates=" in line and "--slot-map" in line
-                           for line in completion.splitlines())
-        assert all(f"print {action}:--filename" in completion for action in ("pause", "resume", "cancel"))
-        assert "jobs list:--kind" in completion and "jobs list:--limit" in completion
+        check_completion(completion, shell)
     assert not list(empty_home.iterdir())
     for mode in ([], ["--json"]):
         output = probe(*mode, "files", "upload", hostile, code=2)

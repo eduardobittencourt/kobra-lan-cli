@@ -7,13 +7,13 @@ import json
 from email.parser import BytesParser
 import os
 from pathlib import Path, PurePosixPath
-import re
 import subprocess
 import sys
 import tarfile
 import venv
 import zipfile
 
+from probe_completions import check_completion
 from release_version import ROOT, source_version
 
 RUNTIME_REQUIREMENT = "cryptography>=41"
@@ -197,26 +197,7 @@ def main():
     for shell in ("bash", "zsh", "fish"):
         completion = subprocess.check_output([str(command), "completion", shell],
                                              cwd=outside, env=probe_env, text=True)
-        assert all(word in completion for word in ("kobra-lan", "slots", "watch", "timeout", "pause", "resume", "cancel",
-                                                   "execute", "filename", "jobs", "observation", "limit"))
-        assert "slots:list" in completion
-        assert "files:delete" in completion
-        if shell == "fish":
-            assert any("xfiles delete" in line and line.endswith(" -l execute") for line in completion.splitlines())
-        else:
-            assert "'files delete') candidates='-h --help --execute'" in completion
-        assert all(f"print {action}:--reprint-from" in completion for action in ("plan", "start"))
-        assert all(f"print {action}:--slot-map" in completion for action in ("plan", "start"))
-        assert not re.search(r"--slot(?![\w-])| -l slot(?:\s|$)", completion)
-        for action in ("plan", "start"):
-            if shell == "fish":
-                assert any(f"xprint {action}" in line and " -l slot-map -r" in line
-                           for line in completion.splitlines())
-            else:
-                assert any(f"'print {action}') candidates=" in line and "--slot-map" in line
-                           for line in completion.splitlines())
-        assert all(f"print {action}:--filename" in completion for action in ("pause", "resume", "cancel"))
-        assert "jobs list:--kind" in completion and "jobs list:--limit" in completion
+        check_completion(completion, shell)
     assert not list(empty_home.iterdir())
     print(f"Python archives and independent installation verified: {version}")
 
