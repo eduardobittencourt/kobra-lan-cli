@@ -71,6 +71,15 @@ def installed_probes(probe, version, home, work, before):
     slots_help = probe("slots", "--help", probe_home=empty_home)
     assert "list" in slots_help
     assert "onboard" in probe("slots", "list", "--help", probe_home=empty_home).lower()
+    camera_help = probe("camera", "--help", probe_home=empty_home)
+    assert all(word in camera_help for word in ("status", "snapshot", "pipe"))
+    assert "18088" in probe("camera", "status", "--help", probe_home=empty_home)
+    camera_snap_help = probe("camera", "snapshot", "--help", probe_home=empty_home)
+    assert all(flag in camera_snap_help for flag in ("--output", "--timeout", "--overwrite", "--no-start-capture"))
+    camera_pipe_help = probe("camera", "pipe", "--help", probe_home=empty_home)
+    assert all(flag in camera_pipe_help for flag in ("--timeout", "--max-bytes", "--no-start-capture"))
+    pipe_json = json.loads(probe("--json", "camera", "pipe", code=2, probe_home=empty_home, quiet_stderr=True))
+    assert pipe_json["error"]["code"] == "invalid_arguments"
     assert "delete" in probe("files", "--help", probe_home=empty_home)
     delete_help = probe("files", "delete", "--help", probe_home=empty_home)
     assert "--execute" in delete_help and "idle printer" in " ".join(delete_help.split())

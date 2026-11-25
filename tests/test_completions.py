@@ -44,11 +44,17 @@ class CompletionTests(unittest.TestCase):
             registry.assert_not_called()
             script = out.getvalue()
             self.assertIn('files:delete', script)
+            self.assertIn('camera:status', script)
+            self.assertIn('camera:snapshot', script)
+            self.assertIn('camera:pipe', script)
             if shell == 'fish':
                 self.assertTrue(any('xfiles delete' in line and line.endswith(' -l execute')
                                     for line in script.splitlines()))
+                self.assertTrue(any('xcamera snapshot' in line and ' -l output -r -F' in line
+                                    for line in script.splitlines()))
             else:
                 self.assertIn("'files delete') candidates='-h --help --execute'", script)
+                self.assertIn("'camera snapshot:--output')", script)
             for command in ('plan', 'start'):
                 if shell == 'fish':
                     lines = [line for line in script.splitlines()
@@ -85,6 +91,18 @@ COMP_WORDS=(kobra-lan sl); COMP_CWORD=1
 _kobra_lan; printf 'root:%s\\n' "${COMPREPLY[@]}"
 COMP_WORDS=(kobra-lan slots ''); COMP_CWORD=2
 _kobra_lan; printf 'slots:%s\\n' "${COMPREPLY[@]}"
+COMP_WORDS=(kobra-lan cam); COMP_CWORD=1
+_kobra_lan; printf 'root:%s\\n' "${COMPREPLY[@]}"
+COMP_WORDS=(kobra-lan camera ''); COMP_CWORD=2
+_kobra_lan; printf 'camera:%s\\n' "${COMPREPLY[@]}"
+COMP_WORDS=(kobra-lan camera snapshot --out); COMP_CWORD=3
+_kobra_lan; printf 'camera-snap:%s\\n' "${COMPREPLY[@]}"
+COMP_WORDS=(kobra-lan camera snapshot --no-); COMP_CWORD=3
+_kobra_lan; printf 'camera-snap:%s\\n' "${COMPREPLY[@]}"
+COMP_WORDS=(kobra-lan camera snapshot --output pypro); COMP_CWORD=4
+_kobra_lan; printf 'camera-snap-file:%s\\n' "${COMPREPLY[@]}"
+COMP_WORDS=(kobra-lan camera pipe --max); COMP_CWORD=3
+_kobra_lan; printf 'camera-pipe:%s\\n' "${COMPREPLY[@]}"
 COMP_WORDS=(kobra-lan print plan test.gcode --auto-leveling o); COMP_CWORD=5
 _kobra_lan; printf '%s\\n' "${COMPREPLY[@]}"
 COMP_WORDS=(kobra-lan print wa); COMP_CWORD=2
@@ -118,7 +136,9 @@ _kobra_lan; printf '%s\\n' "${COMPREPLY[@]}"
         self.assertEqual(process.returncode, 0, process.stderr)
         self.assertEqual(process.stderr, '')
         for expected in ('list', 'info', 'upload', 'on', 'off', 'watch', '--timeout', '--json', 'pyproject.toml',
-                         'root:slots', 'slots:list', 'files:delete', 'files delete:--execute',
+                         'root:slots', 'slots:list', 'root:camera', 'camera:status', 'camera:snapshot', 'camera:pipe',
+                         'camera-snap:--output', 'camera-snap:--no-start-capture', 'camera-snap-file:pyproject.toml',
+                         'camera-pipe:--max-bytes', 'files:delete', 'files delete:--execute',
                          'plan:--reprint-from', 'start:--reprint-from',
                          'print:pause', 'print:resume', 'print:cancel',
                          'pause:--execute', 'pause:--filename', 'resume:--execute', 'resume:--filename',
@@ -174,6 +194,18 @@ end
 for item in (complete -C 'kobra-lan slots ')
   printf 'slots:%s\\n' $item
 end
+for item in (complete -C 'kobra-lan cam')
+  printf 'root:%s\\n' $item
+end
+for item in (complete -C 'kobra-lan camera ')
+  printf 'camera:%s\\n' $item
+end
+for item in (complete -C 'kobra-lan camera snapshot --no-')
+  printf 'camera-snap:%s\\n' $item
+end
+for item in (complete -C 'kobra-lan camera pipe --max')
+  printf 'camera-pipe:%s\\n' $item
+end
 complete -C 'kobra-lan print plan a.gcode --auto-leveling o'
 complete -C 'kobra-lan print wa'
 complete -C 'kobra-lan print watch --time'
@@ -200,7 +232,9 @@ complete -C 'kobra-lan --j'
         self.assertEqual(process.returncode, 0, process.stderr)
         self.assertEqual(process.stderr, '')
         for expected in ('list', 'info', 'upload', 'on', 'off', 'watch', '--timeout', '--json',
-                         'root:slots', 'slots:list', 'files:delete', 'files delete:--execute',
+                         'root:slots', 'slots:list', 'root:camera', 'camera:status', 'camera:snapshot', 'camera:pipe',
+                         'camera-snap:--no-start-capture', 'camera-pipe:--max-bytes',
+                         'files:delete', 'files delete:--execute',
                          'plan:--reprint-from', 'start:--reprint-from',
                          'print:pause', 'print:resume', 'print:cancel',
                          'pause:--execute', 'pause:--filename', 'resume:--execute', 'resume:--filename',
@@ -225,6 +259,14 @@ words=(kobra-lan sl); CURRENT=2
 for candidate in $(_kobra_lan); do print -r -- "root:$candidate"; done
 words=(kobra-lan slots ''); CURRENT=3
 for candidate in $(_kobra_lan); do print -r -- "slots:$candidate"; done
+words=(kobra-lan cam); CURRENT=2
+for candidate in $(_kobra_lan); do print -r -- "root:$candidate"; done
+words=(kobra-lan camera ''); CURRENT=3
+for candidate in $(_kobra_lan); do print -r -- "camera:$candidate"; done
+words=(kobra-lan camera snapshot --no-); CURRENT=4
+for candidate in $(_kobra_lan); do print -r -- "camera-snap:$candidate"; done
+words=(kobra-lan camera pipe --max); CURRENT=4
+for candidate in $(_kobra_lan); do print -r -- "camera-pipe:$candidate"; done
 words=(kobra-lan print plan a.gcode --auto-leveling o); CURRENT=6
 _kobra_lan
 words=(kobra-lan print wa); CURRENT=3
@@ -256,7 +298,9 @@ _kobra_lan
         self.assertEqual(process.returncode, 0, process.stderr)
         self.assertEqual(process.stderr, '')
         for expected in ('list', 'info', 'upload', 'on', 'off', 'watch', '--timeout', '--json',
-                         'root:slots', 'slots:list', 'files:delete', 'files delete:--execute',
+                         'root:slots', 'slots:list', 'root:camera', 'camera:status', 'camera:snapshot', 'camera:pipe',
+                         'camera-snap:--no-start-capture', 'camera-pipe:--max-bytes',
+                         'files:delete', 'files delete:--execute',
                          'plan:--reprint-from', 'start:--reprint-from',
                          'print:pause', 'print:resume', 'print:cancel',
                          'pause:--execute', 'pause:--filename', 'resume:--execute', 'resume:--filename',

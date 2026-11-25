@@ -115,8 +115,28 @@ subset, sparse, and shared-slot multicolor mappings and non-zero single-filament
 paint indices continue to report `hardware_start_validated: false`. See the
 [multicolor workflow](docs/usage.md#plan-and-start-a-multicolor-print).
 
+The source CLI also includes experimental LAN camera access (`camera status`,
+`camera snapshot`, and `camera pipe`) over pinned MQTT discovery (`info` and
+`peripherie`) and strictly host-validated local port `18088` HTTP-FLV reads
+with strict token redaction. `camera status` is strictly read-only without
+opening port `18088`; `camera snapshot` pipes validated FLV bytes over `stdin`
+into an optional external `ffmpeg` binary and writes JPEG/PNG frames
+atomically; `camera pipe` streams raw FLV bytes directly to `stdout` with zero
+external video dependencies (rejecting `--json`). Both capture commands use
+read-only-first access with an optional single-shot `video/startCapture` +
+best-effort `video/stopCapture` cleanup fallback (`--no-start-capture` disables
+fallback). End-to-end live CLI verification on Kobra X model 20030 / firmware 2.0.2.2
+(2026-11-25) confirmed `camera status` (text/`--json`), `camera pipe` (direct
+read-only FLV delivery, `--max-bytes`, broken-pipe exit `0`, `SIGINT` exit
+`130`, and `startCapture`/`stopCapture` transitions), and `camera snapshot`
+(1280×720 JPEG and PNG frames via `ffmpeg 7.1.5`, existing-file refusal, and
+`--overwrite --no-start-capture`), so camera operations report
+`hardware_camera_validated: true` on `20030` / `2.0.2.2`. See
+[camera inspection and capture](docs/usage.md#inspect-and-capture-camera-video).
+
 Remaining work:
 
+- Qualify post-reboot cold-start camera behavior on Kobra X firmware 2.0.2.2 (the read-only-first + automatic `startCapture`/`stopCapture` fallback already handles both direct and cold-start states).
 - Qualify attempt identity and terminal signals if future firmware exposes them (firmware 2.0.2.2 reports `task_id: "-1"` and empty `last_project` after both normal completion and cancellation).
 - Investigate stored-file download support separately (live Kobra X stored-file deletion wire report and `files list` removal were verified on 2026-11-23; `hardware_delete_validated` remains `false` because byte-for-byte local state preservation was verified offline).
 - Expand hardware coverage beyond `PLA High Speed` with `auto-leveling on` and vibration/flow off (single-filament slot 3 `0=3`, other materials, and other preparation settings).

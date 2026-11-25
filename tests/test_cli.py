@@ -20,6 +20,7 @@ class CommandTreeTests(unittest.TestCase):
     def test_every_leaf_has_help_without_operations(self):
         leaves = [("printer", c) for c in ("pair", "list", "info", "use", "remove")]
         leaves += [("slots", "list")]
+        leaves += [("camera", c) for c in ("status", "snapshot", "pipe")]
         leaves += [("files", c) for c in ("list", "info", "upload", "delete")]
         leaves += [("gcode", "inspect"), ("print", "plan"), ("print", "start"), ("print", "watch"),
                    ("print", "pause"), ("print", "resume"), ("print", "cancel")]
@@ -34,7 +35,7 @@ class CommandTreeTests(unittest.TestCase):
 
     def test_removed_commands_and_missing_groups_fail_before_access(self):
         for argv in (["file", "x"], ["upload", "x"], ["inspect", "x"], ["start", "x"],
-                     ["slots"], ["files"], ["printer"], ["gcode"], ["print"], ["jobs"],
+                     ["slots"], ["camera"], ["files"], ["printer"], ["gcode"], ["print"], ["jobs"],
                      ["status", "--printer", "bench"], ["--print", "bench", "status"]):
             with self.subTest(argv=argv), patch("kobra_lan.cli.Registry") as registry:
                 with contextlib.redirect_stdout(io.StringIO()):
@@ -62,6 +63,10 @@ class CommandTreeTests(unittest.TestCase):
             (["files"], ("delete", "read-only", "idle printer", "--execute")),
             (["files", "delete"], ("idle printer", "no active job", "local receipts and markers",
                                    "files list", "Do not resend blindly", "hardware_delete_validated: false", "--execute")),
+            (["camera"], ("status", "snapshot", "pipe", "startCapture", "--no-start-capture")),
+            (["camera", "status"], ("Read-only", "18088", "hardware_camera_validated: true")),
+            (["camera", "snapshot"], ("--output PATH", "--timeout SECONDS", "--overwrite", "--no-start-capture", "ffmpeg")),
+            (["camera", "pipe"], ("--timeout SECONDS", "--max-bytes BYTES", "--no-start-capture", "--json")),
         ):
             with self.subTest(argv=argv), patch("kobra_lan.cli.Registry") as registry:
                 out = io.StringIO()
@@ -140,7 +145,12 @@ class SafeArgumentTests(unittest.TestCase):
     def test_hostile_inputs_never_echo_or_open_access(self):
         import json
         secret = "https://example.test/?token=SYNTHETIC_PRIVATE\x1b[31m"
-        cases = [[secret], ["slots", secret], ["files", secret], ["printer", "pair"],
+        cases = [[secret], ["slots", secret], ["camera", secret], ["files", secret], ["printer", "pair"],
+                 ["camera", "snapshot"],
+                 ["camera", "snapshot", "--output", "frame.bmp"],
+                 ["camera", "snapshot", "--output", "frame.jpg", "--timeout", "0"],
+                 ["camera", "snapshot", "--output", "frame.jpg", "--timeout", "61"],
+                 ["camera", "snapshot", "--output", "frame.jpg", "--timeout", secret],
                  ["files", "upload", secret],
                  ["files", "upload", secret, "--execute", "--sha256", secret],
                  ["files", "delete", secret],
@@ -298,6 +308,124 @@ class SafeArgumentTests(unittest.TestCase):
                         self.assertIn("Hardware control validated: yes", rendered)
                         if expected_code is not None:
                             self.assertIn(f"Error ({expected_code}):", rendered)
+
+
+class CameraCliTests(unittest.TestCase):
+    def test_camera_pipe_rejects_global_json_before_target_lookup(self):
+        import json
+        out, err = io.StringIO(), io.StringIO()
+        with patch("kobra_lan.cli.Registry") as registry, \
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            self.assertEqual(main(["--json", "camera", "pipe"]), 2)
+        registry.assert_not_called()
+        self.assertEqual(err.getvalue(), "")
+        envelope = json.loads(out.getvalue())
+        self.assertEqual(envelope["schema_version"], 1)
+        self.assertFalse(envelope["ok"])
+        self.assertEqual(envelope["error"]["code"], "invalid_arguments")
+
+    def test_camera_pipe_routes_errors_and_interrupt_to_stderr_only(self):
+        from kobra_lan.camera import CameraOperationError
+
+        # Bad args without --json -> stderr only, empty stdout, exit 2.
+        out, err = io.StringIO(), io.StringIO()
+        with patch("kobra_lan.cli.Registry") as registry, \
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            self.assertEqual(main(["camera", "pipe", "--timeout", "0"]), 2)
+        registry.assert_not_called()
+        self.assertEqual(out.getvalue(), "")
+        self.assertIn("Error (invalid_arguments):", err.getvalue())
+
+        # Operational error -> stderr only, empty stdout, exit 3.
+        out, err = io.StringIO(), io.StringIO()
+        out.buffer = io.BytesIO()
+        with patch("kobra_lan.cli.Registry") as registry, \
+                patch("kobra_lan.cli.camera_pipe", side_effect=CameraOperationError("stream unavailable")), \
+                patch("kobra_lan.cli.sys.stdout", out), contextlib.redirect_stderr(err):
+            registry.return_value.access.return_value.__enter__.return_value = (object(), {})
+            self.assertEqual(main(["camera", "pipe"]), 3)
+        self.assertEqual(out.getvalue(), "")
+        self.assertIn("Error (operation_failed): stream unavailable", err.getvalue())
+
+        # KeyboardInterrupt -> stderr notice, exit 130.
+        out, err = io.StringIO(), io.StringIO()
+        out.buffer = io.BytesIO()
+        with patch("kobra_lan.cli.Registry") as registry, \
+                patch("kobra_lan.cli.camera_pipe", side_effect=KeyboardInterrupt()), \
+                patch("kobra_lan.cli.sys.stdout", out), contextlib.redirect_stderr(err):
+            registry.return_value.access.return_value.__enter__.return_value = (object(), {})
+            self.assertEqual(main(["camera", "pipe"]), 130)
+        self.assertEqual(out.getvalue(), "")
+        self.assertIn("interrupted", err.getvalue().lower())
+
+        # Success / broken pipe -> exit 0, no text envelope on stdout.
+        out, err = io.StringIO(), io.StringIO()
+        out.buffer = io.BytesIO()
+        with patch("kobra_lan.cli.Registry") as registry, \
+                patch("kobra_lan.cli.camera_pipe", return_value={"bytes_written": 16, "broken_pipe": True}) as pipe_fn, \
+                patch("kobra_lan.cli.sys.stdout", out), contextlib.redirect_stderr(err):
+            registry.return_value.access.return_value.__enter__.return_value = (object(), {})
+            self.assertEqual(main(["camera", "pipe", "--max-bytes", "65536", "--no-start-capture"]), 0)
+        pipe_fn.assert_called_once()
+        self.assertEqual(pipe_fn.call_args.kwargs["max_bytes"], 65536)
+        self.assertFalse(pipe_fn.call_args.kwargs["allow_start_capture"])
+        self.assertEqual(out.getvalue(), "")
+        self.assertEqual(err.getvalue(), "")
+
+    def test_camera_status_and_snapshot_render_in_text_and_json_and_precheck_ffmpeg(self):
+        import json
+        import tempfile
+        from pathlib import Path
+
+        status_payload = {
+            "device_digest": "a" * 64,
+            "model": "Anycubic Kobra X",
+            "firmware": "2.0.2.2",
+            "printer_state": "free",
+            "camera_present": True,
+            "timelapse_supported": True,
+            "stream_url_announced": True,
+            "stream_protocol": "http-flv",
+            "stream_port": 18088,
+            "experimental": True,
+            "hardware_camera_validated": True,
+        }
+        for mode in ([], ["--json"]):
+            out, err = io.StringIO(), io.StringIO()
+            with patch("kobra_lan.cli.Registry") as registry, \
+                    patch("kobra_lan.cli.camera_status", return_value=status_payload) as status_fn, \
+                    contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                registry.return_value.access.return_value.__enter__.return_value = (object(), {})
+                self.assertEqual(main([*mode, "camera", "status"]), 0)
+            status_fn.assert_called_once()
+            self.assertEqual(err.getvalue(), "")
+            if mode:
+                report = json.loads(out.getvalue())
+                self.assertTrue(report["ok"])
+                self.assertEqual(report["result"]["stream_port"], 18088)
+                self.assertTrue(report["result"]["hardware_camera_validated"])
+            else:
+                self.assertIn("Camera present: yes", out.getvalue())
+                self.assertIn("Hardware camera validated: yes", out.getvalue())
+
+        # Missing ffmpeg on camera snapshot exits 3 before Registry lookup.
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "bed.jpg"
+            for mode in ([], ["--json"]):
+                out, err = io.StringIO(), io.StringIO()
+                with patch("kobra_lan.cli.Registry") as registry, \
+                        patch("kobra_lan.camera.shutil.which", return_value=None), \
+                        contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                    self.assertEqual(main([*mode, "camera", "snapshot", "--output", str(target)]), 3)
+                registry.assert_not_called()
+                self.assertEqual(err.getvalue(), "")
+                if mode:
+                    report = json.loads(out.getvalue())
+                    self.assertEqual(report["error"]["code"], "operation_failed")
+                    self.assertIn("ffmpeg", report["error"]["message"])
+                else:
+                    self.assertIn("Error (operation_failed):", out.getvalue())
+                    self.assertIn("ffmpeg", out.getvalue())
 
 
 class NamedOnlySetupTests(unittest.TestCase):

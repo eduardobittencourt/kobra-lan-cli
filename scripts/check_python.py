@@ -22,7 +22,7 @@ RUNTIME_LOCK = ROOT / "requirements-runtime.txt"
 SYNTHETIC_HOSTILE_URL = "https://example.test/?token=SYNTHETIC_PRIVATE"
 
 MODULES = {f"kobra_lan/{name}.py" for name in
-           ("__init__", "cli", "cli_output", "completions", "config", "control", "delete_file", "filaments",
+           ("__init__", "camera", "cli", "cli_output", "completions", "config", "control", "delete_file", "filaments",
             "jobs", "mqtt", "printer", "qualification", "start", "upload", "provisioning", "pairing", "profiles",
             "diagnostics", "watch")}
 DOCS = {
@@ -144,6 +144,19 @@ def main():
     slots_list_help = subprocess.check_output([str(command), "slots", "list", "--help"],
                                               cwd=outside, env=probe_env, text=True)
     assert "onboard" in slots_list_help.lower()
+    camera_help = subprocess.check_output([str(command), "camera", "--help"],
+                                          cwd=outside, env=probe_env, text=True)
+    assert all(word in camera_help for word in ("status", "snapshot", "pipe"))
+    camera_snap_help = subprocess.check_output([str(command), "camera", "snapshot", "--help"],
+                                               cwd=outside, env=probe_env, text=True)
+    assert all(flag in camera_snap_help for flag in ("--output", "--timeout", "--overwrite", "--no-start-capture"))
+    camera_pipe_help = subprocess.check_output([str(command), "camera", "pipe", "--help"],
+                                               cwd=outside, env=probe_env, text=True)
+    assert all(flag in camera_pipe_help for flag in ("--timeout", "--max-bytes", "--no-start-capture"))
+    pipe_json_fail = subprocess.run([str(command), "--json", "camera", "pipe"],
+                                    cwd=outside, env=probe_env, text=True, capture_output=True)
+    assert pipe_json_fail.returncode == 2 and not pipe_json_fail.stderr
+    assert json.loads(pipe_json_fail.stdout)["error"]["code"] == "invalid_arguments"
     files_help = subprocess.check_output([str(command), "files", "--help"],
                                          cwd=outside, env=probe_env, text=True)
     assert "delete" in files_help

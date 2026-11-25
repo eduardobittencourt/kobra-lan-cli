@@ -4,7 +4,18 @@ import sys
 from pathlib import Path
 
 from . import __version__
-from .cli_output import emit
+from .camera import (
+    DEFAULT_SNAPSHOT_TIMEOUT,
+    MAX_PIPE_BYTES,
+    MAX_PIPE_TIMEOUT,
+    MAX_SNAPSHOT_TIMEOUT,
+    CameraArgumentError,
+    camera_pipe,
+    camera_snapshot,
+    camera_status,
+    validate_snapshot_request,
+)
+from .cli_output import emit, safe_text
 from .config import ProtocolError
 from .control import control_print, validate_filename
 from .delete_file import delete_file
@@ -20,6 +31,7 @@ from .qualification import (
     KOBRA_X,
     QUALIFICATION_SUMMARY,
     QUALIFIED_FIRMWARE,
+    is_camera_hardware_validated,
     is_control_hardware_validated,
     is_delete_hardware_validated,
     is_valid_onboard_slot,
@@ -42,6 +54,8 @@ class Parser(argparse.ArgumentParser):
             prog = self.prog
             if getattr(parsed, "command", None) == "print" and parsed.print_command in ("plan", "start"):
                 prog = f"{prog} print {parsed.print_command}"
+            elif getattr(parsed, "command", None) == "camera" and parsed.camera_command in ("status", "snapshot", "pipe"):
+                prog = f"{prog} camera {parsed.camera_command}"
             self.error("Unrecognized arguments", prog=prog)
         return parsed
 
@@ -50,6 +64,9 @@ class Parser(argparse.ArgumentParser):
         prog = prog or self.prog
         guidance = {
             "kobra-lan printer pair": "; supply --name NAME and --host IPv4",
+            "kobra-lan camera": "; choose status, snapshot, or pipe",
+            "kobra-lan camera snapshot": f"; supply --output PATH (.jpg, .jpeg, or .png) and optional --timeout (1 to {MAX_SNAPSHOT_TIMEOUT})",
+            "kobra-lan camera pipe": f"; --timeout accepts 1 to {MAX_PIPE_TIMEOUT} and --max-bytes accepts 1 to {MAX_PIPE_BYTES}",
             "kobra-lan files upload": "; review first with kobra-lan gcode inspect",
             "kobra-lan files delete": "; find a root filename with kobra-lan files list and supply --execute",
             "kobra-lan print plan": ". Supply --slot-map PAINT_INDEX=SLOT for each G-code paint index.",
@@ -83,20 +100,48 @@ def root_json(argv):
     return selected
 
 
-def watch_timeout(value):
+def argv_is_camera_pipe(argv):
+    """Detect whether the positional command tokens invoke `camera pipe`."""
+    index = 0
+    while index < len(argv):
+        token = argv[index]
+        if token == "--json":
+            index += 1
+        elif token in ("--config", "--printer", "--state-dir"):
+            index += 2
+        elif any(token.startswith(flag + "=") for flag in ("--config", "--printer", "--state-dir")):
+            index += 1
+        else:
+            break
+    return argv[index:index + 2] == ["camera", "pipe"]
+
+
+def _bounded_positive_int(value, maximum, label):
     if value.isascii() and value.isdecimal():
-        seconds = int(value)
-        if 1 <= seconds <= MAX_TIMEOUT:
-            return seconds
-    raise argparse.ArgumentTypeError("Invalid observation timeout")
+        parsed = int(value)
+        if 1 <= parsed <= maximum:
+            return parsed
+    raise argparse.ArgumentTypeError(f"Invalid {label}")
+
+
+def watch_timeout(value):
+    return _bounded_positive_int(value, MAX_TIMEOUT, "observation timeout")
+
+
+def camera_snapshot_timeout(value):
+    return _bounded_positive_int(value, MAX_SNAPSHOT_TIMEOUT, "snapshot timeout")
+
+
+def camera_pipe_timeout(value):
+    return _bounded_positive_int(value, MAX_PIPE_TIMEOUT, "pipe timeout")
+
+
+def camera_pipe_max_bytes(value):
+    return _bounded_positive_int(value, MAX_PIPE_BYTES, "max-bytes limit")
 
 
 def jobs_limit(value):
-    if value.isascii() and value.isdecimal():
-        limit = int(value)
-        if 1 <= limit <= MAX_LIMIT:
-            return limit
-    raise argparse.ArgumentTypeError("Invalid history limit")
+    return _bounded_positive_int(value, MAX_LIMIT, "history limit")
 
 
 def slot_map_entry(value):
@@ -119,6 +164,7 @@ def slot_map_entry(value):
 def build_parser():
     """Build the canonical command metadata without opening access or state."""
     slot_count = onboard_topology().slot_count
+    camera_validated = "true" if is_camera_hardware_validated(KOBRA_X.model_id, QUALIFIED_FIRMWARE) else "false"
     control_validated = "true" if is_control_hardware_validated(KOBRA_X.model_id, QUALIFIED_FIRMWARE) else "false"
     delete_validated = "true" if is_delete_hardware_validated(KOBRA_X.model_id, QUALIFIED_FIRMWARE) else "false"
     parser = Parser(prog="kobra-lan", description="Direct Kobra X LAN client; global options precede commands")
@@ -152,6 +198,40 @@ def build_parser():
     slots.add_parser("list", help=f"List onboard filament slots (1..{slot_count}); read-only",
                      description=f"Read-only onboard four-slot inventory on {QUALIFICATION_SUMMARY} "
                                  "(idle or printing). Reports slot numbering, status, material, color, and start availability.")
+    p = sub.add_parser("camera", help="Inspect camera status, capture a snapshot, or pipe raw FLV",
+                       description="status is read-only over pinned MQTT without touching port 18088. "
+                                   "snapshot and pipe attempt a direct read-only HTTP-FLV fetch first, falling back to "
+                                   "one video/startCapture + video/stopCapture pair unless --no-start-capture is supplied. "
+                                   "Stream URLs and tokens are never exposed.")
+    camera = p.add_subparsers(dest="camera_command", required=True)
+    camera.add_parser("status", help="Read-only camera presence, timelapse flag, and stream announcement",
+                      description=f"Read-only camera inspection on {QUALIFICATION_SUMMARY} "
+                                  f"(hardware_camera_validated: {camera_validated}). Queries pinned MQTT info and "
+                                  "peripherie without mutating printer state, opening port 18088, or exposing stream tokens.")
+    p = camera.add_parser("snapshot", help="Capture one JPEG or PNG frame via optional external ffmpeg",
+                          description=f"Experimental single-frame snapshot on {QUALIFICATION_SUMMARY} "
+                                      f"(hardware_camera_validated: {camera_validated}). Requires optional external ffmpeg "
+                                      "on PATH; pipes validated FLV bytes via stdin without passing stream URLs in argv. "
+                                      "Attempts direct read-only fetch first, falling back to startCapture/stopCapture "
+                                      "unless --no-start-capture is set.")
+    p.add_argument("--output", type=Path, required=True, metavar="PATH",
+                   help="Destination .jpg, .jpeg, or .png path (refuses existing files without --overwrite)")
+    p.add_argument("--timeout", type=camera_snapshot_timeout, default=DEFAULT_SNAPSHOT_TIMEOUT, metavar="SECONDS",
+                   help=f"Snapshot deadline in seconds (1 to {MAX_SNAPSHOT_TIMEOUT}, default {DEFAULT_SNAPSHOT_TIMEOUT})")
+    p.add_argument("--overwrite", action="store_true", help="Replace an existing destination file atomically")
+    p.add_argument("--no-start-capture", action="store_true",
+                   help="Fail instead of falling back to MQTT video/startCapture when direct stream read fails")
+    p = camera.add_parser("pipe", help="Stream raw HTTP-FLV bytes to stdout without external binaries",
+                          description=f"Experimental raw HTTP-FLV stdout stream on {QUALIFICATION_SUMMARY} "
+                                      f"(hardware_camera_validated: {camera_validated}). Requires no external video binaries "
+                                      "and rejects global --json. Attempts direct read-only fetch first, falling back to "
+                                      "startCapture/stopCapture unless --no-start-capture is set. Diagnostics use stderr only.")
+    p.add_argument("--timeout", type=camera_pipe_timeout, default=None, metavar="SECONDS",
+                   help=f"Optional streaming deadline in seconds (1 to {MAX_PIPE_TIMEOUT})")
+    p.add_argument("--max-bytes", type=camera_pipe_max_bytes, default=None, metavar="BYTES",
+                   help=f"Optional raw byte cap (1 to {MAX_PIPE_BYTES})")
+    p.add_argument("--no-start-capture", action="store_true",
+                   help="Fail instead of falling back to MQTT video/startCapture when direct stream read fails")
     p = sub.add_parser("files", help="Inspect storage, upload, or delete a stored file",
                        description="list/info are read-only. upload requires a reviewed hash and --execute. "
                                    "Experimental delete requires an idle printer and --execute.")
@@ -245,17 +325,34 @@ def build_parser():
     return parser
 
 
+def _emit_error(json_mode, pipe_mode, *, code, message, partial=None):
+    if pipe_mode and not json_mode:
+        print(f"Error ({code}): {safe_text(message)}", file=sys.stderr)
+        return
+    emit(json_mode, partial, code=code, message=message)
+
+
 def main(argv=None):
     """Dispatch CLI operations using the established exit classes."""
     parser = build_parser()
     argv = list(sys.argv[1:] if argv is None else argv)
     json_mode = root_json(argv)
+    pipe_mode = (not json_mode) and argv_is_camera_pipe(argv)
     watch = None
     state_dir = None
     try:
         args = parser.parse_args(argv)
         json_mode = args.json
         state_dir = args.state_dir
+        if args.command == "camera" and args.camera_command == "pipe":
+            if json_mode:
+                raise ArgumentFailure("camera pipe writes raw binary FLV to stdout and rejects --json")
+            pipe_mode = True
+        if args.command == "camera" and args.camera_command == "snapshot":
+            try:
+                validate_snapshot_request(args.output, timeout=args.timeout, overwrite=args.overwrite)
+            except CameraArgumentError as error:
+                raise ArgumentFailure(str(error)) from None
         if args.command == "files" and args.files_command == "upload":
             if not re.fullmatch(r"[0-9a-fA-F]{64}", args.sha256):
                 raise ArgumentFailure("Upload requires a full --sha256 from gcode inspect and --execute")
@@ -340,13 +437,23 @@ def main(argv=None):
             if result is None:
                 result = watch.result("unknown", "deadline_expired")
             result = watch.record(result, args.state_dir)
+        elif pipe_mode:
+            with registry.access(args.config, args.selected_printer) as (config, _):
+                camera_pipe(
+                    config,
+                    sys.stdout.buffer,
+                    timeout=args.timeout,
+                    max_bytes=args.max_bytes,
+                    allow_start_capture=not args.no_start_capture,
+                )
+            return 0
         else:
             with registry.access(args.config, args.selected_printer) as (config, source):
                 result = operate(args, config)
         emit(json_mode, result)
         return 0
     except ArgumentFailure as error:
-        emit(json_mode, code="invalid_arguments", message=str(error))
+        _emit_error(json_mode, pipe_mode, code="invalid_arguments", message=str(error))
         return 2
     except ProtocolError as error:
         status = getattr(error, "exit_code", 2)
@@ -354,22 +461,39 @@ def main(argv=None):
             status = 2
         code = "interrupted" if status == 130 else ("operation_failed" if status == 3 else "validation_failed")
         partial = watch.record(watch.partial(code), state_dir) if watch else getattr(error, "result", None)
-        emit(json_mode, partial, code=code, message=str(error))
+        _emit_error(json_mode, pipe_mode, code=code, message=str(error), partial=partial)
         return status
     except (PairingLocalError, ProfileLocalError) as error:
-        emit(json_mode, getattr(error, "result", None), code="operation_failed", message=str(error))
+        _emit_error(json_mode, pipe_mode, code="operation_failed", message=str(error),
+                    partial=getattr(error, "result", None))
         return 3
     except (ImportError, OSError, ValueError, TypeError, KeyError):
         partial = watch.record(watch.partial("operation_failed"), state_dir) if watch else None
-        emit(json_mode, partial,
-             code="operation_failed", message="Local configuration or network operation failed; no automatic retry")
+        _emit_error(json_mode, pipe_mode, code="operation_failed",
+                    message="Local configuration or network operation failed; no automatic retry",
+                    partial=partial)
         return 3
     except KeyboardInterrupt:
+        if pipe_mode:
+            print("Error (interrupted): Camera pipe interrupted", file=sys.stderr)
+            return 130
         if watch is None:
             raise
         emit(json_mode, watch.record(watch.partial("interrupted"), state_dir),
              code="interrupted", message="Print observation interrupted")
         return 130
+
+
+def _operate_camera(args, config):
+    if args.camera_command == "status":
+        return camera_status(config)
+    return camera_snapshot(
+        config,
+        args.output,
+        timeout=args.timeout,
+        overwrite=args.overwrite,
+        allow_start_capture=not args.no_start_capture,
+    )
 
 
 def _operate_files(args, config):
@@ -400,6 +524,8 @@ def operate(args, config):
         return snapshot(config)
     if args.command == "slots":
         return list_slots(config)
+    if args.command == "camera":
+        return _operate_camera(args, config)
     if args.command == "files":
         return _operate_files(args, config)
     if args.command == "print":

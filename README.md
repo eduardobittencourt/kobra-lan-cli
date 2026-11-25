@@ -41,8 +41,12 @@ cd kobra-lan-cli
 # Read-only operations on the selected printer:
 ./kobra-lan status
 ./kobra-lan slots list
+./kobra-lan camera status
 ./kobra-lan files list
 ./kobra-lan files info agent-model.gcode
+# Capture a single camera frame (requires optional external ffmpeg) or pipe raw FLV:
+./kobra-lan camera snapshot --output /tmp/bed.jpg
+./kobra-lan camera pipe --max-bytes 65536 > /tmp/sample.flv
 # Upload only when authorized, using the inspected SHA-256:
 ./kobra-lan files upload /path/to/model.gcode --name agent-model.gcode --sha256 FILE_HASH --execute
 # Review a read-only experimental start plan:
@@ -73,10 +77,11 @@ with `--reprint-from PREVIOUS_ATTEMPT_ID` on both commands. See the
 [reprint workflow](docs/usage.md#deliberately-reprint-a-stored-file) for eligibility and safety checks.
 
 The canonical tree is `printer pair|list|info|use|remove`, `doctor`, `status`,
-`slots list`, `files list|info|upload|delete`, `gcode inspect`,
-`print plan|start|watch|pause|resume|cancel`, `jobs list|info`, and
-`completion bash|zsh|fish`. Group `--help` describes read-only inventory,
-local history inspection, observation, planning and execution controls.
+`slots list`, `camera status|snapshot|pipe`, `files list|info|upload|delete`,
+`gcode inspect`, `print plan|start|watch|pause|resume|cancel`, `jobs list|info`,
+and `completion bash|zsh|fish`. Group `--help` describes read-only inventory,
+camera inspection/capture, local history inspection, observation, planning and
+execution controls.
 `slots list` inspects the qualified Kobra X onboard four-slot filament box
 (slots `1..4`, idle or printing) over one pinned MQTT session without writing
 local state; `gcode inspect` reports parsed `paint_info` filaments/colors,
@@ -102,11 +107,26 @@ and read `material_type` per mapping entry on `jobs info`.
 Upload requires both execution controls and never starts a print. Inspection and
 job history are local and read-only; planning queries the printer without changing
 it. Text is the default; root `--json` selects the versioned machine contract.
-Exit codes are 0 (success), 2 (arguments/protocol/validation), 3
-(configuration/network failure), and 130 (interrupted print observation,
-lifecycle control, or stored-file deletion after publish).
+Exit codes are 0 (success, or `camera pipe` downstream pipe closure), 2
+(arguments/protocol/validation), 3 (configuration/dependency/network failure),
+and 130 (interrupted print observation, `camera pipe`, lifecycle control, or
+stored-file deletion after publish).
 Global `--config`, `--printer`, `--state-dir` and `--json` precede the command.
 These examples describe the workflow; automated checks use synthetic fixtures.
+
+`camera status` performs strictly read-only inspection over pinned MQTT (`info`
+and `peripherie`) without opening port `18088` or exposing stream URLs or
+tokens. `camera snapshot --output PATH` captures one JPEG or PNG frame by
+piping validated local HTTP-FLV bytes via `stdin` into an optional external
+`ffmpeg` binary (never passing stream URLs in process arguments) and writes the
+file atomically; `camera pipe` streams raw validated FLV bytes directly to
+`stdout` with zero external video dependencies and rejects global `--json` with
+exit 2 before target lookup. Both capture commands attempt a direct read-only
+stream read first and fall back to one MQTT `video/startCapture` + best-effort
+`video/stopCapture` cleanup pair only when needed (pass `--no-start-capture` to
+disable fallback). Camera results carry `experimental: true` and
+`hardware_camera_validated: true` on qualified Kobra X model 20030 / firmware
+2.0.2.2. See [camera inspection and capture](docs/usage.md#inspect-and-capture-camera-video).
 
 `files delete <name> --execute` removes one root-level file from an idle
 Kobra X with no active job. It preserves local receipts, attempt markers, and

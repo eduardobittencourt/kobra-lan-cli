@@ -201,8 +201,8 @@ class MQTT:
     def query(self, kind, action="query", data=None, *, require_fresh=False):
         # Keep this public method strictly read-only.
         allowed = {("info", "query"), ("print", "query"), ("status", "query"),
-                   ("multiColorBox", "getInfo"), ("file", "fileDetails"),
-                   ("file", "listLocal")}
+                   ("peripherie", "query"), ("multiColorBox", "getInfo"),
+                   ("file", "fileDetails"), ("file", "listLocal")}
         if (kind, action) not in allowed:
             raise ProtocolError("Unqualified MQTT command")
         self.begin_stage('status')
@@ -416,3 +416,79 @@ class MQTT:
             if on_report is not None:
                 on_report(report)
         return {"ack": ack, "report": report}
+
+    def _video_capture_once(self, action, terminal_state, intermediate_states=frozenset()):
+        self.begin_stage("camera")
+        msgid = str(uuid.uuid4())
+        sent_timestamp = int(time.time() * 1000)
+        message = {
+            "type": "video",
+            "action": action,
+            "msgid": msgid,
+            "timestamp": sent_timestamp,
+            "data": None,
+        }
+        topic = f"{BASE}/slicer/printer/{self.config.type_id}/{self.config.printer_id}/video"
+        self.sock.settimeout(self.remaining())
+        self.sock.sendall(packet(0x30, string(topic) + json.dumps(message, separators=(",", ":")).encode()))
+        ack = report = None
+        states = []
+        while ack is None or report is None:
+            header, body = self.receive(self.stage_deadline)
+            if header >> 4 != 3:
+                continue
+            response_topic, data = self._publish_fields(header, body)
+            if header & 1:
+                continue
+            is_ack = response_topic.endswith("/response")
+            if not is_ack and not response_topic.endswith("/video/report"):
+                continue
+            try:
+                result = json.loads(data)
+            except (ValueError, RecursionError):
+                raise ProtocolError("Malformed MQTT video response") from None
+            if not isinstance(result, dict):
+                raise ProtocolError("Malformed MQTT video response")
+            correlated = result.get("msgid") == msgid
+            if is_ack:
+                if not correlated:
+                    continue
+                code = result.get("code")
+                if type(code) is not int or code != 0:
+                    raise ProtocolError("Video capture command was rejected; do not retry automatically")
+                if ack is None:
+                    ack = {"code": 0, "msgid": msgid}
+                continue
+            if result.get("type") != "video" or result.get("action") != action:
+                continue
+            stamp = result.get("timestamp")
+            fresh = (type(stamp) in (int, float)
+                     and sent_timestamp <= stamp <= int(time.time() * 1000) + 5000)
+            if not correlated and not (ack is not None and fresh):
+                continue
+            code = result.get("code", 0)
+            state = result.get("state")
+            if type(code) is not int or code not in (0, 200):
+                raise ProtocolError("Video capture command was rejected; do not retry automatically")
+            if state in intermediate_states:
+                states.append(state)
+                continue
+            if state != terminal_state:
+                raise ProtocolError("Video capture command was rejected; do not retry automatically")
+            states.append(state)
+            report = {"action": action, "state": terminal_state, "states": states}
+            if "code" in result:
+                report["code"] = code
+        return {"ack": ack, "report": report}
+
+    def start_video_capture_once(self):
+        """Send one video/startCapture request and wait for ACK and pushStarted."""
+        return self._video_capture_once(
+            "startCapture",
+            "pushStarted",
+            intermediate_states=frozenset({"initSuccess", "joinSuccess"}),
+        )
+
+    def stop_video_capture_once(self):
+        """Send one video/stopCapture request and wait for ACK and pushStopped."""
+        return self._video_capture_once("stopCapture", "pushStopped")
