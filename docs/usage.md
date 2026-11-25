@@ -522,7 +522,7 @@ the same `printer_id` and `--state-dir` see identical local history.
   Other clients or state directories do not share this lock, and firmware-side
   atomic rejection of an existing filename has not been established.
 - Existing remote files are not overwritten. Names must be safe ASCII basenames; only `.gcode` files up to 128 MiB are accepted.
-- Remote verification checks filename, size, layers, and printer model. The endpoints used did not provide a checksum of stored bytes: `remote_byte_hash_verified=false` explicitly indicates that the internal copy was not downloaded and independently hashed.
+- Remote verification checks filename, size, layers, and printer model. The endpoints used did not provide a checksum of stored bytes: `remote_byte_hash_verified=false` explicitly indicates that the internal copy was not downloaded and independently hashed. Investigation of stock Kobra X model 20030 / firmware 2.0.2.2 LAN mode confirmed no HTTP or MQTT endpoint for downloading stored `.gcode` files (or stored timelapse `.mp4` videos); `files download` is therefore unsupported on this firmware (see [validation evidence](#validation-evidence)).
 - Firmware 2.0.2.2 sends a correlated ACK followed by a report with a different msgid. Queries are synchronous and accept a fresh report after the ACK. An idle printer does not produce a report for `print/query`; status uses `info/report`.
 - There is no transactional lock against another computer between a query and an action. Credentials/pins may change after firmware or LAN-mode changes; reassess provisioning.
 
@@ -577,6 +577,30 @@ refusal exit `2` without `--overwrite`, atomic replacement with
 `hardware_camera_validated: true` on Kobra X model 20030 / firmware 2.0.2.2
 (post-reboot cold-start behavior without prior capture remains unverified and
 is covered by the automatic `startCapture`/`stopCapture` fallback).
+
+Stored-file download investigation on 2026-11-25 evaluated whether stock Kobra X
+model 20030 / firmware 2.0.2.2 exposes a LAN mechanism to retrieve stored
+`.gcode` files (or stored timelapse `.mp4` videos) back from printer storage.
+Static inspection of official `AnycubicSlicerNext` `1:2.0.0.6` (`/usr/lib/libmach_mqtt.so`,
+`/usr/bin/AnycubicSlicerNext`, `/usr/lib/libWorkbench.so`, and
+`/usr/lib/libcloud_sdk_cpp.so`) established that LAN `mach_mqtt::FDM::Control`
+operations cover only `listLocal`, `listUdisk`, `fileDetails`, `deleteLocal`,
+`renameFile`, `listVideo`, and `deleteVideo`, and `urls` exposes only
+`fileUploadurl` and `rtspUrl`; download URL helpers target cloud REST APIs
+only. Public protocol references (`Nino6689/anycubic-lan` and
+`stribor/anycubic_kobrax`) likewise expose no LAN download route. Strictly
+read-only live probes against Kobra X `20030` / `2.0.2.2` confirmed that only
+TCP ports `9883` (MQTT/TLS), `18088` (HTTP-FLV camera), and `18910` (LAN HTTP)
+were open across 17 common ports; `GET /gcode_upload?s=<token>` returned
+code `19004` (`Only POST method is allowed`); all candidate download, file,
+timelapse, and thumbnail paths on ports `18910` and `18088` returned HTTP `404`;
+candidate MQTT `file/*` download actions received only the generic empty
+`/response` ACK (`code: 0`) without a `/file/report`; and `listLocal`'s
+`fileKey` equals `md5(filename)` rather than a content checksum or download
+handle (`file/fileDetails` exposes embedded base64 preview images when present
+in a G-code file, and `file/listUdisk` / `file/listVideo` expose read-only
+metadata only). Stored-file download (`files download`) is therefore deferred
+as unsupported on stock firmware `2.0.2.2`.
 
 ## Saved target selection
 

@@ -2,6 +2,73 @@
 
 ## Unreleased
 
+## 0.6.0
+
+- Experimental release for testing and feedback; the CLI and JSON automation
+  interface remain under active development. Breaking changes are expected
+  during 0.x and are documented per version.
+- Distribute a downloadable `.deb` and `SHA256SUMS` through GitHub Releases,
+  with package acceptance on Debian 13 and Ubuntu 24.04, amd64. Runtime
+  dependencies remain Python >=3.11 and `cryptography>=41`; Debian adds
+  optional `Suggests: ffmpeg` for `camera snapshot`. There is no hosted apt
+  repository or automatic update channel.
+- Breaking: replace `--slot` with repeatable `--slot-map PAINT_INDEX=SLOT` on
+  `print plan` and `print start`. Expose `slot_mapping` in place of
+  `selected_slot` on `print plan`, `print start`, and `jobs info`, and report
+  `material_type` per mapping entry on `jobs info`. Existing receipts and
+  reprint chains remain readable in place without migration.
+- Add read-only `print watch` for an active job, saving sanitized local
+  observations under `--state-dir` and reporting `unknown` when firmware
+  telemetry cannot establish terminal outcomes (Kobra X firmware 2.0.2.2
+  reports `task_id: "-1"` and empty `last_project`).
+- Add reviewed intentional reprints (`--reprint-from PREVIOUS_ATTEMPT_ID` on
+  `print plan` and `print start`) with durable attempt-keyed successor markers
+  while preserving legacy file-keyed upload and first-start markers/receipts.
+- Add offline read-only local job history (`jobs list`, `jobs info`) over local
+  start receipts/markers, correlated upload provenance, and saved watch
+  observations (`scope: "local_state_only"`,
+  `direct_printer_history_available: false`, `terminal_outcomes_verified: false`).
+- Add experimental guarded print lifecycle controls (`print pause`,
+  `print resume`, `print cancel`) requiring `--execute`, optional `--filename`
+  active-job guards, strict state preconditions, shared per-device locking,
+  bounded post-ACK verification, and non-replaying uncertainty reporting
+  (`experimental: true`, `hardware_control_validated: true` on Kobra X model
+  20030 / firmware 2.0.2.2).
+- Add experimental guarded stored-file deletion (`files delete <name> --execute`)
+  for an idle printer with no active job, preserving local receipts, attempt
+  markers, and watch observations (`experimental: true`,
+  `hardware_delete_validated: false`; live wire removal and `files list`
+  absence confirmed, byte-for-byte local state preservation verified offline).
+- Add read-only onboard four-slot filament inventory (`slots list`),
+  multicolor-aware offline `gcode inspect` (`paint_info`, `T<n>` tools,
+  optional weights, `multicolor`, `single_filament_start_compatible`), and
+  reviewed multicolor `print plan`/`print start --slot-map`. Live 4-color
+  contiguous 1:1 `PLA High Speed` execution (`0=1, 1=2, 2=3, 3=4`) is
+  hardware-validated on Kobra X model 20030 / firmware 2.0.2.2; non-identity,
+  sparse, subset, shared-slot, and single-filament slot 3 starts remain
+  `hardware_start_validated: false`.
+- Add experimental LAN camera access (`camera status`, `camera snapshot`,
+  `camera pipe`) over pinned MQTT (`info`, `peripherie`) and host-validated
+  local port 18088 HTTP-FLV reads with strict token redaction, read-only-first
+  acquisition with automatic single-shot `video/startCapture`/`stopCapture`
+  fallback (`--no-start-capture` disables fallback), optional external `ffmpeg`
+  piped over `stdin` for atomic JPEG/PNG snapshots, and zero-dependency raw FLV
+  stdout piping (`experimental: true`, `hardware_camera_validated: true` on
+  Kobra X model 20030 / firmware 2.0.2.2).
+- Centralize hardware qualification rules in `kobra_lan/qualification.py` and
+  publish the maintained compatibility matrix in `docs/compatibility.md`.
+- Record the 2026-11-25 stored-file download investigation for Kobra X model
+  20030 / firmware 2.0.2.2: stock LAN mode exposes no HTTP or MQTT endpoint to
+  download stored `.gcode` files (or timelapse `.mp4` videos) from printer
+  storage, so `files download` is deferred unless future firmware adds support.
+- Preserve private profiles, credentials, receipts, attempt markers, watch
+  observations, and permissions during normal operations and package upgrades.
+  Never clear markers or automatically repeat uncertain actions. Hardware
+  qualification remains limited to Kobra X model 20030 / firmware 2.0.2.2 and
+  the recorded material, slot, preparation, and camera observations; package
+  installation does not pair, upload, start a print, or migrate a live checkout
+  installation.
+
 ## 0.5.0
 
 - Experimental release for testing and feedback; the CLI and JSON automation
