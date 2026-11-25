@@ -729,7 +729,40 @@ class CameraSnapshotAndPipeTests(unittest.TestCase):
             + _png_chunk(b"IDAT", zlib.compress(b"\x00" * (4 * 1024 * 1024)))
             + _png_chunk(b"IEND", b"")
         )
-        self.assertIsNone(camera.parse_image_dimensions(oversized_idat_png, "png"))
+        decomp_stats = {"max_lengths": [], "total_out": 0, "flush_called": False}
+        real_decompressobj = zlib.decompressobj
+
+        class BoundedDecompProxy:
+            def __init__(self):
+                self._inner = real_decompressobj()
+
+            def decompress(self, data, max_length=0):
+                decomp_stats["max_lengths"].append(max_length)
+                out = self._inner.decompress(data, max_length)
+                decomp_stats["total_out"] += len(out)
+                return out
+
+            def flush(self, *args, **kwargs):
+                decomp_stats["flush_called"] = True
+                return self._inner.flush(*args, **kwargs)
+
+            @property
+            def eof(self):
+                return self._inner.eof
+
+            @property
+            def unconsumed_tail(self):
+                return self._inner.unconsumed_tail
+
+            @property
+            def unused_data(self):
+                return self._inner.unused_data
+
+        with patch("kobra_lan.camera.zlib.decompressobj", side_effect=BoundedDecompProxy):
+            self.assertIsNone(camera.parse_image_dimensions(oversized_idat_png, "png"))
+        self.assertFalse(decomp_stats["flush_called"])
+        self.assertEqual(decomp_stats["max_lengths"], [5])
+        self.assertLessEqual(decomp_stats["total_out"], 5)
 
         valid_jpeg = make_minimal_jpeg(1280, 720)
         self.assertEqual(camera.parse_image_dimensions(valid_jpeg, "jpeg"), (1280, 720))
