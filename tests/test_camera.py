@@ -3,6 +3,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import io
 import os
 from pathlib import Path
+import shutil
 import stat
 import struct
 import sys
@@ -28,7 +29,8 @@ def _png_chunk(chunk_type, payload):
 
 def make_minimal_png(width=640, height=360):
     ihdr_data = struct.pack("!IIBBBBB", width, height, 8, 2, 0, 0, 0)
-    idat_data = zlib.compress(b"\x00\x00\x00\x00")
+    raw_scanlines = (b"\x00" + b"\x00" * (width * 3)) * height
+    idat_data = zlib.compress(raw_scanlines)
     return (
         camera.PNG_MAGIC
         + _png_chunk(b"IHDR", ihdr_data)
@@ -38,13 +40,17 @@ def make_minimal_png(width=640, height=360):
 
 
 def make_minimal_jpeg(width=1280, height=720):
-    app0 = b"\xff\xe0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00"
-    sof0_payload = struct.pack("!BHHB", 8, height, width, 3) + b"\x01\x22\x00\x02\x11\x01\x03\x11\x01"
-    sof0 = b"\xff\xc0" + struct.pack("!H", len(sof0_payload) + 2) + sof0_payload
-    sos_payload = b"\x03\x01\x00\x02\x11\x03\x11\x00\x3f\x00"
-    sos = b"\xff\xda" + struct.pack("!H", len(sos_payload) + 2) + sos_payload + b"\x00"
-    eoi = b"\xff\xd9"
-    return b"\xff\xd8" + app0 + sof0 + sos + eoi
+    dqt = b"\xff\xdb" + struct.pack("!HB", 67, 0) + bytes([16] * 64)
+    sof0 = b"\xff\xc0" + struct.pack("!HBHHBBBB", 11, 8, height, width, 1, 1, 0x11, 0)
+    dht_dc = b"\xff\xc4" + struct.pack("!HB16sB", 20, 0x00, bytes([1] + [0] * 15), 0x00)
+    dht_ac = b"\xff\xc4" + struct.pack("!HB16sB", 20, 0x10, bytes([1] + [0] * 15), 0x00)
+    sos = b"\xff\xda" + struct.pack("!HBBBBBB", 8, 1, 1, 0x00, 0, 63, 0)
+    mcus = ((width + 7) // 8) * ((height + 7) // 8)
+    full_bytes, rem_bits = divmod(mcus * 2, 8)
+    scan = b"\x00" * full_bytes
+    if rem_bits:
+        scan += bytes([(1 << (8 - rem_bits)) - 1])
+    return b"\xff\xd8" + dqt + sof0 + dht_dc + dht_ac + sos + scan + b"\xff\xd9"
 
 
 def make_config(host="127.0.0.1"):
@@ -188,8 +194,16 @@ def write_fake_ffmpeg(directory: Path, mode="ok", argv_log: Path | None = None, 
         "import json, pathlib, sys, time\n"
         f"log_path = {log_path}\n"
         "if log_path is not None:\n"
-        "    pathlib.Path(log_path).write_text(json.dumps(sys.argv))\n"
+        "    with pathlib.Path(log_path).open('a', encoding='utf-8') as fh:\n"
+        "        fh.write(json.dumps(sys.argv) + '\\n')\n"
         f"mode = {mode!r}\n"
+        "if 'null' in sys.argv:\n"
+        "    img = sys.stdin.buffer.read()\n"
+        "    if mode == 'corrupt_verify':\n"
+        "        raise SystemExit(1)\n"
+        "    if img.startswith(b'\\x89PNG\\r\\n\\x1a\\n') or img.startswith(b'\\xff\\xd8\\xff'):\n"
+        "        raise SystemExit(0)\n"
+        "    raise SystemExit(1)\n"
         "if mode == 'sleep':\n"
         "    time.sleep(5)\n"
         "    raise SystemExit(0)\n"
@@ -700,6 +714,14 @@ class CameraSnapshotAndPipeTests(unittest.TestCase):
         self.assertIsNone(camera.parse_image_dimensions(valid_png[:33], "png"))
         # PNG missing IEND.
         self.assertIsNone(camera.parse_image_dimensions(valid_png[:-12], "png"))
+        # PNG with valid IHDR/CRCs/IEND but under-sized IDAT payload (only 4 decompressed bytes).
+        short_idat_png = (
+            camera.PNG_MAGIC
+            + _png_chunk(b"IHDR", struct.pack("!IIBBBBB", 640, 360, 8, 2, 0, 0, 0))
+            + _png_chunk(b"IDAT", zlib.compress(b"\x00\x00\x00\x00"))
+            + _png_chunk(b"IEND", b"")
+        )
+        self.assertIsNone(camera.parse_image_dimensions(short_idat_png, "png"))
 
         valid_jpeg = make_minimal_jpeg(1280, 720)
         self.assertEqual(camera.parse_image_dimensions(valid_jpeg, "jpeg"), (1280, 720))
@@ -708,6 +730,30 @@ class CameraSnapshotAndPipeTests(unittest.TestCase):
         self.assertIsNone(camera.parse_image_dimensions(valid_jpeg[:sos_pos], "jpeg"))
         # JPEG with SOS but missing EOI.
         self.assertIsNone(camera.parse_image_dimensions(valid_jpeg[:-2], "jpeg"))
+        # JPEG with trailing garbage after EOI.
+        self.assertIsNone(camera.parse_image_dimensions(valid_jpeg + b"\x00", "jpeg"))
+
+        # Decoder verification failure rejects publication and cleans up temp files.
+        corrupt_verify_ffmpeg = write_fake_ffmpeg(self.bin_dir, mode="corrupt_verify")
+        out_file = self.root / "unverified.jpg"
+        cfg = make_config()
+        with patch("kobra_lan.camera.MQTT", FakeCameraMQTT), \
+                patch("kobra_lan.camera.CAMERA_STREAM_PORT", self.server.port), \
+                patch("kobra_lan.camera.shutil.which", return_value=str(corrupt_verify_ffmpeg)):
+            with self.assertRaises(camera.CameraOperationError):
+                camera.camera_snapshot(cfg, out_file, timeout=10)
+        self.assertFalse(out_file.exists())
+        self.assertEqual([p for p in self.root.iterdir() if p.name.startswith(".kobra-lan-snapshot-")], [])
+
+        # When real ffmpeg is available, verify our fixtures decode cleanly and truncated JPEG scan data fails.
+        real_ffmpeg = shutil.which("ffmpeg")
+        if real_ffmpeg is not None:
+            deadline = time.monotonic() + 10
+            camera._verify_snapshot_decodable(real_ffmpeg, "png", valid_png, deadline)
+            camera._verify_snapshot_decodable(real_ffmpeg, "jpeg", valid_jpeg, deadline)
+            truncated_scan_jpeg = valid_jpeg[:sos_pos + 20] + b"\xff\xd9"
+            with self.assertRaises(camera.CameraOperationError):
+                camera._verify_snapshot_decodable(real_ffmpeg, "jpeg", truncated_scan_jpeg, deadline)
 
     def test_http_header_dribble_respects_absolute_deadline(self):
         import socket as _socket

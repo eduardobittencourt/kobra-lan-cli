@@ -31,6 +31,7 @@ MAX_PIPE_TIMEOUT = 86400
 MAX_PIPE_BYTES = 10 * 1024 * 1024 * 1024
 MAX_SNAPSHOT_STREAM_BYTES = 8 * 1024 * 1024
 MAX_IMAGE_BYTES = 32 * 1024 * 1024
+MAX_PNG_RAW_BYTES = 128 * 1024 * 1024
 CHUNK_SIZE = 16384
 DEFAULT_CONNECT_TIMEOUT = 10
 STOP_CAPTURE_TIMEOUT = 5
@@ -38,11 +39,29 @@ STOP_CAPTURE_TIMEOUT = 5
 FLV_MAGIC = b"FLV"
 PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
 JPEG_MAGIC = b"\xff\xd8\xff"
+INVALID_SNAPSHOT_IMAGE_MSG = "Decoded camera snapshot was not a valid image"
 SUPPORTED_SNAPSHOT_FORMATS = {
     ".jpg": "jpeg",
     ".jpeg": "jpeg",
     ".png": "png",
 }
+PNG_COLOR_CHANNELS = {0: 1, 2: 3, 3: 1, 4: 2, 6: 4}
+PNG_ALLOWED_DEPTHS = {
+    0: frozenset({1, 2, 4, 8, 16}),
+    2: frozenset({8, 16}),
+    3: frozenset({1, 2, 4, 8}),
+    4: frozenset({8, 16}),
+    6: frozenset({8, 16}),
+}
+PNG_ADAM7_PASSES = (
+    (0, 0, 8, 8),
+    (4, 0, 8, 8),
+    (0, 4, 4, 8),
+    (2, 0, 4, 4),
+    (0, 2, 2, 4),
+    (1, 0, 2, 2),
+    (0, 1, 1, 2),
+)
 JPEG_SOF_MARKERS = frozenset({
     0xC0, 0xC1, 0xC2, 0xC3,
     0xC5, 0xC6, 0xC7,
@@ -445,18 +464,66 @@ def _read_png_chunk(data, pos):
     return chunk_type, payload, end
 
 
-def _has_valid_png_chunks(data, pos):
-    seen_idat = False
+def _png_scanline_layout(width, height, bit_depth, color_type, interlace):
+    channels = PNG_COLOR_CHANNELS.get(color_type)
+    if channels is None or bit_depth not in PNG_ALLOWED_DEPTHS[color_type]:
+        return None
+    if interlace == 0:
+        return [(height, (width * channels * bit_depth + 7) // 8)]
+    if interlace != 1:
+        return None
+    layout = []
+    for x0, y0, dx, dy in PNG_ADAM7_PASSES:
+        pw = (width - x0 + dx - 1) // dx
+        ph = (height - y0 + dy - 1) // dy
+        if pw > 0 and ph > 0:
+            layout.append((ph, (pw * channels * bit_depth + 7) // 8))
+    return layout
+
+
+def _collect_png_idat(data, pos):
+    idat_parts = []
+    idat_ended = False
     while pos < len(data):
         chunk = _read_png_chunk(data, pos)
         if chunk is None:
-            return False
+            return None
         chunk_type, payload, pos = chunk
         if chunk_type == b"IDAT":
-            seen_idat = True
+            if idat_ended:
+                return None
+            idat_parts.append(payload)
         elif chunk_type == b"IEND":
-            return seen_idat and not payload
-    return False
+            return idat_parts if idat_parts and not payload and pos == len(data) else None
+        elif idat_parts:
+            idat_ended = True
+    return None
+
+
+def _validate_png_scanlines(raw, layout):
+    offset = 0
+    for rows, stride in layout:
+        row_bytes = 1 + stride
+        for _ in range(rows):
+            if raw[offset] > 4:
+                return False
+            offset += row_bytes
+    return offset == len(raw)
+
+
+def _validate_png_idat(idat_parts, layout):
+    expected = sum(rows * (1 + stride) for rows, stride in layout)
+    if expected <= 0 or expected > MAX_PNG_RAW_BYTES:
+        return False
+    decomp = zlib.decompressobj()
+    try:
+        raw = decomp.decompress(b"".join(idat_parts), expected + 1)
+        raw += decomp.flush()
+    except zlib.error:
+        return False
+    if not decomp.eof or decomp.unused_data or len(raw) != expected:
+        return False
+    return _validate_png_scanlines(raw, layout)
 
 
 def _parse_png_dimensions(data):
@@ -465,14 +532,24 @@ def _parse_png_dimensions(data):
     first = _read_png_chunk(data, 8)
     if first is None or first[0] != b"IHDR" or len(first[1]) != 13:
         return None
-    width, height = struct.unpack("!II", first[1][:8])
-    if width <= 0 or height <= 0:
+    width, height, bit_depth, color_type, compression, filter_method, interlace = struct.unpack(
+        "!IIBBBBB", first[1]
+    )
+    if width <= 0 or height <= 0 or compression != 0 or filter_method != 0:
         return None
-    return (width, height) if _has_valid_png_chunks(data, first[2]) else None
+    layout = _png_scanline_layout(width, height, bit_depth, color_type, interlace)
+    if layout is None:
+        return None
+    idat_parts = _collect_png_idat(data, first[2])
+    if idat_parts is None or not _validate_png_idat(idat_parts, layout):
+        return None
+    return (width, height)
 
 
 def _next_jpeg_marker(data, index):
     length = len(data)
+    if index >= length or data[index] != 0xFF:
+        return None, length
     while index < length and data[index] == 0xFF:
         index += 1
     if index >= length:
@@ -501,18 +578,44 @@ def _is_standalone_jpeg_marker(marker):
     return marker == 0x01 or 0xD0 <= marker <= 0xD7
 
 
-def _has_jpeg_eoi_after_sos(data, index):
+def _skip_jpeg_scan_data(data, index):
     seg_len = _read_jpeg_segment(data, index)
     if seg_len is None:
-        return False
-    scan_start = index + seg_len
-    return b"\xff\xd9" in data[scan_start:]
-
-
-def _finish_jpeg_sos(data, index, dims):
-    if dims is None or not _has_jpeg_eoi_after_sos(data, index):
         return None
-    return dims
+    scan_start = index + seg_len
+    pos = scan_start
+    length = len(data)
+    while pos < length:
+        ff_pos = data.find(0xFF, pos)
+        if ff_pos == -1:
+            return None
+        next_pos = ff_pos
+        while next_pos < length and data[next_pos] == 0xFF:
+            next_pos += 1
+        if next_pos >= length:
+            return None
+        marker = data[next_pos]
+        if marker == 0x00 or 0xD0 <= marker <= 0xD7:
+            pos = next_pos + 1
+            continue
+        return ff_pos if ff_pos > scan_start else None
+    return None
+
+
+def _step_jpeg_segment(data, index, marker, dims, seen_dqt, seen_sos):
+    if marker == 0xDA:
+        next_index = _skip_jpeg_scan_data(data, index)
+        return None if next_index is None else (next_index, dims, seen_dqt, True)
+    if _is_standalone_jpeg_marker(marker):
+        return index, dims, seen_dqt, seen_sos
+    seg_len = _read_jpeg_segment(data, index)
+    if seg_len is None:
+        return None
+    if marker == 0xDB:
+        seen_dqt = True
+    elif marker in JPEG_SOF_MARKERS and dims is None:
+        dims = _extract_sof_dimensions(data, index, seg_len)
+    return index + seg_len, dims, seen_dqt, seen_sos
 
 
 def _parse_jpeg_dimensions(data):
@@ -521,20 +624,18 @@ def _parse_jpeg_dimensions(data):
     index = 2
     length = len(data)
     dims = None
+    seen_dqt = False
+    seen_sos = False
     while index < length:
         marker, index = _next_jpeg_marker(data, index)
-        if marker in (None, 0xD9):
+        if marker is None:
             return None
-        if marker == 0xDA:
-            return _finish_jpeg_sos(data, index, dims)
-        if _is_standalone_jpeg_marker(marker):
-            continue
-        seg_len = _read_jpeg_segment(data, index)
-        if seg_len is None:
+        if marker == 0xD9:
+            return dims if (dims and seen_dqt and seen_sos and index == length) else None
+        step = _step_jpeg_segment(data, index, marker, dims, seen_dqt, seen_sos)
+        if step is None:
             return None
-        if marker in JPEG_SOF_MARKERS and dims is None:
-            dims = _extract_sof_dimensions(data, index, seg_len)
-        index += seg_len
+        index, dims, seen_dqt, seen_sos = step
     return None
 
 
@@ -689,6 +790,10 @@ def _decode_snapshot_with_ffmpeg(ffmpeg_bin, image_format, conn, response, first
         "-hide_banner",
         "-loglevel",
         "error",
+        "-probesize",
+        "131072",
+        "-analyzeduration",
+        "1000000",
         "-f",
         "flv",
         "-i",
@@ -738,6 +843,49 @@ def _read_snapshot_fd(tmp_fd):
     if not image_bytes or len(image_bytes) > MAX_IMAGE_BYTES:
         raise CameraOperationError("Decoded camera snapshot was empty or exceeded size limit")
     return image_bytes
+
+
+def _verify_snapshot_decodable(ffmpeg_bin, image_format, image_bytes, deadline):
+    """Verify the encoded snapshot decodes cleanly without errors via strict ffmpeg."""
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise CameraOperationError("Timed out verifying decoded camera snapshot")
+    codec = "png" if image_format == "png" else "mjpeg"
+    cmd = [
+        ffmpeg_bin,
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-err_detect",
+        "+explode",
+        "-xerror",
+        "-f",
+        "image2pipe",
+        "-vcodec",
+        codec,
+        "-i",
+        "pipe:0",
+        "-frames:v",
+        "1",
+        "-f",
+        "null",
+        "-",
+    ]
+    try:
+        result = subprocess.run(
+            cmd,
+            input=image_bytes,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=remaining,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        raise CameraOperationError("Timed out verifying decoded camera snapshot") from None
+    except OSError:
+        raise CameraOperationError("Failed to verify decoded camera snapshot") from None
+    if result.returncode != 0:
+        raise CameraOperationError(INVALID_SNAPSHOT_IMAGE_MSG)
 
 
 def _publish_snapshot_at(parent_fd, tmp_name, dest_name, *, overwrite):
@@ -794,7 +942,8 @@ def camera_snapshot(
 
         dimensions = parse_image_dimensions(image_bytes, image_format)
         if dimensions is None:
-            raise CameraOperationError("Decoded camera snapshot was not a valid image")
+            raise CameraOperationError(INVALID_SNAPSHOT_IMAGE_MSG)
+        _verify_snapshot_decodable(ffmpeg_bin, image_format, image_bytes, deadline)
         width, height = dimensions
         digest = hashlib.sha256(image_bytes).hexdigest()
 
