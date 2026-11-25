@@ -279,7 +279,7 @@ class CameraURLValidationAndStatusTests(unittest.TestCase):
     def test_camera_status_reports_present_announced_redacted_over_one_mqtt_session(self):
         FakeCameraMQTT.info_reports = [make_info()]
         with patch("kobra_lan.camera.MQTT", FakeCameraMQTT), \
-                patch("kobra_lan.camera.http.client.HTTPConnection") as http_conn:
+                patch("kobra_lan.camera._DeadlineHTTPConnection") as http_conn:
             result = camera.camera_status(make_config())
         http_conn.assert_not_called()
         self.assertEqual(FakeCameraMQTT.sessions, 1)
@@ -310,7 +310,7 @@ class CameraURLValidationAndStatusTests(unittest.TestCase):
                 FakeCameraMQTT.peripherie_data = peripherie
                 FakeCameraMQTT.info_reports = [info]
                 with patch("kobra_lan.camera.MQTT", FakeCameraMQTT), \
-                        patch("kobra_lan.camera.http.client.HTTPConnection") as http_conn:
+                        patch("kobra_lan.camera._DeadlineHTTPConnection") as http_conn:
                     result = camera.camera_status(make_config())
                 http_conn.assert_not_called()
                 self.assertEqual(result["camera_present"], expect_camera)
@@ -558,7 +558,7 @@ class CameraSnapshotAndPipeTests(unittest.TestCase):
         FakeCameraMQTT.info_reports = [make_info(rtsp_url=f"http://10.0.0.9:18088/live/{SECRET_TOKEN}")]
         sink = io.BytesIO()
         with patch("kobra_lan.camera.MQTT", FakeCameraMQTT), \
-                patch("kobra_lan.camera.http.client.HTTPConnection") as http_conn:
+                patch("kobra_lan.camera._DeadlineHTTPConnection") as http_conn:
             with self.assertRaises(ProtocolError) as caught:
                 camera.camera_pipe(cfg, sink)
             http_conn.assert_not_called()
@@ -568,7 +568,7 @@ class CameraSnapshotAndPipeTests(unittest.TestCase):
         FakeCameraMQTT.info_reports = [make_info(port=self.server.port)]
         sink = io.BytesIO()
         with patch("kobra_lan.camera.MQTT", FakeCameraMQTT), \
-                patch("kobra_lan.camera.http.client.HTTPConnection") as http_conn:
+                patch("kobra_lan.camera._DeadlineHTTPConnection") as http_conn:
             with self.assertRaises(ProtocolError):
                 camera.camera_pipe(cfg, sink)
             http_conn.assert_not_called()
@@ -722,6 +722,14 @@ class CameraSnapshotAndPipeTests(unittest.TestCase):
             + _png_chunk(b"IEND", b"")
         )
         self.assertIsNone(camera.parse_image_dimensions(short_idat_png, "png"))
+        # PNG declaring 1x1 RGB (expected 4 bytes) whose IDAT expands far beyond expected size.
+        oversized_idat_png = (
+            camera.PNG_MAGIC
+            + _png_chunk(b"IHDR", struct.pack("!IIBBBBB", 1, 1, 8, 2, 0, 0, 0))
+            + _png_chunk(b"IDAT", zlib.compress(b"\x00" * (4 * 1024 * 1024)))
+            + _png_chunk(b"IEND", b"")
+        )
+        self.assertIsNone(camera.parse_image_dimensions(oversized_idat_png, "png"))
 
         valid_jpeg = make_minimal_jpeg(1280, 720)
         self.assertEqual(camera.parse_image_dimensions(valid_jpeg, "jpeg"), (1280, 720))

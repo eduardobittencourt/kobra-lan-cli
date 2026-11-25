@@ -518,10 +518,9 @@ def _validate_png_idat(idat_parts, layout):
     decomp = zlib.decompressobj()
     try:
         raw = decomp.decompress(b"".join(idat_parts), expected + 1)
-        raw += decomp.flush()
     except zlib.error:
         return False
-    if not decomp.eof or decomp.unused_data or len(raw) != expected:
+    if not decomp.eof or decomp.unconsumed_tail or decomp.unused_data or len(raw) != expected:
         return False
     return _validate_png_scanlines(raw, layout)
 
