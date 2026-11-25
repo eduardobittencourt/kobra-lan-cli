@@ -773,7 +773,7 @@ class CameraSnapshotAndPipeTests(unittest.TestCase):
         self.assertEqual(bytes(writer.buf), SYNTHETIC_FLV[:15])
         self.assertEqual(result["bytes_written"], 15)
 
-        # Zero-progress non-fd stream must fail explicitly.
+        # Zero-progress and non-blocking None-returning non-fd streams must fail explicitly.
         class ZeroWriter:
             def write(self, _data):
                 return 0
@@ -781,11 +781,39 @@ class CameraSnapshotAndPipeTests(unittest.TestCase):
             def flush(self):
                 pass
 
-        zero_writer = ZeroWriter()
+        class WouldBlockWriter:
+            def write(self, _data):
+                return None
+
+            def flush(self):
+                pass
+
+        for bad_writer in (ZeroWriter(), WouldBlockWriter()):
+            with patch("kobra_lan.camera.MQTT", FakeCameraMQTT), \
+                    patch("kobra_lan.camera.CAMERA_STREAM_PORT", self.server.port):
+                with self.assertRaises(camera.CameraOperationError):
+                    camera.camera_pipe(cfg, bad_writer, max_bytes=15)
+
+        # Partial non-fd stream write followed by BrokenPipeError preserves partial count.
+        class PartialBrokenStream:
+            def __init__(self):
+                self.calls = 0
+
+            def write(self, data):
+                self.calls += 1
+                if self.calls == 1:
+                    return min(4, len(data))
+                raise BrokenPipeError("stream closed mid-chunk")
+
+            def flush(self):
+                pass
+
+        partial_stream = PartialBrokenStream()
         with patch("kobra_lan.camera.MQTT", FakeCameraMQTT), \
                 patch("kobra_lan.camera.CAMERA_STREAM_PORT", self.server.port):
-            with self.assertRaises(camera.CameraOperationError):
-                camera.camera_pipe(cfg, zero_writer, max_bytes=15)
+            stream_partial_result = camera.camera_pipe(cfg, partial_stream, max_bytes=32)
+        self.assertTrue(stream_partial_result["broken_pipe"])
+        self.assertEqual(stream_partial_result["bytes_written"], 4)
 
         # Partial os.write followed by BrokenPipeError preserves partial count.
         write_calls = [0]

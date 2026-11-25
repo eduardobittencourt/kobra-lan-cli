@@ -127,7 +127,7 @@ class _DeadlineSocket:
         return self._sock.gettimeout()
 
     def settimeout(self, value):
-        self._nonblocking = value == 0.0
+        self._nonblocking = value is not None and value <= 0
         self._sock.settimeout(value)
 
     def setblocking(self, flag):
@@ -858,16 +858,16 @@ def _stream_fileno(output_stream):
 def _write_stream_all(output_stream, chunk):
     view = memoryview(chunk)
     total = 0
-    while view:
-        written = output_stream.write(view)
-        if written is None:
-            total += len(view)
-            break
-        if type(written) is not int or written <= 0:
-            raise CameraOperationError("Camera pipe output stream made no progress")
-        total += written
-        view = view[written:]
-    output_stream.flush()
+    try:
+        while view:
+            written = output_stream.write(view)
+            if type(written) is not int or written <= 0 or written > len(view):
+                raise CameraOperationError("Camera pipe output stream made no progress")
+            total += written
+            view = view[written:]
+        output_stream.flush()
+    except BrokenPipeError:
+        raise _PartialBrokenPipe(total) from None
     return total, True
 
 
