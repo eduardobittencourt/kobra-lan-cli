@@ -5,7 +5,6 @@ import os
 from pathlib import Path
 import re
 import shutil
-import socket
 import struct
 import subprocess
 import tempfile
@@ -13,13 +12,14 @@ import time
 from urllib.parse import urlsplit
 
 from .config import ProtocolError
-from .mqtt import MQTT, MQTTClosed, MQTTFailure, MQTTIOFailure
+from .mqtt import MQTT, MQTTClosed
 from .printer import payload_data
 from .qualification import info_compatibility_issue, is_camera_hardware_validated
 
 CAMERA_STREAM_PORT = 18088
 CAMERA_STREAM_PROTOCOL = "http-flv"
 STREAM_PATH_RE = re.compile(r"^/live/[A-Za-z0-9_.-]{1,128}$")
+UNSAFE_STREAM_URL_MSG = "Printer announced an invalid or unsafe camera stream URL"
 
 DEFAULT_SNAPSHOT_TIMEOUT = 15
 MAX_SNAPSHOT_TIMEOUT = 60
@@ -70,11 +70,11 @@ def validate_stream_url(host, url, *, port=None):
     if not isinstance(url, str) or not url:
         raise ProtocolError("Printer did not announce a valid local camera stream URL")
     if "?" in url or "#" in url or any(ord(c) <= 32 or ord(c) == 127 for c in url):
-        raise ProtocolError("Printer announced an invalid or unsafe camera stream URL")
+        raise ProtocolError(UNSAFE_STREAM_URL_MSG)
     try:
         parsed = urlsplit(url)
     except ValueError:
-        raise ProtocolError("Printer announced an invalid or unsafe camera stream URL") from None
+        raise ProtocolError(UNSAFE_STREAM_URL_MSG) from None
     valid = (
         parsed.scheme == "http"
         and parsed.username is None
@@ -88,7 +88,7 @@ def validate_stream_url(host, url, *, port=None):
         and ".." not in parsed.path.split("/")
     )
     if not valid:
-        raise ProtocolError("Printer announced an invalid or unsafe camera stream URL")
+        raise ProtocolError(UNSAFE_STREAM_URL_MSG)
     return parsed.path
 
 
@@ -204,7 +204,7 @@ def _best_effort_stop_capture(config):
         with MQTT(config, timeout=STOP_CAPTURE_TIMEOUT) as client:
             client.stop_video_capture_once()
         return True
-    except (ProtocolError, OSError, MQTTFailure, MQTTIOFailure):
+    except (ProtocolError, OSError):
         return False
 
 
@@ -268,8 +268,8 @@ def _acquire_camera_stream(config, *, allow_start_capture=True, deadline=None):
         raise
 
 
-def validate_snapshot_output(output_path, *, overwrite=False):
-    """Validate snapshot output path and format before target lookup or network access."""
+def _resolve_snapshot_target(output_path):
+    """Validate and resolve snapshot parent directory and single safe filename."""
     if not isinstance(output_path, (str, Path)) or not str(output_path).strip():
         raise CameraArgumentError("Snapshot --output must be a file path ending in .jpg, .jpeg, or .png")
     dest = Path(output_path)
@@ -278,9 +278,30 @@ def validate_snapshot_output(output_path, *, overwrite=False):
     image_format = SUPPORTED_SNAPSHOT_FORMATS.get(dest.suffix.lower())
     if image_format is None:
         raise CameraArgumentError("Snapshot --output must end in .jpg, .jpeg, or .png")
+    name = dest.name
+    if (
+        not name
+        or name in (".", "..")
+        or os.path.basename(name) != name
+        or "/" in name
+        or "\\" in name
+        or "\x00" in name
+    ):
+        raise CameraArgumentError("Snapshot --output must end in .jpg, .jpeg, or .png")
     parent = dest.parent if str(dest.parent) else Path(".")
     if not parent.is_dir():
         raise ProtocolError("Snapshot output parent directory does not exist")
+    parent_real = os.path.realpath(parent)
+    resolved_candidate = os.path.abspath(os.path.join(parent_real, name))
+    parent_prefix = parent_real if parent_real == os.sep else parent_real + os.sep
+    if not resolved_candidate.startswith(parent_prefix):
+        raise CameraArgumentError("Snapshot --output resolves outside its parent directory")
+    return dest, parent_real, name, image_format
+
+
+def validate_snapshot_output(output_path, *, overwrite=False):
+    """Validate snapshot output path and format before target lookup or network access."""
+    dest, _parent_real, _name, image_format = _resolve_snapshot_target(output_path)
     if not overwrite and os.path.lexists(dest):
         raise ProtocolError("Snapshot output path already exists; pass --overwrite to replace it")
     return dest, image_format
@@ -301,43 +322,107 @@ def validate_snapshot_request(output_path, *, timeout=DEFAULT_SNAPSHOT_TIMEOUT, 
     return dest, image_format, ffmpeg_bin
 
 
+def _parse_png_dimensions(data):
+    if len(data) < 24 or data[:8] != PNG_MAGIC or data[12:16] != b"IHDR":
+        return None
+    width, height = struct.unpack("!II", data[16:24])
+    return (width, height) if width > 0 and height > 0 else None
+
+
+def _next_jpeg_marker(data, index):
+    length = len(data)
+    while index < length and data[index] == 0xFF:
+        index += 1
+    if index >= length:
+        return None, length
+    return data[index], index + 1
+
+
+def _parse_jpeg_dimensions(data):
+    if len(data) < 4 or data[:3] != JPEG_MAGIC:
+        return None
+    index = 2
+    length = len(data)
+    while index < length:
+        marker, index = _next_jpeg_marker(data, index)
+        if marker is None or marker in (0xD9, 0xDA):
+            return None
+        if marker == 0x01 or 0xD0 <= marker <= 0xD7:
+            continue
+        if index + 2 > length:
+            return None
+        seg_len = struct.unpack("!H", data[index:index + 2])[0]
+        if seg_len < 2 or index + seg_len > length:
+            return None
+        if marker in JPEG_SOF_MARKERS:
+            if seg_len < 7:
+                return None
+            height, width = struct.unpack("!HH", data[index + 3:index + 7])
+            return (width, height) if width > 0 and height > 0 else None
+        index += seg_len
+    return None
+
+
 def parse_image_dimensions(data, image_format):
     """Validate magic bytes and parse (width, height) from PNG or JPEG bytes in pure Python."""
     if not isinstance(data, (bytes, bytearray)) or not data or len(data) > MAX_IMAGE_BYTES:
         return None
     if image_format == "png":
-        if len(data) < 24 or data[:8] != PNG_MAGIC or data[12:16] != b"IHDR":
-            return None
-        width, height = struct.unpack("!II", data[16:24])
-        return (width, height) if width > 0 and height > 0 else None
+        return _parse_png_dimensions(data)
     if image_format == "jpeg":
-        if len(data) < 4 or data[:3] != JPEG_MAGIC:
-            return None
-        index = 2
-        length = len(data)
-        while index < length:
-            while index < length and data[index] == 0xFF:
-                index += 1
-            if index >= length:
-                break
-            marker = data[index]
-            index += 1
-            if marker in (0xD9, 0xDA):
-                break
-            if marker == 0x01 or 0xD0 <= marker <= 0xD7:
-                continue
-            if index + 2 > length:
-                break
-            seg_len = struct.unpack("!H", data[index:index + 2])[0]
-            if seg_len < 2 or index + seg_len > length:
-                break
-            if marker in JPEG_SOF_MARKERS:
-                if seg_len < 7:
-                    return None
-                height, width = struct.unpack("!HH", data[index + 3:index + 7])
-                return (width, height) if width > 0 and height > 0 else None
-            index += seg_len
+        return _parse_jpeg_dimensions(data)
     return None
+
+
+def _feed_flv_to_ffmpeg(proc, conn, response, first_chunk, deadline):
+    streamed = 0
+    try:
+        proc.stdin.write(first_chunk)
+        proc.stdin.flush()
+        streamed += len(first_chunk)
+        while streamed < MAX_SNAPSHOT_STREAM_BYTES and proc.poll() is None:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            _set_response_timeout(conn, response, min(0.5, remaining))
+            try:
+                chunk = response.read1(min(CHUNK_SIZE, MAX_SNAPSHOT_STREAM_BYTES - streamed))
+            except TimeoutError:
+                continue
+            except (OSError, http.client.HTTPException):
+                break
+            if not chunk:
+                break
+            proc.stdin.write(chunk)
+            proc.stdin.flush()
+            streamed += len(chunk)
+    except OSError:
+        pass
+    finally:
+        try:
+            proc.stdin.close()
+        except OSError:
+            pass
+
+
+def _finish_ffmpeg(proc, deadline):
+    remaining = max(0.1, deadline - time.monotonic())
+    try:
+        proc.wait(timeout=remaining)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
+        raise CameraOperationError("Timed out decoding camera snapshot") from None
+    finally:
+        if proc.stderr is not None:
+            try:
+                proc.stderr.read(4096)
+            except OSError:
+                pass
+            finally:
+                proc.stderr.close()
+    if proc.returncode != 0:
+        raise CameraOperationError("ffmpeg failed to decode a frame from the camera stream")
 
 
 def _decode_snapshot_with_ffmpeg(ffmpeg_bin, conn, response, first_chunk, tmp_path, deadline):
@@ -365,54 +450,9 @@ def _decode_snapshot_with_ffmpeg(ffmpeg_bin, conn, response, first_chunk, tmp_pa
     except OSError:
         raise CameraOperationError("Failed to start external ffmpeg process") from None
 
-    streamed = 0
     try:
-        try:
-            proc.stdin.write(first_chunk)
-            proc.stdin.flush()
-            streamed += len(first_chunk)
-            while streamed < MAX_SNAPSHOT_STREAM_BYTES and proc.poll() is None:
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    break
-                _set_response_timeout(conn, response, min(0.5, remaining))
-                try:
-                    chunk = response.read1(min(CHUNK_SIZE, MAX_SNAPSHOT_STREAM_BYTES - streamed))
-                except (TimeoutError, socket.timeout):
-                    continue
-                except (OSError, http.client.HTTPException):
-                    break
-                if not chunk:
-                    break
-                proc.stdin.write(chunk)
-                proc.stdin.flush()
-                streamed += len(chunk)
-        except (BrokenPipeError, OSError):
-            pass
-        finally:
-            try:
-                proc.stdin.close()
-            except OSError:
-                pass
-
-        remaining = max(0.1, deadline - time.monotonic())
-        try:
-            proc.wait(timeout=remaining)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            proc.wait()
-            raise CameraOperationError("Timed out decoding camera snapshot") from None
-        finally:
-            if proc.stderr is not None:
-                try:
-                    proc.stderr.read(4096)
-                except OSError:
-                    pass
-                finally:
-                    proc.stderr.close()
-
-        if proc.returncode != 0:
-            raise CameraOperationError("ffmpeg failed to decode a frame from the camera stream")
+        _feed_flv_to_ffmpeg(proc, conn, response, first_chunk, deadline)
+        _finish_ffmpeg(proc, deadline)
     except BaseException:
         if proc.poll() is None:
             proc.kill()
@@ -420,15 +460,15 @@ def _decode_snapshot_with_ffmpeg(ffmpeg_bin, conn, response, first_chunk, tmp_pa
         raise
 
 
-def _publish_snapshot_file(tmp_path, dest, *, overwrite):
+def _publish_snapshot_at(parent_fd, tmp_name, dest_name, *, overwrite):
     if overwrite:
-        os.replace(tmp_path, dest)
+        os.replace(tmp_name, dest_name, src_dir_fd=parent_fd, dst_dir_fd=parent_fd)
         return
     try:
-        os.link(tmp_path, dest)
+        os.link(tmp_name, dest_name, src_dir_fd=parent_fd, dst_dir_fd=parent_fd)
     except FileExistsError:
         raise ProtocolError("Snapshot output path already exists; pass --overwrite to replace it") from None
-    os.unlink(tmp_path)
+    os.unlink(tmp_name, dir_fd=parent_fd)
 
 
 def camera_snapshot(
@@ -443,16 +483,18 @@ def camera_snapshot(
     dest, image_format, ffmpeg_bin = validate_snapshot_request(
         output_path, timeout=timeout, overwrite=overwrite
     )
+    _, parent_real, dest_name, _ = _resolve_snapshot_target(output_path)
     deadline = time.monotonic() + timeout
     conn, response, first_chunk, firmware, capture_mode, start_capture_used = _acquire_camera_stream(
         config, allow_start_capture=allow_start_capture, deadline=deadline
     )
     stop_capture_sent = False
     tmp_path = None
+    parent_fd = None
     try:
-        parent = dest.parent if str(dest.parent) else Path(".")
+        parent_fd = os.open(parent_real, os.O_RDONLY | os.O_DIRECTORY)
         fd, raw_tmp = tempfile.mkstemp(
-            dir=parent,
+            dir=parent_real,
             prefix=".kobra-lan-snapshot-",
             suffix=dest.suffix.lower(),
         )
@@ -475,7 +517,7 @@ def camera_snapshot(
         width, height = dimensions
         digest = hashlib.sha256(image_bytes).hexdigest()
 
-        _publish_snapshot_file(tmp_path, dest, overwrite=overwrite)
+        _publish_snapshot_at(parent_fd, tmp_path.name, dest_name, overwrite=overwrite)
         tmp_path = None
     finally:
         conn.close()
@@ -484,6 +526,8 @@ def camera_snapshot(
                 tmp_path.unlink(missing_ok=True)
             except OSError:
                 pass
+        if parent_fd is not None:
+            os.close(parent_fd)
         if start_capture_used:
             stop_capture_sent = _best_effort_stop_capture(config)
 
@@ -527,6 +571,39 @@ def _write_pipe_chunk(output_stream, chunk, max_bytes, written):
     return len(chunk)
 
 
+def _read_next_pipe_chunk(conn, response, deadline, to_read):
+    if deadline is not None:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return b""
+        _set_response_timeout(conn, response, remaining)
+    else:
+        _set_response_timeout(conn, response, None)
+    try:
+        return response.read1(to_read)
+    except TimeoutError:
+        if deadline is not None and time.monotonic() >= deadline:
+            return b""
+        raise CameraOperationError("Camera stream timed out") from None
+    except (OSError, http.client.HTTPException):
+        raise CameraOperationError("Camera stream connection failed") from None
+
+
+def _stream_flv_to_output(conn, response, first_chunk, output_stream, deadline, max_bytes):
+    bytes_written = 0
+    try:
+        bytes_written += _write_pipe_chunk(output_stream, first_chunk, max_bytes, bytes_written)
+        while max_bytes is None or bytes_written < max_bytes:
+            to_read = CHUNK_SIZE if max_bytes is None else min(CHUNK_SIZE, max_bytes - bytes_written)
+            chunk = _read_next_pipe_chunk(conn, response, deadline, to_read)
+            if not chunk:
+                break
+            bytes_written += _write_pipe_chunk(output_stream, chunk, max_bytes, bytes_written)
+        return bytes_written, False
+    except BrokenPipeError:
+        return bytes_written, True
+
+
 def camera_pipe(
     config,
     output_stream,
@@ -542,35 +619,10 @@ def camera_pipe(
         config, allow_start_capture=allow_start_capture, deadline=deadline
     )
     stop_capture_sent = False
-    bytes_written = 0
-    broken_pipe = False
     try:
-        try:
-            bytes_written += _write_pipe_chunk(output_stream, first_chunk, max_bytes, bytes_written)
-            while max_bytes is None or bytes_written < max_bytes:
-                if deadline is not None:
-                    remaining = deadline - time.monotonic()
-                    if remaining <= 0:
-                        break
-                    _set_response_timeout(conn, response, remaining)
-                else:
-                    _set_response_timeout(conn, response, None)
-                to_read = CHUNK_SIZE
-                if max_bytes is not None:
-                    to_read = min(to_read, max_bytes - bytes_written)
-                try:
-                    chunk = response.read1(to_read)
-                except (TimeoutError, socket.timeout):
-                    if deadline is not None and time.monotonic() >= deadline:
-                        break
-                    raise CameraOperationError("Camera stream timed out") from None
-                except (OSError, http.client.HTTPException):
-                    raise CameraOperationError("Camera stream connection failed") from None
-                if not chunk:
-                    break
-                bytes_written += _write_pipe_chunk(output_stream, chunk, max_bytes, bytes_written)
-        except BrokenPipeError:
-            broken_pipe = True
+        bytes_written, broken_pipe = _stream_flv_to_output(
+            conn, response, first_chunk, output_stream, deadline, max_bytes
+        )
     finally:
         conn.close()
         if start_capture_used:

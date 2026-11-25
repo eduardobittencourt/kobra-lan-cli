@@ -380,12 +380,14 @@ class MQTTVideoAndPeripherieTests(unittest.TestCase):
                         raise item
                     return item
 
+                action_fn = (
+                    self.client.start_video_capture_once
+                    if mode == "start"
+                    else self.client.stop_video_capture_once
+                )
                 with patch.object(self.client, "receive", side_effect=receive):
                     with self.assertRaisesRegex(exc_type, regex):
-                        if mode == "start":
-                            self.client.start_video_capture_once()
-                        else:
-                            self.client.stop_video_capture_once()
+                        action_fn()
                 self.client.sock.sendall.assert_called_once()
 
 

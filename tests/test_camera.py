@@ -279,9 +279,10 @@ class CameraURLValidationAndStatusTests(unittest.TestCase):
 
     def test_camera_status_rejects_unqualified_printer(self):
         FakeCameraMQTT.info_reports = [make_info(version="2.0.2.9")]
+        cfg = make_config()
         with patch("kobra_lan.camera.MQTT", FakeCameraMQTT):
             with self.assertRaises(ProtocolError):
-                camera.camera_status(make_config())
+                camera.camera_status(cfg)
 
 
 class CameraSnapshotAndPipeTests(unittest.TestCase):
@@ -319,7 +320,8 @@ class CameraSnapshotAndPipeTests(unittest.TestCase):
                 self.assertTrue(out_file.is_file())
                 self.assertEqual(result["output_path"], str(out_file))
                 self.assertEqual(result["format"], expected_fmt)
-                self.assertEqual((result["width"], result["height"]), expected_dims)
+                actual_dims = (result["width"], result["height"])
+                self.assertEqual(actual_dims, expected_dims)
                 self.assertEqual(result["bytes"], out_file.stat().st_size)
                 self.assertEqual(len(result["sha256"]), 64)
                 self.assertEqual(result["capture_mode"], "direct")
@@ -358,11 +360,12 @@ class CameraSnapshotAndPipeTests(unittest.TestCase):
         FakeCameraMQTT.start_hook = lambda: setattr(self.server, "started", True)
         FakeCameraMQTT.info_reports = [make_info(port=self.server.port), make_info(port=self.server.port)]
         out_file = self.root / "failed.jpg"
+        cfg = make_config()
         with patch("kobra_lan.camera.MQTT", FakeCameraMQTT), \
                 patch("kobra_lan.camera.CAMERA_STREAM_PORT", self.server.port), \
                 patch("kobra_lan.camera.shutil.which", return_value=str(fake_ffmpeg)):
             with self.assertRaises(camera.CameraOperationError) as caught:
-                camera.camera_snapshot(make_config(), out_file, timeout=10)
+                camera.camera_snapshot(cfg, out_file, timeout=10)
         self.assertEqual(caught.exception.exit_code, 3)
         self.assertNotIn(SECRET_TOKEN, str(caught.exception))
         self.assertFalse(out_file.exists())
@@ -373,11 +376,12 @@ class CameraSnapshotAndPipeTests(unittest.TestCase):
         fake_ffmpeg = write_fake_ffmpeg(self.bin_dir, mode="ok")
         self.server.status = 404
         out_file = self.root / "no-fallback.jpg"
+        cfg = make_config()
         with patch("kobra_lan.camera.MQTT", FakeCameraMQTT), \
                 patch("kobra_lan.camera.CAMERA_STREAM_PORT", self.server.port), \
                 patch("kobra_lan.camera.shutil.which", return_value=str(fake_ffmpeg)):
             with self.assertRaises(camera.CameraOperationError) as caught:
-                camera.camera_snapshot(make_config(), out_file, timeout=10, allow_start_capture=False)
+                camera.camera_snapshot(cfg, out_file, timeout=10, allow_start_capture=False)
         self.assertEqual(caught.exception.exit_code, 3)
         self.assertNotIn(("start_video_capture_once",), FakeCameraMQTT.calls)
         self.assertNotIn(("stop_video_capture_once",), FakeCameraMQTT.calls)
@@ -385,11 +389,12 @@ class CameraSnapshotAndPipeTests(unittest.TestCase):
 
     def test_snapshot_pre_network_checks_ffmpeg_existing_overwrite_and_corrupt_cleanup(self):
         out_file = self.root / "bed.jpg"
+        cfg = make_config()
         # Missing ffmpeg -> exit 3, zero MQTT calls.
         with patch("kobra_lan.camera.MQTT") as mqtt_mock, \
                 patch("kobra_lan.camera.shutil.which", return_value=None):
             with self.assertRaises(camera.CameraOperationError) as caught:
-                camera.camera_snapshot(make_config(), out_file)
+                camera.camera_snapshot(cfg, out_file)
             self.assertEqual(caught.exception.exit_code, 3)
             mqtt_mock.assert_not_called()
 
@@ -402,7 +407,7 @@ class CameraSnapshotAndPipeTests(unittest.TestCase):
                     patch("kobra_lan.camera.MQTT") as mqtt_mock, \
                     patch("kobra_lan.camera.shutil.which", return_value="/usr/bin/ffmpeg"):
                 with self.assertRaises(ProtocolError):
-                    camera.camera_snapshot(make_config(), target, overwrite=False)
+                    camera.camera_snapshot(cfg, target, overwrite=False)
                 mqtt_mock.assert_not_called()
         self.assertEqual(out_file.read_bytes(), b"original")
 
@@ -411,7 +416,7 @@ class CameraSnapshotAndPipeTests(unittest.TestCase):
         with patch("kobra_lan.camera.MQTT", FakeCameraMQTT), \
                 patch("kobra_lan.camera.CAMERA_STREAM_PORT", self.server.port), \
                 patch("kobra_lan.camera.shutil.which", return_value=str(fake_ffmpeg)):
-            camera.camera_snapshot(make_config(), out_file, overwrite=True)
+            camera.camera_snapshot(cfg, out_file, overwrite=True)
         self.assertTrue(out_file.read_bytes().startswith(camera.JPEG_MAGIC))
 
         # Corrupt / empty decode cleans up temp files and leaves no output.
@@ -423,21 +428,24 @@ class CameraSnapshotAndPipeTests(unittest.TestCase):
                         patch("kobra_lan.camera.CAMERA_STREAM_PORT", self.server.port), \
                         patch("kobra_lan.camera.shutil.which", return_value=str(bad_ffmpeg)):
                     with self.assertRaises(camera.CameraOperationError):
-                        camera.camera_snapshot(make_config(), target)
+                        camera.camera_snapshot(cfg, target)
                 self.assertFalse(target.exists())
                 self.assertEqual([p.name for p in self.root.glob(".kobra-lan-snapshot-*")], [])
 
     def test_snapshot_rejects_bad_extensions_dirs_missing_parent_and_timeout_before_network(self):
+        cfg = make_config()
+        missing_parent_target = self.root / "missing-dir" / "bed.jpg"
+        valid_target = self.root / "bed.jpg"
         with patch("kobra_lan.camera.MQTT") as mqtt_mock, \
                 patch("kobra_lan.camera.shutil.which", return_value="/usr/bin/ffmpeg"):
             for bad_path in (self.root / "bed.bmp", self.root / "bed", self.root):
                 with self.subTest(bad_path=bad_path), self.assertRaises(camera.CameraArgumentError):
-                    camera.camera_snapshot(make_config(), bad_path)
+                    camera.camera_snapshot(cfg, bad_path)
             with self.assertRaises(ProtocolError):
-                camera.camera_snapshot(make_config(), self.root / "missing-dir" / "bed.jpg")
+                camera.camera_snapshot(cfg, missing_parent_target)
             for bad_timeout in (0, -1, 61, True, "10"):
                 with self.subTest(timeout=bad_timeout), self.assertRaises(camera.CameraArgumentError):
-                    camera.camera_snapshot(make_config(), self.root / "bed.jpg", timeout=bad_timeout)
+                    camera.camera_snapshot(cfg, valid_target, timeout=bad_timeout)
             mqtt_mock.assert_not_called()
 
     def test_pipe_streams_raw_flv_without_ffmpeg_and_respects_max_bytes(self):
@@ -495,30 +503,36 @@ class CameraSnapshotAndPipeTests(unittest.TestCase):
             def flush(self):
                 pass
 
+        cfg = make_config()
+        interrupt_stream = InterruptStream()
         with patch("kobra_lan.camera.MQTT", FakeCameraMQTT), \
                 patch("kobra_lan.camera.CAMERA_STREAM_PORT", self.server.port):
             with self.assertRaises(KeyboardInterrupt):
-                camera.camera_pipe(make_config(), InterruptStream())
+                camera.camera_pipe(cfg, interrupt_stream)
         self.assertIn(("stop_video_capture_once",), FakeCameraMQTT.calls)
 
     def test_pipe_rejects_hostile_url_and_absent_camera_before_http(self):
+        cfg = make_config()
         FakeCameraMQTT.info_reports = [make_info(rtsp_url=f"http://10.0.0.9:18088/live/{SECRET_TOKEN}")]
+        sink = io.BytesIO()
         with patch("kobra_lan.camera.MQTT", FakeCameraMQTT), \
                 patch("kobra_lan.camera.http.client.HTTPConnection") as http_conn:
             with self.assertRaises(ProtocolError) as caught:
-                camera.camera_pipe(make_config(), io.BytesIO())
+                camera.camera_pipe(cfg, sink)
             http_conn.assert_not_called()
             self.assertNotIn(SECRET_TOKEN, str(caught.exception))
 
         FakeCameraMQTT.peripherie_data = {"camera": 0}
         FakeCameraMQTT.info_reports = [make_info(port=self.server.port)]
+        sink = io.BytesIO()
         with patch("kobra_lan.camera.MQTT", FakeCameraMQTT), \
                 patch("kobra_lan.camera.http.client.HTTPConnection") as http_conn:
             with self.assertRaises(ProtocolError):
-                camera.camera_pipe(make_config(), io.BytesIO())
+                camera.camera_pipe(cfg, sink)
             http_conn.assert_not_called()
 
     def test_pipe_respects_timeout_and_validates_bounds(self):
+        cfg = make_config()
         for kwargs in (
             {"timeout": 0},
             {"timeout": camera.MAX_PIPE_TIMEOUT + 1},
@@ -527,8 +541,9 @@ class CameraSnapshotAndPipeTests(unittest.TestCase):
             {"max_bytes": camera.MAX_PIPE_BYTES + 1},
             {"max_bytes": False},
         ):
+            sink = io.BytesIO()
             with self.subTest(kwargs=kwargs), self.assertRaises(camera.CameraArgumentError):
-                camera.camera_pipe(make_config(), io.BytesIO(), **kwargs)
+                camera.camera_pipe(cfg, sink, **kwargs)
 
         self.server.chunks = [SYNTHETIC_FLV[:16]] + [b"\x00" * 16] * 20
         self.server.delay_per_chunk = 0.2

@@ -19,6 +19,7 @@ MAX_PACKET = 4 * 1024 * 1024
 BASE = "anycubic/anycubicCloud/v1"
 CONTROL_ACTIONS = frozenset({"pause", "resume", "stop"})
 TASKID_RE = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
+VIDEO_CAPTURE_REJECTED = "Video capture command was rejected; do not retry automatically"
 
 
 def validate_delete_filename(value):
@@ -417,6 +418,60 @@ class MQTT:
                 on_report(report)
         return {"ack": ack, "report": report}
 
+    def _receive_video_packet(self):
+        header, body = self.receive(self.stage_deadline)
+        if header >> 4 != 3:
+            return None
+        response_topic, data = self._publish_fields(header, body)
+        if header & 1:
+            return None
+        is_ack = response_topic.endswith("/response")
+        if not is_ack and not response_topic.endswith("/video/report"):
+            return None
+        try:
+            result = json.loads(data)
+        except (ValueError, RecursionError):
+            raise ProtocolError("Malformed MQTT video response") from None
+        if not isinstance(result, dict):
+            raise ProtocolError("Malformed MQTT video response")
+        return is_ack, result
+
+    def _consume_video_ack(self, result, msgid, ack):
+        if result.get("msgid") != msgid:
+            return ack
+        code = result.get("code")
+        if type(code) is not int or code != 0:
+            raise ProtocolError(VIDEO_CAPTURE_REJECTED)
+        return ack or {"code": 0, "msgid": msgid}
+
+    def _consume_video_report(
+        self, result, action, terminal_state, intermediate_states, states, ack, msgid, sent_timestamp
+    ):
+        if result.get("type") != "video" or result.get("action") != action:
+            return None
+        correlated = result.get("msgid") == msgid
+        stamp = result.get("timestamp")
+        fresh = (
+            type(stamp) in (int, float)
+            and sent_timestamp <= stamp <= int(time.time() * 1000) + 5000
+        )
+        if not correlated and not (ack is not None and fresh):
+            return None
+        code = result.get("code", 0)
+        state = result.get("state")
+        if type(code) is not int or code not in (0, 200):
+            raise ProtocolError(VIDEO_CAPTURE_REJECTED)
+        if state in intermediate_states:
+            states.append(state)
+            return None
+        if state != terminal_state:
+            raise ProtocolError(VIDEO_CAPTURE_REJECTED)
+        states.append(state)
+        report = {"action": action, "state": terminal_state, "states": states}
+        if "code" in result:
+            report["code"] = code
+        return report
+
     def _video_capture_once(self, action, terminal_state, intermediate_states=frozenset()):
         self.begin_stage("camera")
         msgid = str(uuid.uuid4())
@@ -434,51 +489,16 @@ class MQTT:
         ack = report = None
         states = []
         while ack is None or report is None:
-            header, body = self.receive(self.stage_deadline)
-            if header >> 4 != 3:
+            received = self._receive_video_packet()
+            if received is None:
                 continue
-            response_topic, data = self._publish_fields(header, body)
-            if header & 1:
-                continue
-            is_ack = response_topic.endswith("/response")
-            if not is_ack and not response_topic.endswith("/video/report"):
-                continue
-            try:
-                result = json.loads(data)
-            except (ValueError, RecursionError):
-                raise ProtocolError("Malformed MQTT video response") from None
-            if not isinstance(result, dict):
-                raise ProtocolError("Malformed MQTT video response")
-            correlated = result.get("msgid") == msgid
+            is_ack, result = received
             if is_ack:
-                if not correlated:
-                    continue
-                code = result.get("code")
-                if type(code) is not int or code != 0:
-                    raise ProtocolError("Video capture command was rejected; do not retry automatically")
-                if ack is None:
-                    ack = {"code": 0, "msgid": msgid}
-                continue
-            if result.get("type") != "video" or result.get("action") != action:
-                continue
-            stamp = result.get("timestamp")
-            fresh = (type(stamp) in (int, float)
-                     and sent_timestamp <= stamp <= int(time.time() * 1000) + 5000)
-            if not correlated and not (ack is not None and fresh):
-                continue
-            code = result.get("code", 0)
-            state = result.get("state")
-            if type(code) is not int or code not in (0, 200):
-                raise ProtocolError("Video capture command was rejected; do not retry automatically")
-            if state in intermediate_states:
-                states.append(state)
-                continue
-            if state != terminal_state:
-                raise ProtocolError("Video capture command was rejected; do not retry automatically")
-            states.append(state)
-            report = {"action": action, "state": terminal_state, "states": states}
-            if "code" in result:
-                report["code"] = code
+                ack = self._consume_video_ack(result, msgid, ack)
+            else:
+                report = self._consume_video_report(
+                    result, action, terminal_state, intermediate_states, states, ack, msgid, sent_timestamp
+                )
         return {"ack": ack, "report": report}
 
     def start_video_capture_once(self):
