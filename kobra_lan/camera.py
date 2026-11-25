@@ -4,6 +4,7 @@ import http.client
 import os
 from pathlib import Path
 import re
+import select
 import shutil
 import struct
 import subprocess
@@ -73,6 +74,7 @@ def validate_stream_url(host, url, *, port=None):
         raise ProtocolError(UNSAFE_STREAM_URL_MSG)
     try:
         parsed = urlsplit(url)
+        parsed_port = parsed.port
     except ValueError:
         raise ProtocolError(UNSAFE_STREAM_URL_MSG) from None
     valid = (
@@ -80,7 +82,7 @@ def validate_stream_url(host, url, *, port=None):
         and parsed.username is None
         and parsed.password is None
         and parsed.hostname == host
-        and parsed.port == expected_port
+        and parsed_port == expected_port
         and parsed.netloc == f"{host}:{expected_port}"
         and not parsed.query
         and not parsed.fragment
@@ -241,8 +243,8 @@ def _acquire_camera_stream(config, *, allow_start_capture=True, deadline=None):
             if deadline is not None and time.monotonic() >= deadline:
                 raise CameraOperationError("Camera stream timed out before fallback capture could start")
 
-            client.start_video_capture_once()
             start_capture_used = True
+            client.start_video_capture_once()
 
             refreshed_info = payload_data(client.query("info", require_fresh=True))
             if info_compatibility_issue(config.type_id, config.printer_id, refreshed_info) is not None:
@@ -338,6 +340,16 @@ def _next_jpeg_marker(data, index):
     return data[index], index + 1
 
 
+def _read_jpeg_segment(data, index):
+    length = len(data)
+    if index + 2 > length:
+        return None
+    seg_len = struct.unpack("!H", data[index:index + 2])[0]
+    if seg_len < 2 or index + seg_len > length:
+        return None
+    return seg_len
+
+
 def _parse_jpeg_dimensions(data):
     if len(data) < 4 or data[:3] != JPEG_MAGIC:
         return None
@@ -349,10 +361,8 @@ def _parse_jpeg_dimensions(data):
             return None
         if marker == 0x01 or 0xD0 <= marker <= 0xD7:
             continue
-        if index + 2 > length:
-            return None
-        seg_len = struct.unpack("!H", data[index:index + 2])[0]
-        if seg_len < 2 or index + seg_len > length:
+        seg_len = _read_jpeg_segment(data, index)
+        if seg_len is None:
             return None
         if marker in JPEG_SOF_MARKERS:
             if seg_len < 7:
@@ -374,27 +384,79 @@ def parse_image_dimensions(data, image_format):
     return None
 
 
+def _response_socket(conn, response):
+    return getattr(getattr(response.fp, "raw", None), "_sock", None) or conn.sock
+
+
+def _wait_socket_readable(conn, response, deadline, *, proc=None):
+    """Poll socket readability without triggering SocketIO timeout corruption."""
+    sock = _response_socket(conn, response)
+    if sock is None:
+        return True
+    while True:
+        if proc is not None and proc.poll() is not None:
+            return False
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return False
+        ready, _, _ = select.select([sock], [], [], min(0.2, remaining))
+        if ready:
+            return True
+
+
+def _write_fd_with_deadline(fd, data, deadline, *, proc=None):
+    """Write all bytes to a POSIX fd before deadline without blocking indefinitely."""
+    view = memoryview(data)
+    was_blocking = os.get_blocking(fd)
+    os.set_blocking(fd, False)
+    try:
+        while view:
+            if proc is not None and proc.poll() is not None:
+                return False
+            remaining = None if deadline is None else (deadline - time.monotonic())
+            if remaining is not None and remaining <= 0:
+                return False
+            wait_s = 0.2 if remaining is None else min(0.2, remaining)
+            _, writable, _ = select.select([], [fd], [], wait_s)
+            if not writable:
+                continue
+            try:
+                written = os.write(fd, view)
+            except BlockingIOError:
+                continue
+            if written <= 0:
+                return False
+            view = view[written:]
+        return True
+    finally:
+        try:
+            os.set_blocking(fd, was_blocking)
+        except OSError:
+            pass
+
+
 def _feed_flv_to_ffmpeg(proc, conn, response, first_chunk, deadline):
     streamed = 0
+    stdin_fd = proc.stdin.fileno()
     try:
-        proc.stdin.write(first_chunk)
-        proc.stdin.flush()
+        if not _write_fd_with_deadline(stdin_fd, first_chunk, deadline, proc=proc):
+            return
         streamed += len(first_chunk)
         while streamed < MAX_SNAPSHOT_STREAM_BYTES and proc.poll() is None:
+            if not _wait_socket_readable(conn, response, deadline, proc=proc):
+                break
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 break
-            _set_response_timeout(conn, response, min(0.5, remaining))
+            _set_response_timeout(conn, response, remaining)
             try:
                 chunk = response.read1(min(CHUNK_SIZE, MAX_SNAPSHOT_STREAM_BYTES - streamed))
-            except TimeoutError:
-                continue
-            except (OSError, http.client.HTTPException):
+            except (TimeoutError, OSError, http.client.HTTPException):
                 break
             if not chunk:
                 break
-            proc.stdin.write(chunk)
-            proc.stdin.flush()
+            if not _write_fd_with_deadline(stdin_fd, chunk, deadline, proc=proc):
+                break
             streamed += len(chunk)
     except OSError:
         pass
@@ -413,14 +475,6 @@ def _finish_ffmpeg(proc, deadline):
         proc.kill()
         proc.wait()
         raise CameraOperationError("Timed out decoding camera snapshot") from None
-    finally:
-        if proc.stderr is not None:
-            try:
-                proc.stderr.read(4096)
-            except OSError:
-                pass
-            finally:
-                proc.stderr.close()
     if proc.returncode != 0:
         raise CameraOperationError("ffmpeg failed to decode a frame from the camera stream")
 
@@ -445,7 +499,7 @@ def _decode_snapshot_with_ffmpeg(ffmpeg_bin, conn, response, first_chunk, tmp_pa
             cmd,
             stdin=subprocess.PIPE,
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
         )
     except OSError:
         raise CameraOperationError("Failed to start external ffmpeg process") from None
@@ -558,17 +612,32 @@ def validate_pipe_options(*, timeout=None, max_bytes=None):
         )
 
 
-def _write_pipe_chunk(output_stream, chunk, max_bytes, written):
+def _stream_fileno(output_stream):
+    fileno = getattr(output_stream, "fileno", None)
+    if fileno is None:
+        return None
+    try:
+        fd = fileno()
+    except (OSError, ValueError):
+        return None
+    return fd if isinstance(fd, int) and fd >= 0 else None
+
+
+def _write_pipe_chunk(output_stream, chunk, max_bytes, written, *, deadline=None):
     if max_bytes is not None:
         remaining_bytes = max_bytes - written
         if remaining_bytes <= 0:
-            return 0
+            return 0, True
         chunk = chunk[:remaining_bytes]
     if not chunk:
-        return 0
+        return 0, True
+    fd = _stream_fileno(output_stream)
+    if fd is not None:
+        completed = _write_fd_with_deadline(fd, chunk, deadline)
+        return (len(chunk), True) if completed else (0, False)
     output_stream.write(chunk)
     output_stream.flush()
-    return len(chunk)
+    return len(chunk), True
 
 
 def _read_next_pipe_chunk(conn, response, deadline, to_read):
@@ -592,13 +661,19 @@ def _read_next_pipe_chunk(conn, response, deadline, to_read):
 def _stream_flv_to_output(conn, response, first_chunk, output_stream, deadline, max_bytes):
     bytes_written = 0
     try:
-        bytes_written += _write_pipe_chunk(output_stream, first_chunk, max_bytes, bytes_written)
+        count, ok = _write_pipe_chunk(output_stream, first_chunk, max_bytes, bytes_written, deadline=deadline)
+        bytes_written += count
+        if not ok:
+            return bytes_written, False
         while max_bytes is None or bytes_written < max_bytes:
             to_read = CHUNK_SIZE if max_bytes is None else min(CHUNK_SIZE, max_bytes - bytes_written)
             chunk = _read_next_pipe_chunk(conn, response, deadline, to_read)
             if not chunk:
                 break
-            bytes_written += _write_pipe_chunk(output_stream, chunk, max_bytes, bytes_written)
+            count, ok = _write_pipe_chunk(output_stream, chunk, max_bytes, bytes_written, deadline=deadline)
+            bytes_written += count
+            if not ok:
+                break
         return bytes_written, False
     except BrokenPipeError:
         return bytes_written, True

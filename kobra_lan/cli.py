@@ -1,4 +1,5 @@
 import argparse
+import os
 import re
 import sys
 from pathlib import Path
@@ -325,6 +326,20 @@ def build_parser():
     return parser
 
 
+def _silence_broken_stdout():
+    """Redirect stdout fd to /dev/null after BrokenPipeError to prevent shutdown exit 120."""
+    try:
+        devnull = os.open(os.devnull, os.O_WRONLY)
+    except OSError:
+        return
+    try:
+        os.dup2(devnull, sys.stdout.fileno())
+    except (OSError, ValueError, AttributeError):
+        pass
+    finally:
+        os.close(devnull)
+
+
 def _emit_error(json_mode, pipe_mode, *, code, message, partial=None):
     if pipe_mode and not json_mode:
         print(f"Error ({code}): {safe_text(message)}", file=sys.stderr)
@@ -439,13 +454,15 @@ def main(argv=None):
             result = watch.record(result, args.state_dir)
         elif pipe_mode:
             with registry.access(args.config, args.selected_printer) as (config, _):
-                camera_pipe(
+                pipe_result = camera_pipe(
                     config,
                     sys.stdout.buffer,
                     timeout=args.timeout,
                     max_bytes=args.max_bytes,
                     allow_start_capture=not args.no_start_capture,
                 )
+            if isinstance(pipe_result, dict) and pipe_result.get("broken_pipe"):
+                _silence_broken_stdout()
             return 0
         else:
             with registry.access(args.config, args.selected_printer) as (config, source):

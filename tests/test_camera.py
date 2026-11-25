@@ -1,6 +1,7 @@
 """Offline unit tests for Kobra X camera status, snapshot, and raw FLV piping."""
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import io
+import os
 from pathlib import Path
 import stat
 import struct
@@ -175,8 +176,11 @@ def write_fake_ffmpeg(directory: Path, mode="ok", argv_log: Path | None = None):
         f"log_path = {log_path}\n"
         "if log_path is not None:\n"
         "    pathlib.Path(log_path).write_text(json.dumps(sys.argv))\n"
-        "data = sys.stdin.buffer.read(4096)\n"
         f"mode = {mode!r}\n"
+        "if mode == 'sleep':\n"
+        "    time.sleep(5)\n"
+        "    raise SystemExit(0)\n"
+        "data = sys.stdin.buffer.read(4096)\n"
         "out = pathlib.Path(sys.argv[-1])\n"
         "if mode == 'fail':\n"
         "    sys.stderr.write('synthetic decode error\\n')\n"
@@ -186,9 +190,6 @@ def write_fake_ffmpeg(directory: Path, mode="ok", argv_log: Path | None = None):
         "    raise SystemExit(0)\n"
         "if mode == 'corrupt':\n"
         "    out.write_bytes(b'NOT_AN_IMAGE_AT_ALL')\n"
-        "    raise SystemExit(0)\n"
-        "if mode == 'sleep':\n"
-        "    time.sleep(5)\n"
         "    raise SystemExit(0)\n"
         "if not data.startswith(b'FLV'):\n"
         "    sys.stderr.write('missing FLV on stdin\\n')\n"
@@ -218,6 +219,8 @@ class CameraURLValidationAndStatusTests(unittest.TestCase):
             f"https://127.0.0.1:18088/live/{SECRET_TOKEN}",
             f"http://192.168.1.99:18088/live/{SECRET_TOKEN}",
             f"http://127.0.0.1:18910/live/{SECRET_TOKEN}",
+            f"http://127.0.0.1:bad/live/{SECRET_TOKEN}",
+            f"http://127.0.0.1:99999/live/{SECRET_TOKEN}",
             f"http://127.0.0.1/live/{SECRET_TOKEN}",
             f"http://user:pass@127.0.0.1:18088/live/{SECRET_TOKEN}",
             f"http://127.0.0.1:18088/live/{SECRET_TOKEN}?extra=1",
@@ -554,6 +557,61 @@ class CameraSnapshotAndPipeTests(unittest.TestCase):
         self.assertTrue(out.getvalue().startswith(camera.FLV_MAGIC))
         self.assertGreaterEqual(result["bytes_written"], 16)
         self.assertLess(result["bytes_written"], 16 * 21)
+
+    def test_snapshot_sends_stop_capture_when_start_capture_raises_mid_wait(self):
+        fake_ffmpeg = write_fake_ffmpeg(self.bin_dir, mode="ok")
+        self.server.status = 404
+        FakeCameraMQTT.start_hook = lambda: (_ for _ in ()).throw(TimeoutError("wait timeout"))
+        out_file = self.root / "start-timeout.jpg"
+        cfg = make_config()
+        with patch("kobra_lan.camera.MQTT", FakeCameraMQTT), \
+                patch("kobra_lan.camera.CAMERA_STREAM_PORT", self.server.port), \
+                patch("kobra_lan.camera.shutil.which", return_value=str(fake_ffmpeg)):
+            with self.assertRaises(TimeoutError):
+                camera.camera_snapshot(cfg, out_file, timeout=10)
+        self.assertIn(("start_video_capture_once",), FakeCameraMQTT.calls)
+        self.assertIn(("stop_video_capture_once",), FakeCameraMQTT.calls)
+
+    def test_snapshot_survives_pause_longer_than_half_second_within_timeout(self):
+        fake_ffmpeg = write_fake_ffmpeg(self.bin_dir, mode="ok")
+        self.server.chunks = [SYNTHETIC_FLV[:16], SYNTHETIC_FLV[16:]]
+        self.server.delay_per_chunk = 0.7
+        out_file = self.root / "delayed.jpg"
+        cfg = make_config()
+        with patch("kobra_lan.camera.MQTT", FakeCameraMQTT), \
+                patch("kobra_lan.camera.CAMERA_STREAM_PORT", self.server.port), \
+                patch("kobra_lan.camera.shutil.which", return_value=str(fake_ffmpeg)):
+            result = camera.camera_snapshot(cfg, out_file, timeout=5)
+        self.assertEqual(result["format"], "jpeg")
+        self.assertTrue(out_file.is_file())
+
+    def test_snapshot_enforces_deadline_when_ffmpeg_stalls_on_stdin(self):
+        fake_ffmpeg = write_fake_ffmpeg(self.bin_dir, mode="sleep")
+        self.server.chunks = [SYNTHETIC_FLV[:16]] + [b"\x00" * 65536] * 20
+        out_file = self.root / "stalled.jpg"
+        cfg = make_config()
+        t0 = time.monotonic()
+        with patch("kobra_lan.camera.MQTT", FakeCameraMQTT), \
+                patch("kobra_lan.camera.CAMERA_STREAM_PORT", self.server.port), \
+                patch("kobra_lan.camera.shutil.which", return_value=str(fake_ffmpeg)):
+            with self.assertRaises(camera.CameraOperationError):
+                camera.camera_snapshot(cfg, out_file, timeout=1)
+        self.assertLess(time.monotonic() - t0, 3.0)
+        self.assertFalse(out_file.exists())
+
+    def test_pipe_enforces_deadline_when_stdout_pipe_blocks(self):
+        self.server.chunks = [SYNTHETIC_FLV[:16]] + [b"\x00" * 65536] * 32
+        read_fd, write_fd = os.pipe()
+        cfg = make_config()
+        t0 = time.monotonic()
+        try:
+            with os.fdopen(write_fd, "wb", buffering=0) as writer, \
+                    patch("kobra_lan.camera.MQTT", FakeCameraMQTT), \
+                    patch("kobra_lan.camera.CAMERA_STREAM_PORT", self.server.port):
+                camera.camera_pipe(cfg, writer, timeout=1)
+        finally:
+            os.close(read_fd)
+        self.assertLess(time.monotonic() - t0, 3.0)
 
 
 if __name__ == "__main__":
