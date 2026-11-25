@@ -350,6 +350,17 @@ def _read_jpeg_segment(data, index):
     return seg_len
 
 
+def _extract_sof_dimensions(data, index, seg_len):
+    if seg_len < 7:
+        return None
+    height, width = struct.unpack("!HH", data[index + 3:index + 7])
+    return (width, height) if width > 0 and height > 0 else None
+
+
+def _is_standalone_jpeg_marker(marker):
+    return marker == 0x01 or 0xD0 <= marker <= 0xD7
+
+
 def _parse_jpeg_dimensions(data):
     if len(data) < 4 or data[:3] != JPEG_MAGIC:
         return None
@@ -359,16 +370,13 @@ def _parse_jpeg_dimensions(data):
         marker, index = _next_jpeg_marker(data, index)
         if marker is None or marker in (0xD9, 0xDA):
             return None
-        if marker == 0x01 or 0xD0 <= marker <= 0xD7:
+        if _is_standalone_jpeg_marker(marker):
             continue
         seg_len = _read_jpeg_segment(data, index)
         if seg_len is None:
             return None
         if marker in JPEG_SOF_MARKERS:
-            if seg_len < 7:
-                return None
-            height, width = struct.unpack("!HH", data[index + 3:index + 7])
-            return (width, height) if width > 0 and height > 0 else None
+            return _extract_sof_dimensions(data, index, seg_len)
         index += seg_len
     return None
 
@@ -401,7 +409,7 @@ def _response_has_buffered_data(response, sock):
         if getattr(response, "chunked", False):
             return bool(buffered.lstrip(b"\r\n"))
         return bool(buffered)
-    except (BlockingIOError, OSError, ValueError):
+    except (OSError, ValueError):
         return False
     finally:
         try:
@@ -428,6 +436,18 @@ def _wait_socket_readable(conn, response, deadline, *, proc=None):
             return True
 
 
+def _wait_fd_writable(fd, deadline, proc):
+    """Wait one bounded slice for fd writability; return 'ready', 'retry', or 'stop'."""
+    if proc is not None and proc.poll() is not None:
+        return "stop"
+    remaining = None if deadline is None else (deadline - time.monotonic())
+    if remaining is not None and remaining <= 0:
+        return "stop"
+    wait_s = 0.2 if remaining is None else min(0.2, remaining)
+    _, writable, _ = select.select([], [fd], [], wait_s)
+    return "ready" if writable else "retry"
+
+
 def _write_fd_with_deadline(fd, data, deadline, *, proc=None):
     """Write bytes to a POSIX fd before deadline; return (bytes_written, completed)."""
     view = memoryview(data)
@@ -436,14 +456,10 @@ def _write_fd_with_deadline(fd, data, deadline, *, proc=None):
     os.set_blocking(fd, False)
     try:
         while view:
-            if proc is not None and proc.poll() is not None:
+            state = _wait_fd_writable(fd, deadline, proc)
+            if state == "stop":
                 return total_written, False
-            remaining = None if deadline is None else (deadline - time.monotonic())
-            if remaining is not None and remaining <= 0:
-                return total_written, False
-            wait_s = 0.2 if remaining is None else min(0.2, remaining)
-            _, writable, _ = select.select([], [fd], [], wait_s)
-            if not writable:
+            if state == "retry":
                 continue
             try:
                 written = os.write(fd, view)
@@ -478,7 +494,7 @@ def _feed_flv_to_ffmpeg(proc, conn, response, first_chunk, deadline):
             _set_response_timeout(conn, response, remaining)
             try:
                 chunk = response.read1(min(CHUNK_SIZE, MAX_SNAPSHOT_STREAM_BYTES - streamed))
-            except (TimeoutError, OSError, http.client.HTTPException):
+            except (OSError, http.client.HTTPException):
                 break
             if not chunk:
                 break
