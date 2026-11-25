@@ -1,16 +1,19 @@
 """Direct, bounded, token-redacted Kobra X LAN camera status, snapshot, and FLV piping."""
 import hashlib
 import http.client
+import io
 import os
 from pathlib import Path
 import re
 import select
 import shutil
+import socket
 import struct
 import subprocess
-import tempfile
 import time
 from urllib.parse import urlsplit
+import uuid
+import zlib
 
 from .config import ProtocolError
 from .mqtt import MQTT, MQTTClosed
@@ -58,6 +61,104 @@ class CameraOperationError(ProtocolError):
     def __init__(self, message):
         super().__init__(message)
         self.exit_code = 3
+
+
+class _PartialBrokenPipe(BrokenPipeError):
+    """BrokenPipeError carrying the partial byte count transferred before closure."""
+
+    def __init__(self, bytes_written):
+        super().__init__("Broken pipe")
+        self.bytes_written = bytes_written
+
+
+class _DeadlineSocket:
+    """Socket wrapper enforcing an absolute monotonic deadline across multi-read HTTP calls."""
+
+    def __init__(self, raw_sock, deadline):
+        self._sock = raw_sock
+        self._deadline = deadline
+        self._nonblocking = False
+        self._io_refs = 0
+        self._closed = False
+
+    def _apply_deadline(self):
+        if self._nonblocking or self._deadline is None:
+            return
+        remaining = self._deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("HTTP deadline exceeded")
+        self._sock.settimeout(remaining)
+
+    def recv(self, bufsize, flags=0):
+        self._apply_deadline()
+        return self._sock.recv(bufsize, flags)
+
+    def recv_into(self, buffer, nbytes=0, flags=0):
+        self._apply_deadline()
+        return self._sock.recv_into(buffer, nbytes, flags)
+
+    def sendall(self, data, flags=0):
+        self._apply_deadline()
+        return self._sock.sendall(data, flags)
+
+    def send(self, data, flags=0):
+        self._apply_deadline()
+        return self._sock.send(data, flags)
+
+    def makefile(self, mode="r", buffering=None):
+        raw = socket.SocketIO(self, mode)
+        self._io_refs += 1
+        if buffering is None or buffering < 0:
+            buffering = io.DEFAULT_BUFFER_SIZE
+        if buffering == 0:
+            return raw
+        return io.BufferedReader(raw, buffering)
+
+    def _decref_socketios(self):
+        if self._io_refs > 0:
+            self._io_refs -= 1
+        if self._closed and self._io_refs <= 0:
+            self._sock.close()
+
+    def fileno(self):
+        return self._sock.fileno()
+
+    def gettimeout(self):
+        return self._sock.gettimeout()
+
+    def settimeout(self, value):
+        self._nonblocking = value == 0.0
+        self._sock.settimeout(value)
+
+    def setblocking(self, flag):
+        self._nonblocking = not flag
+        self._sock.setblocking(flag)
+
+    def close(self):
+        self._closed = True
+        if self._io_refs <= 0:
+            self._sock.close()
+
+    def __getattr__(self, name):
+        return getattr(self._sock, name)
+
+
+class _DeadlineHTTPConnection(http.client.HTTPConnection):
+    """HTTPConnection enforcing an absolute deadline across connect, headers, and body reads."""
+
+    def __init__(self, host, port, *, timeout, deadline=None):
+        super().__init__(host, port, timeout=timeout)
+        self._deadline = deadline
+
+    def connect(self):
+        if self._deadline is not None:
+            remaining = self._deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("HTTP connect deadline exceeded")
+            self.timeout = min(self.timeout, remaining)
+        super().connect()
+        if self._deadline is not None and self.sock is not None:
+            self.sock = _DeadlineSocket(self.sock, self._deadline)
 
 
 def validate_stream_url(host, url, *, port=None):
@@ -183,19 +284,24 @@ def _open_flv_http(host, port, path, *, deadline=None):
         if remaining <= 0:
             return None, None, b""
         timeout = min(timeout, remaining)
-    conn = http.client.HTTPConnection(host, port, timeout=timeout)
+    conn = _DeadlineHTTPConnection(host, port, timeout=timeout, deadline=deadline)
+    response = None
     try:
         conn.request("GET", path)
         response = conn.getresponse()
         if response.status not in (200, 206):
+            response.close()
             conn.close()
             return None, None, b""
         first_chunk = _read_flv_prefix(conn, response, deadline)
         if len(first_chunk) < len(FLV_MAGIC) or not first_chunk.startswith(FLV_MAGIC):
+            response.close()
             conn.close()
             return None, None, b""
         return conn, response, first_chunk
     except (OSError, http.client.HTTPException):
+        if response is not None:
+            response.close()
         conn.close()
         return None, None, b""
 
@@ -324,11 +430,45 @@ def validate_snapshot_request(output_path, *, timeout=DEFAULT_SNAPSHOT_TIMEOUT, 
     return dest, image_format, ffmpeg_bin
 
 
-def _parse_png_dimensions(data):
-    if len(data) < 24 or data[:8] != PNG_MAGIC or data[12:16] != b"IHDR":
+def _read_png_chunk(data, pos):
+    if pos + 12 > len(data):
         return None
-    width, height = struct.unpack("!II", data[16:24])
-    return (width, height) if width > 0 and height > 0 else None
+    chunk_len = struct.unpack("!I", data[pos:pos + 4])[0]
+    end = pos + 12 + chunk_len
+    if end > len(data):
+        return None
+    chunk_type = data[pos + 4:pos + 8]
+    payload = data[pos + 8:pos + 8 + chunk_len]
+    expected_crc = struct.unpack("!I", data[pos + 8 + chunk_len:end])[0]
+    if (zlib.crc32(chunk_type + payload) & 0xFFFFFFFF) != expected_crc:
+        return None
+    return chunk_type, payload, end
+
+
+def _has_valid_png_chunks(data, pos):
+    seen_idat = False
+    while pos < len(data):
+        chunk = _read_png_chunk(data, pos)
+        if chunk is None:
+            return False
+        chunk_type, payload, pos = chunk
+        if chunk_type == b"IDAT":
+            seen_idat = True
+        elif chunk_type == b"IEND":
+            return seen_idat and not payload
+    return False
+
+
+def _parse_png_dimensions(data):
+    if len(data) < 33 or data[:8] != PNG_MAGIC:
+        return None
+    first = _read_png_chunk(data, 8)
+    if first is None or first[0] != b"IHDR" or len(first[1]) != 13:
+        return None
+    width, height = struct.unpack("!II", first[1][:8])
+    if width <= 0 or height <= 0:
+        return None
+    return (width, height) if _has_valid_png_chunks(data, first[2]) else None
 
 
 def _next_jpeg_marker(data, index):
@@ -361,22 +501,39 @@ def _is_standalone_jpeg_marker(marker):
     return marker == 0x01 or 0xD0 <= marker <= 0xD7
 
 
+def _has_jpeg_eoi_after_sos(data, index):
+    seg_len = _read_jpeg_segment(data, index)
+    if seg_len is None:
+        return False
+    scan_start = index + seg_len
+    return b"\xff\xd9" in data[scan_start:]
+
+
+def _finish_jpeg_sos(data, index, dims):
+    if dims is None or not _has_jpeg_eoi_after_sos(data, index):
+        return None
+    return dims
+
+
 def _parse_jpeg_dimensions(data):
     if len(data) < 4 or data[:3] != JPEG_MAGIC:
         return None
     index = 2
     length = len(data)
+    dims = None
     while index < length:
         marker, index = _next_jpeg_marker(data, index)
-        if marker is None or marker in (0xD9, 0xDA):
+        if marker in (None, 0xD9):
             return None
+        if marker == 0xDA:
+            return _finish_jpeg_sos(data, index, dims)
         if _is_standalone_jpeg_marker(marker):
             continue
         seg_len = _read_jpeg_segment(data, index)
         if seg_len is None:
             return None
-        if marker in JPEG_SOF_MARKERS:
-            return _extract_sof_dimensions(data, index, seg_len)
+        if marker in JPEG_SOF_MARKERS and dims is None:
+            dims = _extract_sof_dimensions(data, index, seg_len)
         index += seg_len
     return None
 
@@ -465,6 +622,8 @@ def _write_fd_with_deadline(fd, data, deadline, *, proc=None):
                 written = os.write(fd, view)
             except BlockingIOError:
                 continue
+            except BrokenPipeError:
+                raise _PartialBrokenPipe(total_written) from None
             if written <= 0:
                 return total_written, False
             total_written += written
@@ -523,7 +682,8 @@ def _finish_ffmpeg(proc, deadline):
         raise CameraOperationError("ffmpeg failed to decode a frame from the camera stream")
 
 
-def _decode_snapshot_with_ffmpeg(ffmpeg_bin, conn, response, first_chunk, tmp_path, deadline):
+def _decode_snapshot_with_ffmpeg(ffmpeg_bin, image_format, conn, response, first_chunk, out_fd, deadline):
+    codec = "png" if image_format == "png" else "mjpeg"
     cmd = [
         ffmpeg_bin,
         "-hide_banner",
@@ -535,14 +695,17 @@ def _decode_snapshot_with_ffmpeg(ffmpeg_bin, conn, response, first_chunk, tmp_pa
         "pipe:0",
         "-frames:v",
         "1",
-        "-y",
-        str(tmp_path),
+        "-c:v",
+        codec,
+        "-f",
+        "image2pipe",
+        "pipe:1",
     ]
     try:
         proc = subprocess.Popen(
             cmd,
             stdin=subprocess.PIPE,
-            stdout=subprocess.DEVNULL,
+            stdout=out_fd,
             stderr=subprocess.DEVNULL,
         )
     except OSError:
@@ -556,6 +719,25 @@ def _decode_snapshot_with_ffmpeg(ffmpeg_bin, conn, response, first_chunk, tmp_pa
             proc.kill()
             proc.wait()
         raise
+
+
+def _read_snapshot_fd(tmp_fd):
+    size = os.fstat(tmp_fd).st_size
+    if size <= 0 or size > MAX_IMAGE_BYTES:
+        raise CameraOperationError("Decoded camera snapshot was empty or exceeded size limit")
+    os.lseek(tmp_fd, 0, os.SEEK_SET)
+    chunks = []
+    remaining = MAX_IMAGE_BYTES + 1
+    while remaining > 0:
+        part = os.read(tmp_fd, min(65536, remaining))
+        if not part:
+            break
+        chunks.append(part)
+        remaining -= len(part)
+    image_bytes = b"".join(chunks)
+    if not image_bytes or len(image_bytes) > MAX_IMAGE_BYTES:
+        raise CameraOperationError("Decoded camera snapshot was empty or exceeded size limit")
+    return image_bytes
 
 
 def _publish_snapshot_at(parent_fd, tmp_name, dest_name, *, overwrite):
@@ -587,25 +769,26 @@ def camera_snapshot(
         config, allow_start_capture=allow_start_capture, deadline=deadline
     )
     stop_capture_sent = False
-    tmp_path = None
+    tmp_name = None
+    tmp_fd = None
     parent_fd = None
     try:
         parent_fd = os.open(parent_real, os.O_RDONLY | os.O_DIRECTORY)
-        fd, raw_tmp = tempfile.mkstemp(
-            dir=parent_real,
-            prefix=".kobra-lan-snapshot-",
-            suffix=dest.suffix.lower(),
+        candidate = f".kobra-lan-snapshot-{uuid.uuid4().hex}{dest.suffix.lower()}"
+        tmp_fd = os.open(
+            candidate,
+            os.O_CREAT | os.O_EXCL | os.O_RDWR | os.O_NOFOLLOW,
+            0o600,
+            dir_fd=parent_fd,
         )
-        os.close(fd)
-        tmp_path = Path(raw_tmp)
+        tmp_name = candidate
 
-        _decode_snapshot_with_ffmpeg(ffmpeg_bin, conn, response, first_chunk, tmp_path, deadline)
+        _decode_snapshot_with_ffmpeg(
+            ffmpeg_bin, image_format, conn, response, first_chunk, tmp_fd, deadline
+        )
 
         try:
-            size = tmp_path.stat().st_size
-            if size <= 0 or size > MAX_IMAGE_BYTES:
-                raise CameraOperationError("Decoded camera snapshot was empty or exceeded size limit")
-            image_bytes = tmp_path.read_bytes()
+            image_bytes = _read_snapshot_fd(tmp_fd)
         except OSError:
             raise CameraOperationError("Decoded camera snapshot could not be read") from None
 
@@ -615,13 +798,18 @@ def camera_snapshot(
         width, height = dimensions
         digest = hashlib.sha256(image_bytes).hexdigest()
 
-        _publish_snapshot_at(parent_fd, tmp_path.name, dest_name, overwrite=overwrite)
-        tmp_path = None
+        os.close(tmp_fd)
+        tmp_fd = None
+        _publish_snapshot_at(parent_fd, tmp_name, dest_name, overwrite=overwrite)
+        tmp_name = None
     finally:
+        response.close()
         conn.close()
-        if tmp_path is not None:
+        if tmp_fd is not None:
+            os.close(tmp_fd)
+        if tmp_name is not None and parent_fd is not None:
             try:
-                tmp_path.unlink(missing_ok=True)
+                os.unlink(tmp_name, dir_fd=parent_fd)
             except OSError:
                 pass
         if parent_fd is not None:
@@ -667,6 +855,22 @@ def _stream_fileno(output_stream):
     return fd if isinstance(fd, int) and fd >= 0 else None
 
 
+def _write_stream_all(output_stream, chunk):
+    view = memoryview(chunk)
+    total = 0
+    while view:
+        written = output_stream.write(view)
+        if written is None:
+            total += len(view)
+            break
+        if type(written) is not int or written <= 0:
+            raise CameraOperationError("Camera pipe output stream made no progress")
+        total += written
+        view = view[written:]
+    output_stream.flush()
+    return total, True
+
+
 def _write_pipe_chunk(output_stream, chunk, max_bytes, written, *, deadline=None):
     if max_bytes is not None:
         remaining_bytes = max_bytes - written
@@ -678,9 +882,7 @@ def _write_pipe_chunk(output_stream, chunk, max_bytes, written, *, deadline=None
     fd = _stream_fileno(output_stream)
     if fd is not None:
         return _write_fd_with_deadline(fd, chunk, deadline)
-    output_stream.write(chunk)
-    output_stream.flush()
-    return len(chunk), True
+    return _write_stream_all(output_stream, chunk)
 
 
 def _read_next_pipe_chunk(conn, response, deadline, to_read):
@@ -718,6 +920,8 @@ def _stream_flv_to_output(conn, response, first_chunk, output_stream, deadline, 
             if not ok:
                 break
         return bytes_written, False
+    except _PartialBrokenPipe as error:
+        return bytes_written + error.bytes_written, True
     except BrokenPipeError:
         return bytes_written, True
 
@@ -742,6 +946,7 @@ def camera_pipe(
             conn, response, first_chunk, output_stream, deadline, max_bytes
         )
     finally:
+        response.close()
         conn.close()
         if start_capture_used:
             stop_capture_sent = _best_effort_stop_capture(config)

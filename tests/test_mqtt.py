@@ -363,6 +363,8 @@ class MQTTVideoAndPeripherieTests(unittest.TestCase):
             ("start", lambda: [self.ack(), self.video_report("startCapture", "pushStarted", code=500)], ProtocolError, "rejected"),
             ("stop", lambda: [self.ack(code=False)], ProtocolError, "rejected"),
             ("stop", lambda: [self.ack(), self.video_report("stopCapture", "initSuccess")], ProtocolError, "rejected"),
+            ("stop", lambda: [self.ack(), self.video_report("stopCapture", [])], ProtocolError, "rejected"),
+            ("start", lambda: [self.ack(), self.video_report("startCapture", {"bad": 1})], ProtocolError, "rejected"),
             ("stop", lambda: [(0x30, string("root/video/report") + b"not-json")], ProtocolError, "Malformed MQTT video response"),
             ("stop", lambda: [self.ack(), self.client._timeout()], MQTTFailure, "timeout"),
         )
@@ -389,6 +391,20 @@ class MQTTVideoAndPeripherieTests(unittest.TestCase):
                     with self.assertRaisesRegex(exc_type, regex):
                         action_fn()
                 self.client.sock.sendall.assert_called_once()
+
+    def test_video_capture_keeps_correlated_terminal_report_before_ack(self):
+        def receive():
+            request = sent_publish_payload(self.client.sock)
+            yield self.video_report("startCapture", "pushStarted", msgid=request["msgid"])
+            yield self.video_report("stopCapture", "pushStopped", msgid="unrelated")
+            yield self.ack()
+
+        packets = receive()
+        with patch.object(self.client, "receive", side_effect=lambda _: next(packets)):
+            result = self.client.start_video_capture_once()
+        self.assertEqual(result["report"]["state"], "pushStarted")
+        self.assertEqual(result["report"]["states"], ["pushStarted"])
+        self.client.sock.sendall.assert_called_once()
 
 
 if __name__ == "__main__":

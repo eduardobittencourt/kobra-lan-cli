@@ -12,6 +12,7 @@ import time
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
+import zlib
 
 from kobra_lan import camera
 from kobra_lan.config import ProtocolError
@@ -20,19 +21,30 @@ SECRET_TOKEN = "T0kEnS3cR3t99"
 SYNTHETIC_FLV = b"FLV\x01\x01\x00\x00\x00\x09\x00\x00\x00\x00" + (b"\x09\x00\x00\x04\x00\x00\x00\x00\x00\x00\x00\x17\x00\x00\x00" * 16)
 
 
+def _png_chunk(chunk_type, payload):
+    crc = zlib.crc32(chunk_type + payload) & 0xFFFFFFFF
+    return struct.pack("!I", len(payload)) + chunk_type + payload + struct.pack("!I", crc)
+
+
 def make_minimal_png(width=640, height=360):
     ihdr_data = struct.pack("!IIBBBBB", width, height, 8, 2, 0, 0, 0)
-    ihdr = struct.pack("!I", len(ihdr_data)) + b"IHDR" + ihdr_data + b"\x00\x00\x00\x00"
-    iend = b"\x00\x00\x00\x00IEND\xaeB`\x82"
-    return camera.PNG_MAGIC + ihdr + iend
+    idat_data = zlib.compress(b"\x00\x00\x00\x00")
+    return (
+        camera.PNG_MAGIC
+        + _png_chunk(b"IHDR", ihdr_data)
+        + _png_chunk(b"IDAT", idat_data)
+        + _png_chunk(b"IEND", b"")
+    )
 
 
 def make_minimal_jpeg(width=1280, height=720):
     app0 = b"\xff\xe0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00"
     sof0_payload = struct.pack("!BHHB", 8, height, width, 3) + b"\x01\x22\x00\x02\x11\x01\x03\x11\x01"
     sof0 = b"\xff\xc0" + struct.pack("!H", len(sof0_payload) + 2) + sof0_payload
+    sos_payload = b"\x03\x01\x00\x02\x11\x03\x11\x00\x3f\x00"
+    sos = b"\xff\xda" + struct.pack("!H", len(sos_payload) + 2) + sos_payload + b"\x00"
     eoi = b"\xff\xd9"
-    return b"\xff\xd8" + app0 + sof0 + eoi
+    return b"\xff\xd8" + app0 + sof0 + sos + eoi
 
 
 def make_config(host="127.0.0.1"):
@@ -196,21 +208,19 @@ def write_fake_ffmpeg(directory: Path, mode="ok", argv_log: Path | None = None, 
         "        raise SystemExit(3)\n"
         "else:\n"
         "    data = sys.stdin.buffer.read(4096)\n"
-        "out = pathlib.Path(sys.argv[-1])\n"
         "if mode == 'fail':\n"
         "    sys.stderr.write('synthetic decode error\\n')\n"
         "    raise SystemExit(1)\n"
         "if mode == 'empty':\n"
-        "    out.write_bytes(b'')\n"
         "    raise SystemExit(0)\n"
         "if mode == 'corrupt':\n"
-        "    out.write_bytes(b'NOT_AN_IMAGE_AT_ALL')\n"
+        "    sys.stdout.buffer.write(b'NOT_AN_IMAGE_AT_ALL')\n"
         "    raise SystemExit(0)\n"
         "if not data.startswith(b'FLV'):\n"
         "    sys.stderr.write('missing FLV on stdin\\n')\n"
         "    raise SystemExit(2)\n"
-        f"payload = bytes.fromhex({png_hex!r}) if out.suffix.lower() == '.png' else bytes.fromhex({jpeg_hex!r})\n"
-        "out.write_bytes(payload)\n"
+        f"payload = bytes.fromhex({png_hex!r}) if 'png' in sys.argv else bytes.fromhex({jpeg_hex!r})\n"
+        "sys.stdout.buffer.write(payload)\n"
     )
     script.chmod(script.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
     return script
@@ -631,9 +641,10 @@ class CameraSnapshotAndPipeTests(unittest.TestCase):
             dummy_conn = SimpleNamespace(sock=cli_sock)
             tmp_out = self.root / "chunked.jpg"
             t0 = time.monotonic()
-            camera._decode_snapshot_with_ffmpeg(
-                str(fake_ffmpeg), dummy_conn, resp, first, tmp_out, time.monotonic() + 5
-            )
+            with tmp_out.open("w+b") as out_fp:
+                camera._decode_snapshot_with_ffmpeg(
+                    str(fake_ffmpeg), "jpeg", dummy_conn, resp, first, out_fp.fileno(), time.monotonic() + 5
+                )
             self.assertLess(time.monotonic() - t0, 2.0)
             self.assertTrue(tmp_out.read_bytes().startswith(camera.JPEG_MAGIC))
         finally:
@@ -681,6 +692,121 @@ class CameraSnapshotAndPipeTests(unittest.TestCase):
         self.assertLess(elapsed, 3.0)
         self.assertGreater(len(drained), 16)
         self.assertEqual(result["bytes_written"], len(drained))
+
+    def test_truncated_png_and_jpeg_with_valid_dimensions_are_rejected(self):
+        valid_png = make_minimal_png(640, 360)
+        self.assertEqual(camera.parse_image_dimensions(valid_png, "png"), (640, 360))
+        # Truncated PNG retaining full valid IHDR (no IDAT/IEND).
+        self.assertIsNone(camera.parse_image_dimensions(valid_png[:33], "png"))
+        # PNG missing IEND.
+        self.assertIsNone(camera.parse_image_dimensions(valid_png[:-12], "png"))
+
+        valid_jpeg = make_minimal_jpeg(1280, 720)
+        self.assertEqual(camera.parse_image_dimensions(valid_jpeg, "jpeg"), (1280, 720))
+        # Truncated JPEG retaining SOF0 dimensions without SOS/EOI.
+        sos_pos = valid_jpeg.index(b"\xff\xda")
+        self.assertIsNone(camera.parse_image_dimensions(valid_jpeg[:sos_pos], "jpeg"))
+        # JPEG with SOS but missing EOI.
+        self.assertIsNone(camera.parse_image_dimensions(valid_jpeg[:-2], "jpeg"))
+
+    def test_http_header_dribble_respects_absolute_deadline(self):
+        import socket as _socket
+
+        listener = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(1)
+        port = listener.getsockname()[1]
+        stop_event = threading.Event()
+
+        def slow_peer():
+            try:
+                conn, _ = listener.accept()
+                try:
+                    conn.recv(4096)
+                    conn.sendall(b"HTTP/1.1 200 OK\r\n")
+                    for idx in range(20):
+                        if stop_event.wait(timeout=0.3):
+                            break
+                        conn.sendall(f"X-Slow-{idx}: pad\r\n".encode())
+                except OSError:
+                    pass
+                finally:
+                    conn.close()
+            finally:
+                listener.close()
+
+        thread = threading.Thread(target=slow_peer, daemon=True)
+        thread.start()
+        try:
+            t0 = time.monotonic()
+            conn, resp, first = camera._open_flv_http(
+                "127.0.0.1", port, f"/live/{SECRET_TOKEN}", deadline=t0 + 1.0
+            )
+            elapsed = time.monotonic() - t0
+            self.assertIsNone(conn)
+            self.assertIsNone(resp)
+            self.assertEqual(first, b"")
+            self.assertLess(elapsed, 2.2)
+        finally:
+            stop_event.set()
+            thread.join(timeout=2)
+
+    def test_pipe_honors_short_writes_and_preserves_partial_count_on_broken_pipe(self):
+        # Short-writing non-fd stream must send all bytes up to max_bytes.
+        class ShortWriter:
+            def __init__(self):
+                self.buf = bytearray()
+
+            def write(self, data):
+                part = bytes(data[:2])
+                self.buf.extend(part)
+                return len(part)
+
+            def flush(self):
+                pass
+
+        writer = ShortWriter()
+        cfg = make_config()
+        with patch("kobra_lan.camera.MQTT", FakeCameraMQTT), \
+                patch("kobra_lan.camera.CAMERA_STREAM_PORT", self.server.port):
+            result = camera.camera_pipe(cfg, writer, max_bytes=15)
+        self.assertEqual(bytes(writer.buf), SYNTHETIC_FLV[:15])
+        self.assertEqual(result["bytes_written"], 15)
+
+        # Zero-progress non-fd stream must fail explicitly.
+        class ZeroWriter:
+            def write(self, _data):
+                return 0
+
+            def flush(self):
+                pass
+
+        zero_writer = ZeroWriter()
+        with patch("kobra_lan.camera.MQTT", FakeCameraMQTT), \
+                patch("kobra_lan.camera.CAMERA_STREAM_PORT", self.server.port):
+            with self.assertRaises(camera.CameraOperationError):
+                camera.camera_pipe(cfg, zero_writer, max_bytes=15)
+
+        # Partial os.write followed by BrokenPipeError preserves partial count.
+        write_calls = [0]
+
+        def fake_os_write(_fd, view):
+            write_calls[0] += 1
+            if write_calls[0] == 1:
+                return min(5, len(view))
+            raise BrokenPipeError("peer closed mid-chunk")
+
+        read_fd, write_fd = os.pipe()
+        try:
+            with os.fdopen(write_fd, "wb", buffering=0) as fd_writer, \
+                    patch("kobra_lan.camera.os.write", side_effect=fake_os_write), \
+                    patch("kobra_lan.camera.MQTT", FakeCameraMQTT), \
+                    patch("kobra_lan.camera.CAMERA_STREAM_PORT", self.server.port):
+                partial_result = camera.camera_pipe(cfg, fd_writer, max_bytes=32)
+        finally:
+            os.close(read_fd)
+        self.assertTrue(partial_result["broken_pipe"])
+        self.assertEqual(partial_result["bytes_written"], 5)
 
 
 if __name__ == "__main__":

@@ -459,7 +459,7 @@ class MQTT:
             return None
         code = result.get("code", 0)
         state = result.get("state")
-        if type(code) is not int or code not in (0, 200):
+        if type(code) is not int or code not in (0, 200) or not isinstance(state, str):
             raise ProtocolError(VIDEO_CAPTURE_REJECTED)
         if state in intermediate_states:
             states.append(state)
@@ -495,7 +495,7 @@ class MQTT:
             is_ack, result = received
             if is_ack:
                 ack = self._consume_video_ack(result, msgid, ack)
-            else:
+            elif report is None:
                 report = self._consume_video_report(
                     result, action, terminal_state, intermediate_states, states, ack, msgid, sent_timestamp
                 )
