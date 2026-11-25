@@ -165,11 +165,12 @@ class LoopbackFLVServer:
         self.thread.join(timeout=2)
 
 
-def write_fake_ffmpeg(directory: Path, mode="ok", argv_log: Path | None = None):
+def write_fake_ffmpeg(directory: Path, mode="ok", argv_log: Path | None = None, require_bytes: bytes | None = None):
     script = directory / "ffmpeg"
     jpeg_hex = make_minimal_jpeg(1280, 720).hex()
     png_hex = make_minimal_png(640, 360).hex()
     log_path = repr(str(argv_log)) if argv_log is not None else "None"
+    req_hex = repr(require_bytes.hex()) if require_bytes is not None else "None"
     script.write_text(
         f"#!{sys.executable}\n"
         "import json, pathlib, sys, time\n"
@@ -180,7 +181,21 @@ def write_fake_ffmpeg(directory: Path, mode="ok", argv_log: Path | None = None):
         "if mode == 'sleep':\n"
         "    time.sleep(5)\n"
         "    raise SystemExit(0)\n"
-        "data = sys.stdin.buffer.read(4096)\n"
+        f"req_hex = {req_hex}\n"
+        "if req_hex is not None:\n"
+        "    req = bytes.fromhex(req_hex)\n"
+        "    buf = bytearray()\n"
+        "    while req not in buf:\n"
+        "        part = sys.stdin.buffer.read1(4096)\n"
+        "        if not part:\n"
+        "            break\n"
+        "        buf.extend(part)\n"
+        "    data = bytes(buf)\n"
+        "    if req not in data:\n"
+        "        sys.stderr.write('missing required marker\\n')\n"
+        "        raise SystemExit(3)\n"
+        "else:\n"
+        "    data = sys.stdin.buffer.read(4096)\n"
         "out = pathlib.Path(sys.argv[-1])\n"
         "if mode == 'fail':\n"
         "    sys.stderr.write('synthetic decode error\\n')\n"
@@ -573,8 +588,9 @@ class CameraSnapshotAndPipeTests(unittest.TestCase):
         self.assertIn(("stop_video_capture_once",), FakeCameraMQTT.calls)
 
     def test_snapshot_survives_pause_longer_than_half_second_within_timeout(self):
-        fake_ffmpeg = write_fake_ffmpeg(self.bin_dir, mode="ok")
-        self.server.chunks = [SYNTHETIC_FLV[:16], SYNTHETIC_FLV[16:]]
+        marker = b"DELAYED_KEYFRAME_MARKER"
+        fake_ffmpeg = write_fake_ffmpeg(self.bin_dir, mode="ok", require_bytes=marker)
+        self.server.chunks = [SYNTHETIC_FLV[:16], marker + SYNTHETIC_FLV[16:]]
         self.server.delay_per_chunk = 0.7
         out_file = self.root / "delayed.jpg"
         cfg = make_config()
@@ -584,6 +600,46 @@ class CameraSnapshotAndPipeTests(unittest.TestCase):
             result = camera.camera_snapshot(cfg, out_file, timeout=5)
         self.assertEqual(result["format"], "jpeg")
         self.assertTrue(out_file.is_file())
+
+    def test_snapshot_reads_buffered_chunked_second_chunk_without_waiting_on_select(self):
+        import http.client
+        import socket as _socket
+
+        marker = b"BUFFERED_CHUNK_2"
+        fake_ffmpeg = write_fake_ffmpeg(self.bin_dir, mode="ok", require_bytes=marker)
+        srv_sock, cli_sock = _socket.socketpair()
+        stop_event = threading.Event()
+
+        def serve():
+            c1 = b"FLV\x01\x01\x00\x00\x00\x09"
+            c2 = marker
+            body = (
+                f"{len(c1):x}\r\n".encode() + c1 + b"\r\n"
+                + f"{len(c2):x}\r\n".encode() + c2 + b"\r\n"
+            )
+            srv_sock.sendall(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n" + body)
+            stop_event.wait(timeout=5)
+            srv_sock.close()
+
+        thread = threading.Thread(target=serve, daemon=True)
+        thread.start()
+        try:
+            resp = http.client.HTTPResponse(cli_sock)
+            resp.begin()
+            first = resp.read1(16384)
+            self.assertTrue(first.startswith(camera.FLV_MAGIC))
+            dummy_conn = SimpleNamespace(sock=cli_sock)
+            tmp_out = self.root / "chunked.jpg"
+            t0 = time.monotonic()
+            camera._decode_snapshot_with_ffmpeg(
+                str(fake_ffmpeg), dummy_conn, resp, first, tmp_out, time.monotonic() + 5
+            )
+            self.assertLess(time.monotonic() - t0, 2.0)
+            self.assertTrue(tmp_out.read_bytes().startswith(camera.JPEG_MAGIC))
+        finally:
+            stop_event.set()
+            cli_sock.close()
+            thread.join(timeout=2)
 
     def test_snapshot_enforces_deadline_when_ffmpeg_stalls_on_stdin(self):
         fake_ffmpeg = write_fake_ffmpeg(self.bin_dir, mode="sleep")
@@ -599,19 +655,32 @@ class CameraSnapshotAndPipeTests(unittest.TestCase):
         self.assertLess(time.monotonic() - t0, 3.0)
         self.assertFalse(out_file.exists())
 
-    def test_pipe_enforces_deadline_when_stdout_pipe_blocks(self):
+    def test_pipe_enforces_deadline_and_counts_partial_write_when_stdout_blocks(self):
         self.server.chunks = [SYNTHETIC_FLV[:16]] + [b"\x00" * 65536] * 32
         read_fd, write_fd = os.pipe()
         cfg = make_config()
         t0 = time.monotonic()
+        drained = bytearray()
         try:
             with os.fdopen(write_fd, "wb", buffering=0) as writer, \
                     patch("kobra_lan.camera.MQTT", FakeCameraMQTT), \
                     patch("kobra_lan.camera.CAMERA_STREAM_PORT", self.server.port):
-                camera.camera_pipe(cfg, writer, timeout=1)
+                result = camera.camera_pipe(cfg, writer, timeout=1)
+            elapsed = time.monotonic() - t0
+            os.set_blocking(read_fd, False)
+            while True:
+                try:
+                    part = os.read(read_fd, 65536)
+                except BlockingIOError:
+                    break
+                if not part:
+                    break
+                drained.extend(part)
         finally:
             os.close(read_fd)
-        self.assertLess(time.monotonic() - t0, 3.0)
+        self.assertLess(elapsed, 3.0)
+        self.assertGreater(len(drained), 16)
+        self.assertEqual(result["bytes_written"], len(drained))
 
 
 if __name__ == "__main__":

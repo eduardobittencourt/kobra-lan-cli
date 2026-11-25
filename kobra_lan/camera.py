@@ -388,10 +388,34 @@ def _response_socket(conn, response):
     return getattr(getattr(response.fp, "raw", None), "_sock", None) or conn.sock
 
 
+def _response_has_buffered_data(response, sock):
+    """Return True if response.fp already holds buffered payload bytes without blocking."""
+    fp = getattr(response, "fp", None)
+    peek = getattr(fp, "peek", None)
+    if peek is None:
+        return False
+    prev_timeout = sock.gettimeout()
+    sock.setblocking(False)
+    try:
+        buffered = peek(4) if getattr(response, "chunked", False) else peek(1)
+        if getattr(response, "chunked", False):
+            return bool(buffered.lstrip(b"\r\n"))
+        return bool(buffered)
+    except (BlockingIOError, OSError, ValueError):
+        return False
+    finally:
+        try:
+            sock.settimeout(prev_timeout)
+        except OSError:
+            pass
+
+
 def _wait_socket_readable(conn, response, deadline, *, proc=None):
     """Poll socket readability without triggering SocketIO timeout corruption."""
     sock = _response_socket(conn, response)
     if sock is None:
+        return True
+    if _response_has_buffered_data(response, sock):
         return True
     while True:
         if proc is not None and proc.poll() is not None:
@@ -405,17 +429,18 @@ def _wait_socket_readable(conn, response, deadline, *, proc=None):
 
 
 def _write_fd_with_deadline(fd, data, deadline, *, proc=None):
-    """Write all bytes to a POSIX fd before deadline without blocking indefinitely."""
+    """Write bytes to a POSIX fd before deadline; return (bytes_written, completed)."""
     view = memoryview(data)
+    total_written = 0
     was_blocking = os.get_blocking(fd)
     os.set_blocking(fd, False)
     try:
         while view:
             if proc is not None and proc.poll() is not None:
-                return False
+                return total_written, False
             remaining = None if deadline is None else (deadline - time.monotonic())
             if remaining is not None and remaining <= 0:
-                return False
+                return total_written, False
             wait_s = 0.2 if remaining is None else min(0.2, remaining)
             _, writable, _ = select.select([], [fd], [], wait_s)
             if not writable:
@@ -425,9 +450,10 @@ def _write_fd_with_deadline(fd, data, deadline, *, proc=None):
             except BlockingIOError:
                 continue
             if written <= 0:
-                return False
+                return total_written, False
+            total_written += written
             view = view[written:]
-        return True
+        return total_written, True
     finally:
         try:
             os.set_blocking(fd, was_blocking)
@@ -439,9 +465,10 @@ def _feed_flv_to_ffmpeg(proc, conn, response, first_chunk, deadline):
     streamed = 0
     stdin_fd = proc.stdin.fileno()
     try:
-        if not _write_fd_with_deadline(stdin_fd, first_chunk, deadline, proc=proc):
+        written, ok = _write_fd_with_deadline(stdin_fd, first_chunk, deadline, proc=proc)
+        streamed += written
+        if not ok:
             return
-        streamed += len(first_chunk)
         while streamed < MAX_SNAPSHOT_STREAM_BYTES and proc.poll() is None:
             if not _wait_socket_readable(conn, response, deadline, proc=proc):
                 break
@@ -455,9 +482,10 @@ def _feed_flv_to_ffmpeg(proc, conn, response, first_chunk, deadline):
                 break
             if not chunk:
                 break
-            if not _write_fd_with_deadline(stdin_fd, chunk, deadline, proc=proc):
+            written, ok = _write_fd_with_deadline(stdin_fd, chunk, deadline, proc=proc)
+            streamed += written
+            if not ok:
                 break
-            streamed += len(chunk)
     except OSError:
         pass
     finally:
@@ -633,8 +661,7 @@ def _write_pipe_chunk(output_stream, chunk, max_bytes, written, *, deadline=None
         return 0, True
     fd = _stream_fileno(output_stream)
     if fd is not None:
-        completed = _write_fd_with_deadline(fd, chunk, deadline)
-        return (len(chunk), True) if completed else (0, False)
+        return _write_fd_with_deadline(fd, chunk, deadline)
     output_stream.write(chunk)
     output_stream.flush()
     return len(chunk), True
