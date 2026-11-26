@@ -244,8 +244,6 @@ def discover_printers(
                     socket.IP_MULTICAST_IF,
                     socket.inet_aton(interface),
                 )
-            else:
-                sock.bind(("0.0.0.0", 0))
 
             start = monotonic()
             deadline = start + timeout

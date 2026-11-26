@@ -223,7 +223,7 @@ class DiscoverPrintersTests(unittest.TestCase):
         )
         self.assertTrue(sock.closed)
         self.assertFalse(sock.blocking)
-        self.assertEqual(sock.bound, ("0.0.0.0", 0))
+        self.assertIsNone(sock.bound)
         self.assertEqual(len(sock.sent), 2)
         expected_payload = d.build_msearch_payload()
         self.assertEqual(sock.sent[0], (expected_payload, ("239.255.255.250", 1900)))
