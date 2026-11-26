@@ -2,21 +2,6 @@
 
 ## Unreleased
 
-- Breaking: unify `print start` local state records under `starts/<device>/` so
-  both root starts and reprints are stored and looked up by their deterministic
-  `attempt_id` (`<attempt_id>.attempt` and `<attempt_id>.json`), and drop legacy
-  file-keyed (`<file_sha256>.*`) and pre-`attempt_id` start parsing from
-  `print plan`, `print start`, `jobs list|info`, and `files delete`. Preexisting
-  legacy files on disk remain untouched and read-only, surfaced by `jobs list`
-  and `jobs info` as `incomplete` (`unreadable-<storage-key>`).
-- Breaking: remove `record_format` from `jobs info` output.
-- Breaking: unify per-device mutation concurrency locking on a single
-  `.device.lock` lease across `files upload`, `print start`,
-  `print pause|resume|cancel`, and `files delete`; stop creating `.upload.lock`
-  and `.start.lock` and remove `upload_lock()`.
-- Breaking: remove `single_filament_start_compatible` from `gcode inspect`
-  output.
-
 ## 0.6.0
 
 - Experimental release for testing and feedback; the CLI and JSON automation
@@ -30,15 +15,35 @@
 - Breaking: replace `--slot` with repeatable `--slot-map PAINT_INDEX=SLOT` on
   `print plan` and `print start`. Expose `slot_mapping` in place of
   `selected_slot` on `print plan`, `print start`, and `jobs info`, and report
-  `material_type` per mapping entry on `jobs info`. Existing receipts and
-  reprint chains remain readable in place without migration.
+  `material_type` per mapping entry on `jobs info`. Existing upload
+  markers/receipts, watch observations, and canonical attempt-keyed start
+  receipts and reprint chains remain readable in place without migration.
+- Breaking: unify `print start` local state records under `starts/<device>/` so
+  both root starts and reprints are stored and looked up by their deterministic
+  `attempt_id` (`<attempt_id>.attempt` and `<attempt_id>.json`), dropping legacy
+  file-keyed (`<file_sha256>.*`) and pre-`attempt_id` start parsing from
+  `print plan`, `print start`, `jobs list|info`, and `files delete`. Preexisting
+  legacy file-keyed (`<file_sha256>.*`) start files on disk remain untouched and
+  read-only, surface as `incomplete` (`unreadable-<storage-key>`) in
+  `jobs list|info`, and cause `print start --execute` for that file to refuse
+  rather than bypass them.
+- Breaking: unify per-device mutation concurrency locking within a shared
+  `--state-dir` on a single `.device.lock` lease across `files upload`,
+  `print start`, `print pause|resume|cancel`, and `files delete`; stop creating
+  `.upload.lock` and `.start.lock` and remove `upload_lock()`. The lease
+  coordinates only 0.6.0+ processes sharing the same `--state-dir` (processes
+  using different `--state-dir` paths, other clients, and 0.5.0 / pre-0.6.0
+  binaries do not share `.device.lock` and do not exclude each other — stop all
+  0.5.0 / older processes for a device before running any 0.6.0 mutating command
+  against it).
 - Add read-only `print watch` for an active job, saving sanitized local
   observations under `--state-dir` and reporting `unknown` when firmware
   telemetry cannot establish terminal outcomes (Kobra X firmware 2.0.2.2
   reports `task_id: "-1"` and empty `last_project`).
 - Add reviewed intentional reprints (`--reprint-from PREVIOUS_ATTEMPT_ID` on
-  `print plan` and `print start`) with durable attempt-keyed successor markers
-  while preserving legacy file-keyed upload and first-start markers/receipts.
+  `print plan` and `print start`) with durable canonical attempt-keyed start
+  markers and receipts (`starts/<device>/<attempt_id>.*`) while keeping upload
+  markers and receipts file-keyed (`<device>/<file_sha256>.*`).
 - Add offline read-only local job history (`jobs list`, `jobs info`) over local
   start receipts/markers, correlated upload provenance, and saved watch
   observations (`scope: "local_state_only"`,
@@ -56,7 +61,7 @@
   absence confirmed, byte-for-byte local state preservation verified offline).
 - Add read-only onboard four-slot filament inventory (`slots list`),
   multicolor-aware offline `gcode inspect` (`paint_info`, `T<n>` tools,
-  optional weights, `multicolor`, `single_filament_start_compatible`), and
+  optional weights, `multicolor`), and
   reviewed multicolor `print plan`/`print start --slot-map`. Live 4-color
   contiguous 1:1 `PLA High Speed` execution (`0=1, 1=2, 2=3, 3=4`) is
   hardware-validated on Kobra X model 20030 / firmware 2.0.2.2; non-identity,
