@@ -39,6 +39,28 @@ are read-only network observations.
 is a read-only onboard four-slot filament inventory query over one pinned MQTT
 session on Kobra X model 20030 / firmware 2.0.2.2 (idle or printing) without
 state writes; external ACE and multi-box topologies remain unqualified and exit 2.
+.B camera status
+is a strictly read-only camera inspection over one pinned MQTT session
+(info and peripherie) on Kobra X model 20030 / firmware 2.0.2.2
+(experimental: true, hardware_camera_validated: true) without mutating printer
+state, opening port 18088, or exposing stream URLs or tokens.
+.B camera snapshot --output PATH [--timeout SECONDS] [--overwrite] [--no-start-capture]
+captures one JPEG or PNG frame (.jpg, .jpeg, or .png) from the printer's
+validated local http://<host>:18088/live/<token> HTTP-FLV stream using an
+optional external ffmpeg binary on PATH. Validated FLV bytes are piped via
+stdin (stream URLs and tokens never enter argv or output) and the decoded image
+is published atomically without clobbering existing files unless --overwrite is
+set. Timeout accepts 1 to 60 seconds (default 15). Attempts a direct read-only
+HTTP-FLV read first; only if direct read fails and --no-start-capture is omitted
+does it send one MQTT video/startCapture and best-effort video/stopCapture on
+cleanup. Missing ffmpeg exits 3 before network access.
+.B camera pipe [--timeout SECONDS] [--max-bytes BYTES] [--no-start-capture]
+streams raw validated HTTP-FLV bytes directly to stdout without external video
+binaries, rejecting global --json with exit 2 before target selection. Optional
+--timeout accepts 1 to 86400 seconds and --max-bytes accepts 1 to 10737418240
+bytes. Uses the same read-only-first and optional startCapture/stopCapture
+cleanup strategy. Diagnostics and errors go only to stderr without tokens;
+downstream pipe closure exits 0 and foreground interruption exits 130.
 .B gcode inspect FILE [--name NAME]
 inspects local immutable bytes without configuration or network, reporting
 hashes, layer/slicer metadata, and filament/color metadata (paint_info entries,
@@ -126,9 +148,10 @@ Retain referenced PEMs if a persistence error leaves a visible config.
 Removing an isolated config and only its unreferenced PEM directory does not
 revoke access on the printer. Never remove operational attempt markers.
 .SH EXIT STATUS
-0 indicates success; 2 indicates protocol/validation failure; 3 indicates
-configuration/network failure. Interrupting print watch or an in-flight
-lifecycle control or stored-file deletion returns 130.
+0 indicates success (or downstream pipe closure on camera pipe); 2 indicates
+argument/protocol/validation failure; 3 indicates configuration/dependency/network
+failure. Interrupting print watch, camera pipe, or an in-flight lifecycle control
+or stored-file deletion returns 130.
 Exit 0 for print watch means a result was returned, which can include an
 unknown print outcome. Operations are never retried automatically.
 .SH FILES
@@ -181,7 +204,9 @@ Exit 0 means healthy; 2 means selection/trust/protocol/compatibility failure;
 Preserve trust and markers; follow safe next steps instead of pairing again.
 
 .SH OUTPUT
-Final results and sanitized errors use stdout; prompts/progress use stderr.
+Final results and sanitized errors use stdout; prompts, progress, and camera pipe
+diagnostics/errors use stderr. camera pipe writes raw binary FLV to stdout and
+rejects --json with exit 2.
 Errors use invalid_arguments (exit 2), validation_failed (exit 2),
 operation_failed (exit 3), or diagnostic_failed (exit 2/3 by stage precedence).
 Redirection never changes format. Full file and plan hashes are copyable in

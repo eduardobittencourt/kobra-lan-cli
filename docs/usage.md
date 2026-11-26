@@ -5,10 +5,12 @@ The examples use the source-checkout launcher. After installation, use `kobra-la
 ## Output and exit contract
 
 Output is readable English text by default, including when redirected. Put
-`--json` before the command for one JSON document. Prompts and progress use
-stderr; final successes and failures use stdout. No renderer queries a printer
-or writes operational state. Help, version and `completion` always emit native
-text, even with root `--json`.
+`--json` before the command for one JSON document (except `camera pipe`, which
+writes raw binary HTTP-FLV bytes to stdout and rejects `--json` with exit 2
+before target lookup). Prompts, progress, and `camera pipe` diagnostics/errors
+use stderr; final successes and failures for other commands use stdout. No
+renderer queries a printer or writes operational state. Help, version and
+`completion` always emit native text, even with root `--json`.
 
 ```sh
 kobra-lan --json printer list
@@ -28,7 +30,7 @@ The output envelope does not change private receipt or registry schemas.
 | `validation_failed` | 2 | Selection, trust, protocol, qualification or reviewed-content refusal |
 | `operation_failed` | 3 | Configuration, dependency, I/O or network failure; may retain local partial outcome |
 | `diagnostic_failed` | 2 or 3 | Failed ordered doctor checks; exit 3 takes precedence |
-| `interrupted` | 130 | User interrupted print observation or a lifecycle control or deletion after publish |
+| `interrupted` | 130 | User interrupted print observation, `camera pipe`, or a lifecycle control or deletion after publish |
 
 Every result also includes a `qualification` string with the narrow model/firmware and experimental-start boundary. The `result` payloads retain these command-specific fields. Consumers should
 allow additional safe fields and inspect outcome flags rather than infer success
@@ -44,6 +46,9 @@ from a filename or network acknowledgement.
 | `doctor` | Inner `version: 1`, safe `target`, ordered `checks`, `healthy` |
 | `status` | `identity`, sanitized `info`, nullable `print`, `last_print` |
 | `slots list` | `device_digest`, `model`, `firmware`, `printer_state`, onboard box summary (`box_id: -1`, `box_kind: "onboard"`, `slot_count: 4`, `loaded_count`), and ordered `slots` (`slot`, `ams_index`, `status`, `status_label`, `available_for_start`, nullable `material_type`, `color_rgb`, `color_hex`) |
+| `camera status` | `device_digest`, `model`, `firmware`, `printer_state`, `camera_present`, nullable `timelapse_supported`, `stream_url_announced`, nullable `stream_protocol`, nullable `stream_port`, `experimental: true`, `hardware_camera_validated` (never includes stream URLs or tokens) |
+| `camera snapshot` | `output_path`, `format` (`"jpeg"` or `"png"`), `bytes`, `sha256`, `width`, `height`, `capture_mode` (`"direct"` or `"start_capture"`), `start_capture_used`, `stop_capture_sent`, `experimental: true`, `hardware_camera_validated` |
+| `camera pipe` | Raw binary HTTP-FLV bytes on stdout (`--json` rejected with exit 2); stderr-only diagnostics; exits 0 on EOF, limit, or broken pipe, and 130 on interrupt |
 | `files list` | `records` array of filename/size/directory metadata |
 | `files info` | `filename` and available safe file details |
 | `gcode inspect` | `sha256`, `md5`, `size_bytes`, `remote_filename`, nullable `layer_count`, `slicer_version`, filament/color metadata (`paint_info_present`, ordered `filaments`, `filament_count`, `multicolor`, `tool_indices`, nullable `total_filament_used_g`, `single_filament_start_compatible`), operation/qualification flags |
@@ -99,6 +104,61 @@ non-contiguous `paint_index` values and mixed materials), `filament_count`,
 For start planning, use the declared paint indices and tool indices. The
 `single_filament_start_compatible` field describes the original single-filament
 paint-index-0 case.
+
+## Inspect and capture camera video
+
+```sh
+kobra-lan camera status
+kobra-lan --json --printer bench camera status
+kobra-lan camera snapshot --output /tmp/bed.jpg --timeout 15
+kobra-lan camera snapshot --output /tmp/bed.png --overwrite --no-start-capture
+kobra-lan camera pipe --max-bytes 65536 > /tmp/sample.flv
+kobra-lan camera pipe | ffplay -f flv -
+```
+
+- **`camera status`** is strictly read-only: it opens one pinned authenticated
+  MQTT session, verifies fresh qualification for Kobra X model 20030 / firmware
+  2.0.2.2, queries `info` and `peripherie`, and reports `camera_present`,
+  `timelapse_supported`, `stream_url_announced`, `stream_protocol` (`"http-flv"`),
+  `stream_port` (`18088`), `printer_state`, `experimental: true`, and
+  centralized `hardware_camera_validated`. It never opens port `18088`, never
+  mutates printer or local state, and never exposes stream URLs or tokens.
+- **Read-only-first acquisition with optional fallback**: `camera snapshot` and
+  `camera pipe` verify fresh qualification and `camera == 1`, validate the
+  announced local stream URL, and attempt a direct read-only HTTP `GET` to
+  `http://<paired-host>:18088/live/<token>` (accepting HTTP `200`/`206` with
+  valid `FLV` magic bytes) without mutating printer state (`capture_mode:
+  "direct"`, `start_capture_used: false`, `stop_capture_sent: false`). Only if
+  that direct read fails and `--no-start-capture` is omitted do they send one
+  MQTT `video/startCapture`, refresh `info`, retry the validated `GET` once,
+  and always send best-effort `video/stopCapture` in cleanup (including on
+  decode failure, downstream broken pipe, or `SIGINT`). Pass
+  `--no-start-capture` to forbid any capture mutation and fail with exit 3 if
+  direct read is unavailable.
+- **Strict URL validation and token redaction**: announced stream URLs are
+  accepted only as plain `http` targeting the exact paired IPv4 address and port
+  `18088` with a bounded `/live/<token>` path and no userinfo, query, fragment,
+  path traversal, or control characters; HTTP connections disable proxies and
+  redirects. Stream URLs and tokens never appear in stdout, stderr, JSON
+  envelopes, exceptions, or external subprocess command lines. Because the
+  Kobra X firmware serves port `18088` in plaintext HTTP on the LAN, use camera
+  capture only on a trusted local network.
+- **`camera snapshot`** validates `--output` (`.jpg`, `.jpeg`, or `.png`,
+  existing parent directory, absent destination including symlinks unless
+  `--overwrite` is passed), `--timeout` (`1` to `60`, default `15`), and the
+  presence of optional external `ffmpeg` on `PATH` before any target lookup or
+  network access. Missing `ffmpeg` exits 3 (`operation_failed`) with
+  installation guidance. Validated FLV bytes are piped to `ffmpeg` over `stdin`
+  (never passing the stream URL in `argv`), verified in pure Python for valid
+  JPEG/PNG magic and dimensions, and published atomically without clobbering
+  existing files unless `--overwrite` is supplied.
+- **`camera pipe`** requires no external video binaries (`ffmpeg` is not
+  needed), validates optional `--timeout` (`1` to `86400` seconds) and
+  `--max-bytes` (`1` to `10737418240` bytes), rejects global `--json` with exit
+  2 (`invalid_arguments`) before target selection, verifies `FLV` magic before
+  forwarding any bytes to `stdout`, and writes diagnostics/errors only to
+  `stderr`. Downstream pipe closure (`BrokenPipeError`) exits 0 cleanly without
+  a traceback; foreground `SIGINT` runs cleanup and exits 130.
 
 ## Inspect, upload, plan and start
 
@@ -499,6 +559,24 @@ completion with all four colors and slots matching. Because this run used an
 identity 1:1 mapping (`paint_index == ams_index`), cross-remapped, sparse,
 subset, shared-slot, non-zero single-filament, and single-filament slot 3
 starts remain `hardware_start_validated: false`.
+
+End-to-end live camera validation on 2026-11-25 on Kobra X model 20030 /
+firmware 2.0.2.2 verified `camera status` (text and `--json`, confirming
+`camera_present: true`, `timelapse_supported: true`,
+`stream_url_announced: true`, `stream_protocol: "http-flv"`,
+`stream_port: 18088`, and zero URL/token exposure), `camera pipe`
+(`--max-bytes 65536 --no-start-capture` streaming valid FLV v1 video-only bytes
+directly, downstream broken-pipe exit `0`, foreground `SIGINT` exit `130`, and
+`--json` rejection exit `2`), live `video/startCapture`
+(`initSuccess` -> `joinSuccess` -> `pushStarted`) and `video/stopCapture`
+(`pushStopped`) transitions, and `camera snapshot` with Debian 13 `ffmpeg`
+`7.1.5-0+deb13u1` (1280×720 JPEG and PNG frames in `direct` mode, existing-file
+refusal exit `2` without `--overwrite`, atomic replacement with
+`--overwrite --no-start-capture`, and exit `3` before network access when
+`ffmpeg` was absent). Camera commands therefore report
+`hardware_camera_validated: true` on Kobra X model 20030 / firmware 2.0.2.2
+(post-reboot cold-start behavior without prior capture remains unverified and
+is covered by the automatic `startCapture`/`stopCapture` fallback).
 
 ## Saved target selection
 

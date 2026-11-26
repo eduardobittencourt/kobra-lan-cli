@@ -246,5 +246,166 @@ class MQTTDeleteOnceTests(unittest.TestCase):
         self.client.sock.sendall.assert_not_called()
 
 
+class MQTTVideoAndPeripherieTests(unittest.TestCase):
+    def setUp(self):
+        self.client = MQTT(config())
+        self.client.sock = Mock()
+
+    def publish(self, topic, data, *, qos=0, retained=False):
+        pid = b"\x00\x09" if qos else b""
+        header = 0x30 | (qos << 1) | retained
+        return header, string(topic) + pid + json.dumps(data).encode()
+
+    def ack(self, **fields):
+        request = sent_publish_payload(self.client.sock)
+        return self.publish("root/response", {"msgid": request["msgid"], "code": 0, **fields})
+
+    def video_report(self, action, state, *, qos=0, retained=False, **fields):
+        request = sent_publish_payload(self.client.sock)
+        data = {
+            "type": "video",
+            "action": action,
+            "state": state,
+            "code": 200,
+            "msgid": "printer-generated-id",
+            "timestamp": request["timestamp"],
+            "data": None,
+            **fields,
+        }
+        return self.publish("root/video/report", data, qos=qos, retained=retained)
+
+    def test_query_allows_peripherie_and_rejects_video_mutations(self):
+        def receive():
+            request = sent_publish_payload(self.client.sock)
+            yield self.ack()
+            yield self.publish(
+                "root/peripherie/report",
+                {
+                    "type": "peripherie",
+                    "action": "query",
+                    "code": 200,
+                    "msgid": "printer-peripherie-id",
+                    "timestamp": request["timestamp"],
+                    "data": {"camera": 1, "multiColorBox": 1, "udisk": 0},
+                },
+            )
+
+        packets = receive()
+        with patch.object(self.client, "receive", side_effect=lambda _: next(packets)):
+            result = self.client.query("peripherie", "query", require_fresh=True)
+        request = sent_publish_payload(self.client.sock)
+        self.assertEqual(request["type"], "peripherie")
+        self.assertEqual(request["action"], "query")
+        self.assertEqual(result["data"]["camera"], 1)
+
+        self.client.sock.reset_mock()
+        for kind, action in (
+            ("video", "startCapture"),
+            ("video", "stopCapture"),
+            ("video", "query"),
+            ("peripherie", "set"),
+        ):
+            with self.subTest(kind=kind, action=action), self.assertRaises(ProtocolError):
+                self.client.query(kind, action)
+        self.client.sock.sendall.assert_not_called()
+
+    def test_start_video_capture_once_handles_intermediate_states_and_qos1(self):
+        def receive():
+            stamp = sent_publish_payload(self.client.sock)["timestamp"]
+            yield self.video_report("startCapture", "failed", timestamp=stamp)  # before ACK -> ignored
+            yield self.video_report("startCapture", "failed", retained=True)
+            yield self.ack()
+            yield self.video_report("startCapture", "initSuccess")
+            yield self.video_report("startCapture", "joinSuccess")
+            yield self.video_report("startCapture", "pushStarted", qos=1)
+
+        packets = receive()
+        with patch.object(self.client, "receive", side_effect=lambda _: next(packets)):
+            result = self.client.start_video_capture_once()
+        request = sent_publish_payload(self.client.sock)
+        cfg = self.client.config
+        sent = [call.args[0] for call in self.client.sock.sendall.call_args_list]
+        self.assertIn(string(f"{BASE}/slicer/printer/{cfg.type_id}/{cfg.printer_id}/video"), sent[0])
+        self.assertEqual(request["type"], "video")
+        self.assertEqual(request["action"], "startCapture")
+        self.assertIsNone(request["data"])
+        self.assertEqual(sent[1:], [packet(0x40, b"\x00\x09")])
+        self.assertEqual(result["ack"], {"code": 0, "msgid": request["msgid"]})
+        self.assertEqual(
+            result["report"],
+            {
+                "action": "startCapture",
+                "state": "pushStarted",
+                "states": ["initSuccess", "joinSuccess", "pushStarted"],
+                "code": 200,
+            },
+        )
+
+    def test_stop_video_capture_once_waits_for_ack_and_push_stopped(self):
+        def receive():
+            yield self.ack()
+            yield self.video_report("startCapture", "pushStarted")  # wrong action -> ignored
+            yield self.video_report("stopCapture", "pushStopped")
+
+        packets = receive()
+        with patch.object(self.client, "receive", side_effect=lambda _: next(packets)):
+            result = self.client.stop_video_capture_once()
+        request = sent_publish_payload(self.client.sock)
+        self.assertEqual(request["type"], "video")
+        self.assertEqual(request["action"], "stopCapture")
+        self.assertEqual(result["report"]["state"], "pushStopped")
+        self.client.sock.sendall.assert_called_once()
+
+    def test_video_capture_rejections_and_errors_never_retry(self):
+        cases = (
+            ("start", lambda: [self.ack(code=1)], ProtocolError, "rejected"),
+            ("start", lambda: [self.ack(), self.video_report("startCapture", "pushFailed")], ProtocolError, "rejected"),
+            ("start", lambda: [self.ack(), self.video_report("startCapture", "pushStarted", code=500)], ProtocolError, "rejected"),
+            ("stop", lambda: [self.ack(code=False)], ProtocolError, "rejected"),
+            ("stop", lambda: [self.ack(), self.video_report("stopCapture", "initSuccess")], ProtocolError, "rejected"),
+            ("stop", lambda: [self.ack(), self.video_report("stopCapture", [])], ProtocolError, "rejected"),
+            ("start", lambda: [self.ack(), self.video_report("startCapture", {"bad": 1})], ProtocolError, "rejected"),
+            ("stop", lambda: [(0x30, string("root/video/report") + b"not-json")], ProtocolError, "Malformed MQTT video response"),
+            ("stop", lambda: [self.ack(), self.client._timeout()], MQTTFailure, "timeout"),
+        )
+        for mode, make_items, exc_type, regex in cases:
+            with self.subTest(mode=mode, regex=regex):
+                self.client.sock.reset_mock()
+                items = None
+
+                def receive(_deadline):
+                    nonlocal items
+                    if items is None:
+                        items = iter(make_items())
+                    item = next(items)
+                    if isinstance(item, BaseException):
+                        raise item
+                    return item
+
+                action_fn = (
+                    self.client.start_video_capture_once
+                    if mode == "start"
+                    else self.client.stop_video_capture_once
+                )
+                with patch.object(self.client, "receive", side_effect=receive):
+                    with self.assertRaisesRegex(exc_type, regex):
+                        action_fn()
+                self.client.sock.sendall.assert_called_once()
+
+    def test_video_capture_keeps_correlated_terminal_report_before_ack(self):
+        def receive():
+            request = sent_publish_payload(self.client.sock)
+            yield self.video_report("startCapture", "pushStarted", msgid=request["msgid"])
+            yield self.video_report("stopCapture", "pushStopped", msgid="unrelated")
+            yield self.ack()
+
+        packets = receive()
+        with patch.object(self.client, "receive", side_effect=lambda _: next(packets)):
+            result = self.client.start_video_capture_once()
+        self.assertEqual(result["report"]["state"], "pushStarted")
+        self.assertEqual(result["report"]["states"], ["pushStarted"])
+        self.client.sock.sendall.assert_called_once()
+
+
 if __name__ == "__main__":
     unittest.main()

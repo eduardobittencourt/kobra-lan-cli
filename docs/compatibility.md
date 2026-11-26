@@ -59,6 +59,9 @@ Missing required `model`, `version`, or `state` fields in fresh MQTT `info` repo
 | `doctor` | Read-only | Yes | Yes | Yes | 8 ordered checks; discloses omitted optional MQTT identity fields |
 | `status` | Read-only | Yes | Yes | Yes | HTTP `/info` identity plus pinned MQTT `info` report |
 | `slots list` | Read-only | Yes | Yes | Yes | Onboard 4-slot box (`id: -1`), idle or printing |
+| `camera status` | Read-only | Yes | Yes | Yes (2026-11-25) | `experimental: true`, `hardware_camera_validated: true` on `20030` / `2.0.2.2`; pinned MQTT `info` + `peripherie` only, never opens port `18088` or exposes stream tokens |
+| `camera snapshot` | Read-only-first; optional single-shot `video/startCapture` + `stopCapture` fallback | Yes | Yes | Yes (2026-11-25, JPEG/PNG 1280×720) | `experimental: true`, `hardware_camera_validated: true` on `20030` / `2.0.2.2`; requires optional external `ffmpeg` on `PATH` (piped via `stdin`, never URL in argv); `--no-start-capture` disables fallback |
+| `camera pipe` | Read-only-first; optional single-shot `video/startCapture` + `stopCapture` fallback | Yes | Yes | Yes (2026-11-25) | Raw HTTP-FLV binary stdout with zero external video dependencies; rejects `--json` (exit `2`); exits `0` on broken pipe and `130` on interrupt; `startCapture`/`stopCapture` verified on live firmware |
 | `gcode inspect` | Local read-only | Yes | Yes | N/A (offline) | Computes SHA-256/MD5, layers, `paint_info`, tools, and weights offline |
 | `files list` / `files info` | Read-only | Yes | Yes | Yes | Lists root storage and inspects sanitized metadata |
 | `files upload` | Writes remote file + local attempt marker/receipt | Yes | Yes | Yes (2026-10-07) | Requires `--sha256` and `--execute`; `starts_print: false`; `remote_byte_hash_verified: false` |

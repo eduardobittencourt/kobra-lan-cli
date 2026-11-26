@@ -3,15 +3,22 @@ import re
 
 
 def check_completion(completion, shell):
-    assert all(word in completion for word in ("kobra-lan", "slots", "watch", "timeout", "pause", "resume", "cancel",
+    assert all(word in completion for word in ("kobra-lan", "slots", "camera", "snapshot", "pipe", "output",
+                                               "overwrite", "max-bytes", "no-start-capture",
+                                               "watch", "timeout", "pause", "resume", "cancel",
                                                "execute", "filename", "jobs", "observation", "limit"))
     assert "slots:list" in completion
+    assert "camera:status" in completion
+    assert "camera:snapshot" in completion
+    assert "camera:pipe" in completion
     assert "files:delete" in completion
     lines = completion.splitlines()
     if shell == "fish":
         assert any("xfiles delete" in line and line.endswith(" -l execute") for line in lines)
+        assert any("xcamera snapshot" in line and " -l output -r -F" in line for line in lines)
     else:
         assert "'files delete') candidates='-h --help --execute'" in completion
+        assert "'camera snapshot:--output')" in completion
     assert all(f"print {action}:--reprint-from" in completion for action in ("plan", "start"))
     assert all(f"print {action}:--slot-map" in completion for action in ("plan", "start"))
     assert not re.search(r"--slot(?![\w-])| -l slot(?:\s|$)", completion)
