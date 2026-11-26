@@ -35,7 +35,7 @@ class DeleteLeaseTests(unittest.TestCase):
             self.assertFalse((self.device_dir / ".start.lock").exists())
             with self.assertRaisesRegex(ProtocolError, "Another device operation is active"):
                 with device_lock(self.device_dir):
-                    self.fail("Concurrent device operation acquired the lease")
+                    pass
 
     def test_delete_refuses_symlink_and_non_private_directory(self):
         actual = self.root / "actual"
@@ -43,14 +43,14 @@ class DeleteLeaseTests(unittest.TestCase):
         self.device_dir.symlink_to(actual, target_is_directory=True)
         with self.assertRaises((OSError, ProfileLocalError)):
             with device_lock(self.device_dir):
-                self.fail("Symlink acquired the lease")
+                pass
         self.assertEqual(list(actual.iterdir()), [])
         self.device_dir.unlink()
         self.device_dir.mkdir()
         self.device_dir.chmod(0o755)
         with self.assertRaises(ProfileLocalError):
             with device_lock(self.device_dir):
-                self.fail("Non-private device directory acquired the lease")
+                pass
         self.assertEqual(self.device_dir.stat().st_mode & 0o777, 0o755)
 
 
