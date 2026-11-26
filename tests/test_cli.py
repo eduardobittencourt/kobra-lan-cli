@@ -62,7 +62,7 @@ class CommandTreeTests(unittest.TestCase):
         for argv, phrases in (
             (["files"], ("delete", "read-only", "idle printer", "--execute")),
             (["files", "delete"], ("idle printer", "no active job", "local receipts and markers",
-                                   "files list", "Do not resend blindly", "hardware_delete_validated: false", "--execute")),
+                                   "files list", "Do not resend blindly", "hardware_delete_validated: true", "--execute")),
             (["camera"], ("status", "snapshot", "pipe", "startCapture", "--no-start-capture")),
             (["camera", "status"], ("Read-only", "18088", "hardware_camera_validated: true")),
             (["camera", "snapshot"], ("--output PATH", "--timeout SECONDS", "--overwrite", "--no-start-capture", "ffmpeg")),

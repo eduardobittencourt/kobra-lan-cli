@@ -1,6 +1,6 @@
 # Product roadmap
 
-Current direction as of 2026-11-25. Kobra LAN CLI is experimental and under active development. This roadmap distinguishes implemented behavior from future work; it is not a release schedule or a promise that the firmware supports every proposed operation. Use [README.md](README.md), [release notes](https://github.com/eduardobittencourt/kobra-lan-cli/releases) and `kobra-lan --help` for the interface of a particular version.
+Current direction as of 2026-11-26. Kobra LAN CLI is experimental and under active development. This roadmap distinguishes implemented behavior from future work; it is not a release schedule or a promise that the firmware supports every proposed operation. Use [README.md](README.md), [release notes](https://github.com/eduardobittencourt/kobra-lan-cli/releases) and `kobra-lan --help` for the interface of a particular version.
 
 ## Product boundary
 
@@ -33,7 +33,7 @@ The source launcher and Python archives work outside a desktop, bridge, HA or cl
 
 The CLI and JSON automation interface remain subject to documented changes during 0.x. Version 0.5.0 replaced flat commands and JSON-default output, required named pairing, and removed automatic root-config fallback without migration; version 0.6.0 replaces `--slot` with repeatable `--slot-map PAINT_INDEX=SLOT`, exposes `slot_mapping` in place of `selected_slot`, unifies `print start` local state on canonical attempt-keyed records (`starts/<device>/<attempt_id>.*`), and unifies per-device mutation locking within a shared `--state-dir` on `.device.lock` while keeping upload markers/receipts and canonical start chains readable in place (preexisting legacy file-keyed start files remain untouched on disk and surface read-only as `incomplete`). Existing private credentials and device-based receipt/attempt identities remain protected in normal operations; never clear markers to make a retry work.
 
-Hardware evidence covers Kobra X model 20030 / firmware 2.0.2.2, Next-generated G-code (Linux `2.0.0.3`, `2.0.0.5`, `2.0.0.6`), `PLA High Speed` prints with automatic leveling on, vibration compensation off, and flow calibration off — both single-filament starts on onboard slots 1, 2, and 4 (`0=1|2|4`) and an operator-confirmed 4-color contiguous 1:1 print (`0=1, 1=2, 2=3, 3=4`, exercising slot 3 at `ams_index: 2`) — plus reviewed intentional reprints (`--reprint-from`), read-only `print watch` observation persistence, offline `jobs list|info`, live `print pause|resume|cancel` wire transitions (`pause`, `resume`, `stop`), and live `files delete` wire confirmation (`deleteBatch` `success`/200 and follow-up `files list` removal, with byte-for-byte local state preservation verified offline), with operator-confirmed completion of both runs in a two-slot reprint cycle and the 4-color run. Single-filament slot 3, cross-remapped/sparse/shared/subset multicolor, non-zero single paint indices, other materials and preparation combinations, and external ACE units remain unqualified. Package acceptance and offline tests do not expand hardware evidence.
+Hardware evidence covers Kobra X model 20030 / firmware 2.0.2.2, Next-generated G-code (Linux `2.0.0.3`, `2.0.0.5`, `2.0.0.6`), `PLA High Speed` prints with automatic leveling on, vibration compensation off, and flow calibration off — both single-filament starts on onboard slots 1, 2, and 4 (`0=1|2|4`) and an operator-confirmed 4-color contiguous 1:1 print (`0=1, 1=2, 2=3, 3=4`, exercising slot 3 at `ams_index: 2`) — plus reviewed intentional reprints (`--reprint-from`), read-only `print watch` observation persistence, offline `jobs list|info`, live `print pause|resume|cancel` wire transitions (`pause`, `resume`, `stop`), and live `files delete` wire confirmation plus byte-for-byte local state/permission preservation (`deleteBatch` `success`/200, follow-up `files list` removal, and unchanged local receipts, markers, and watch observations), with operator-confirmed completion of both runs in a two-slot reprint cycle and the 4-color run. Single-filament slot 3, cross-remapped/sparse/shared/subset multicolor, non-zero single paint indices, other materials and preparation combinations, and external ACE units remain unqualified. Package acceptance and offline tests do not expand hardware evidence.
 
 ## Milestone 1 — Independent onboarding
 
@@ -91,9 +91,11 @@ with no active job. It sends one request, checks removal with bounded listing
 polls, and preserves local receipts, attempt markers, and watch observations.
 A live Kobra X test on 2026-11-23 confirmed the correlated ACK (`code 0`),
 `deleteBatch` report (`success` / `200`), `delete_observed_removed` (exit 0),
-and absence in a follow-up `files list`; byte-for-byte preservation of local
-receipts and markers was verified offline with synthetic state, so results
-currently keep `experimental: true` and `hardware_delete_validated: false`.
+and absence in a follow-up `files list`; a live verification on 2026-11-26
+confirmed byte-for-byte preservation of local upload/start receipts, attempt
+markers, watch observations, and directory/file permissions across deletion,
+so results report `experimental: true` and `hardware_delete_validated: true`
+on Kobra X model 20030 / firmware 2.0.2.2.
 An uncertain result retains partial evidence for inspection with `files list`
 and never triggers a replay. See [stored-file deletion](docs/usage.md#delete-a-stored-file)
 and [validation evidence](docs/usage.md#validation-evidence).
@@ -135,8 +137,13 @@ fallback). End-to-end live CLI verification on Kobra X model 20030 / firmware 2.
 read-only FLV delivery, `--max-bytes`, broken-pipe exit `0`, `SIGINT` exit
 `130`, and `startCapture`/`stopCapture` transitions), and `camera snapshot`
 (1280×720 JPEG and PNG frames via `ffmpeg 7.1.5`, existing-file refusal, and
-`--overwrite --no-start-capture`), so camera operations report
-`hardware_camera_validated: true` on `20030` / `2.0.2.2`. See
+`--overwrite --no-start-capture`), and a 2026-11-26 post-reboot cold-start
+verification (with no prior app, slicer, or CLI capture) confirmed that
+firmware `2.0.2.2` already announces the local stream URL and serves direct
+read-only HTTP-FLV immediately after boot (`camera status`, `camera pipe
+--no-start-capture`, `camera snapshot` 1280×720 JPEG, and `camera pipe` all
+succeeded in `direct` mode with zero URL/token exposure), so camera operations
+report `hardware_camera_validated: true` on `20030` / `2.0.2.2`. See
 [camera inspection and capture](docs/usage.md#inspect-and-capture-camera-video).
 
 A stored-file download investigation on 2026-11-25 (static inspection of
@@ -152,9 +159,7 @@ and [compatibility matrix](docs/compatibility.md).
 
 Remaining work:
 
-- Qualify post-reboot cold-start camera behavior on Kobra X firmware 2.0.2.2 (the read-only-first + automatic `startCapture`/`stopCapture` fallback already handles both direct and cold-start states).
 - Qualify attempt identity and terminal signals if future firmware exposes them (firmware 2.0.2.2 reports `task_id: "-1"` and empty `last_project` after both normal completion and cancellation), and revisit stored-file download only if future firmware adds a LAN download endpoint.
-- Complete live byte-for-byte local state preservation verification for `files delete` to promote `hardware_delete_validated` from `false` to `true` (live wire removal and `files list` absence were verified on 2026-11-23; byte-for-byte local state preservation was verified offline).
 - Expand hardware coverage beyond `PLA High Speed` with `auto-leveling on` and vibration/flow off (single-filament slot 3 `0=3`, other materials, and other preparation settings).
 - Qualify non-identity multicolor and non-zero paint-index starts: cross-remapped mappings (`paint_index != ams_index`), 2/3-color subsets, sparse paint indices, and shared physical slots.
 

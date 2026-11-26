@@ -130,7 +130,8 @@ disable fallback). Camera results carry `experimental: true` and
 `files delete <name> --execute` removes one root-level file from an idle
 Kobra X with no active job. It preserves local receipts, attempt markers, and
 watch observations. Results include `experimental: true` and
-`hardware_delete_validated: false`. After an uncertain or unconfirmed result,
+`hardware_delete_validated: true` on qualified Kobra X model 20030 / firmware
+2.0.2.2. After an uncertain or unconfirmed result,
 inspect `files list` before taking further action. The CLI never resends the
 delete command automatically. The 2026-11-25 investigation of stock Kobra X LAN
 firmware 2.0.2.2 found no stored-file download endpoint, so `files download`

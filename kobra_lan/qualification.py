@@ -67,7 +67,7 @@ KOBRA_X = PrinterQualification(
         ),
     ),
     control_hardware_validated=True,
-    delete_hardware_validated=False,
+    delete_hardware_validated=True,
     camera_hardware_validated=True,
 )
 
