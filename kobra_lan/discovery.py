@@ -39,6 +39,7 @@ _USN_MAC_RE = re.compile(
     flags=re.IGNORECASE | re.ASCII,
 )
 _MODEL_ID_RE = re.compile(r"0|[1-9][0-9]*", flags=re.ASCII)
+_URL_SCHEME_RE = re.compile(r"[a-zA-Z][a-zA-Z0-9+.-]*://", flags=re.ASCII)
 
 DISCOVERY_LIMITATIONS = (
     "SSDP advertisements are unauthenticated LAN broadcasts and do not report firmware version; "
@@ -103,6 +104,8 @@ def _canonical_ipv4(value):
 def _sanitize_name(value):
     if not isinstance(value, str):
         return None
+    if _URL_SCHEME_RE.search(value):
+        return "[redacted URL]"
     cleaned = " ".join(safe_text(value).split())
     if not cleaned:
         return None

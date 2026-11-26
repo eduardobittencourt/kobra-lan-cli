@@ -127,9 +127,12 @@ broadcast domain can emit forged advertisements.
   or JSON output.
 - Explicit untrusted disclosures: every result marks
   `unauthenticated_lan_advertisement: true` / `unauthenticated: true` and
-  `firmware_verified: false`, and requires explicit
-  `kobra-lan printer pair --name NAME --host IPv4` with explicit TLS
-  fingerprint consent before any credentials are requested or saved.
+  `firmware_verified: false`, and never initiates pairing automatically.
+  Pairing still requires explicit
+  `kobra-lan printer pair --name NAME --host IPv4` on a trusted network, where
+  the initial unauthenticated HTTP exchange requests the provisioned client
+  certificate for TLS observation and explicit TLS fingerprint consent precedes
+  MQTT username/password authentication and config publication.
 
 Evidence: `ParseSSDPResponseTests` and `DiscoverPrintersTests` in
 `tests/test_discovery.py` and `PrinterDiscoverCliTests` in `tests/test_cli.py`.

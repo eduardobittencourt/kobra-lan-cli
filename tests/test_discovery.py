@@ -121,19 +121,22 @@ class ParseSSDPResponseTests(unittest.TestCase):
             usn="uuid:fdm:not-a-mac",
             host="192.0.2.25",
             query=(
-                "cn=SECRET-CN&ctrlType=lan&deviceName=Bench%20https://evil.test/secret%20Printer"
+                "cn=SECRET-CN&ctrlType=lan&deviceName=Bench%20https://evil.test/secret%20TRAILING_TOKEN%0ASECOND_LINE"
                 "&ip=192.0.2.25&modelId=20025&modelName=Other%20Model"
             ),
         )
         parsed = d.parse_ssdp_response(raw, "192.0.2.25")
         self.assertEqual(parsed["host"], "192.0.2.25")
         self.assertEqual(parsed["model_id"], 20025)
+        self.assertEqual(parsed["model_name"], "Other Model")
         self.assertFalse(parsed["qualified_model"])
         self.assertFalse(parsed["firmware_verified"])
         self.assertTrue(parsed["unauthenticated"])
         self.assertIsNone(parsed["mac"])
+        self.assertEqual(parsed["device_name"], "[redacted URL]")
         self.assertNotIn("evil.test", parsed["device_name"])
-        self.assertIn("[redacted URL]", parsed["device_name"])
+        self.assertNotIn("TRAILING_TOKEN", parsed["device_name"])
+        self.assertNotIn("SECOND_LINE", parsed["device_name"])
         self.assertNotIn("SECRET-CN", repr(parsed))
 
     def test_rejects_spoofed_non_lan_wrong_st_and_malformed_replies(self):

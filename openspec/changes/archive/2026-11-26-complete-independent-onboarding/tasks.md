@@ -23,7 +23,7 @@
 ## 5. Offline gates and read-only live discovery verification
 
 - [x] 5.1 Run the full offline validation gates: `uv run --locked python -m unittest discover -s tests -v`, `uv run --locked ruff check kobra_lan scripts tests`, and `sh -n kobra-lan`, confirming zero failures or lint errors.
-- [x] 5.2 Run a strictly read-only live verification of `./kobra-lan printer discover` and `./kobra-lan --json printer discover` against the Kobra X (`20030` / firmware `2.0.2.2`) on the local LAN (confirming exit 0, `model_id: 20030`, `qualified_model: true`, `firmware_verified: false`, `unauthenticated: true`, `hardware_discovery_validated: true`, zero raw `LOCATION`/`cn` leakage, and zero writes to profiles or state), and record sanitized evidence in `docs/usage.md` and `~/research/kobra-lan-cli/onboarding-m1/README.md`.
+- [x] 5.2 Run a strictly read-only live verification of `./kobra-lan printer discover` and `./kobra-lan --json printer discover` against the Kobra X (`20030` / firmware `2.0.2.2`) on the local LAN (confirming exit 0, `model_id: 20030`, `qualified_model: true`, `firmware_verified: false`, `unauthenticated: true`, `hardware_discovery_validated: true`, zero raw `LOCATION`/`cn` leakage, and zero writes to profiles or state), and record sanitized evidence in `docs/usage.md`.
 
 ## Workflow follow-up
 
