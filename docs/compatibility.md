@@ -54,7 +54,8 @@ Missing required `model`, `version`, or `state` fields in fresh MQTT `info` repo
 
 | Command | Mutates printer / local state | Implemented | Offline-validated | Hardware-observed | Runtime qualification flags / notes |
 | --- | --- | --- | --- | --- | --- |
-| `printer pair` | Writes private profile/PEMs after explicit trust | Yes | Yes | Yes | Requires `--name`, bare IPv4 `--host`, explicit TLS pin consent, and qualified status |
+| `printer discover` | Read-only (UDP multicast `239.255.255.250:1900`, `ST: ac:3dprinter:fdm`) | Yes | Yes | Yes (2026-11-26) | `hardware_discovery_validated: true` on `20030` / `2.0.2.2`; unauthenticated LAN advertisement, `firmware_verified: false`, same-subnet multicast only; never contacts `:18910`/`:9883`, auto-pairs, or exposes raw `LOCATION`/`cn` |
+| `printer pair` | Writes private profile/PEMs after explicit trust | Yes | Yes | Yes | Requires `--name`, bare IPv4 `--host`, explicit TLS pin consent, and qualified status; distinguishes firmware client-limit rejection (`code 19002`) |
 | `printer list\|info\|use\|remove` | Local registry only (`remove` deletes local files only) | Yes | Yes | N/A (offline) | Never contacts the printer or revokes device credentials |
 | `doctor` | Read-only | Yes | Yes | Yes | 8 ordered checks; discloses omitted optional MQTT identity fields |
 | `status` | Read-only | Yes | Yes | Yes | HTTP `/info` identity plus pinned MQTT `info` report |

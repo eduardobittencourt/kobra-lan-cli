@@ -26,11 +26,11 @@ The output envelope does not change private receipt or registry schemas.
 
 | Error code | Exit | Meaning |
 | --- | --- | --- |
-| `invalid_arguments` | 2 | Parser failure, invalid slot-map argument, or malformed execution hash, filename guard, or deletion filename |
+| `invalid_arguments` | 2 | Parser failure, invalid discovery/watch/camera/slot-map option, or malformed execution hash, filename guard, or deletion filename |
 | `validation_failed` | 2 | Selection, trust, protocol, qualification or reviewed-content refusal |
 | `operation_failed` | 3 | Configuration, dependency, I/O or network failure; may retain local partial outcome |
 | `diagnostic_failed` | 2 or 3 | Failed ordered doctor checks; exit 3 takes precedence |
-| `interrupted` | 130 | User interrupted print observation, `camera pipe`, or a lifecycle control or deletion after publish |
+| `interrupted` | 130 | User interrupted `printer discover`, `print watch`, `camera pipe`, or a lifecycle control or deletion after publish |
 
 Every result also includes a `qualification` string with the narrow model/firmware and experimental-start boundary. The `result` payloads retain these command-specific fields. Consumers should
 allow additional safe fields and inspect outcome flags rather than infer success
@@ -38,6 +38,7 @@ from a filename or network acknowledgement.
 
 | Command | Result shape |
 | --- | --- |
+| `printer discover` | `protocol: "ssdp"`, `search_target: "ac:3dprinter:fdm"`, `timeout_seconds`, nullable `interface`, `hardware_discovery_validated`, `unauthenticated_lan_advertisement: true`, `firmware_verified: false`, sanitized `printers` array (`host`, `port`, `model_id`, `model_name`, `device_name`, `mac`, `ctrl_type`, `qualified_model`, `firmware_verified: false`, `unauthenticated: true`), and `limitations` (omits raw `LOCATION` URLs and `cn`) |
 | `printer pair` | `config_path`, `model_id`, `firmware`, `tls_sha256`, plus named `name`/`default` |
 | `printer list` | `profiles` array, `default` (null or named selection); entries report availability |
 | `printer info` | Selection metadata, `config_path`, `available`, host/device/model/firmware/pin metadata |
@@ -630,6 +631,23 @@ in a G-code file, and `file/listUdisk` / `file/listVideo` expose read-only
 metadata only). Because no LAN download endpoint was identified across these
 checks, stored-file download (`files download`) is deferred on stock firmware
 `2.0.2.2`.
+
+Read-only LAN discovery and credential-lifecycle verification on 2026-11-26
+combined static inspection of `AnycubicSlicerNext` `1:2.0.0.6`
+(`/usr/lib/libssdplib.so`, `/usr/lib/libWorkbench.so`,
+`/usr/bin/AnycubicSlicerNext`) with strictly read-only live CLI checks against
+Kobra X model `20030` / firmware `2.0.2.2`. Running `./kobra-lan printer discover`
+and `./kobra-lan --json printer discover` (default 5 s listen window as well as
+explicit `--interface IPv4`) against an empty temporary `HOME` exited `0` with
+empty `stderr`, reported the live Kobra X with `port: 18910`, `model_id: 20030`,
+`model_name: "Anycubic Kobra X"`, `device_name: "Anycubic Kobra X"`,
+`ctrl_type: "lan"`, normalized lowercase `mac`, `qualified_model: true`,
+`firmware_verified: false`, `unauthenticated: true`, and
+`hardware_discovery_validated: true`, leaked zero raw `LOCATION` URLs or `cn`
+cloud binding codes, and performed zero writes to profiles or state. Static
+inspection also confirmed that stock LAN clients never invoke `accountDeleteUrl`
+on printer deletion (local-only removal) and handle `/ctrl` error `code 19002`
+as the printer's LAN client connection limit.
 
 ## Saved target selection
 

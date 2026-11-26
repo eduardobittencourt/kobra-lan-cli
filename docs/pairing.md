@@ -1,5 +1,71 @@
 # LAN pairing and private configuration
 
+## Fresh-install onboarding walkthrough
+
+Follow this sequence from a fresh installation to a verified status query on a
+trusted local network. The examples use the source-checkout launcher; after
+package installation, use `kobra-lan` in place of `./kobra-lan`.
+
+1. **Enable LAN mode on the printer panel**:
+   - Connect the Kobra X to your local network and enable **LAN Mode** on the
+     printer's touchscreen (`Settings` → `Cloud` / `Network` → `LAN Mode` on
+     stock firmware `2.0.2.2`). Confirm the printer is reachable on TCP `18910`
+     (HTTP) and TCP `9883` (MQTT/TLS), and note its IPv4 address on the panel.
+   - **Unverified factory-reset / first-boot boundary**: Once LAN mode is
+     enabled, `kobra-lan` operates completely cloud-free without Anycubic Slicer
+     Next, Home Assistant, or KX-Bridge. However, whether a factory-new or
+     post-factory-reset Kobra X requires an Anycubic account or cloud step in
+     its initial first-boot wizard before LAN mode can be enabled has **not**
+     been tested via destructive factory reset on hardware. Do not infer
+     cloud-free initial unboxing from cloud-independent runtime operation.
+
+2. **Locate the printer (`printer discover` or panel IPv4)**:
+   - On the same local subnet, run strictly read-only SSDP multicast discovery:
+
+     ```sh
+     ./kobra-lan printer discover
+     # Optional listen window (1..15 seconds, default 5) or explicit local IPv4 interface:
+     ./kobra-lan printer discover --timeout 5 --interface 192.0.2.5
+     ```
+
+   - `printer discover` sends bounded UDP multicast `M-SEARCH` probes to
+     `239.255.255.250:1900` (`ST: ac:3dprinter:fdm`) and validates replies
+     against the UDP sender IPv4 address. It never contacts HTTP `18910` or
+     MQTT `9883`, never reads or writes profiles or operational state, never
+     auto-pairs, omits raw `LOCATION` URLs and cloud binding codes (`cn`), and
+     rejects global `--config` and `--printer` selectors with exit `2`.
+   - **Discovery trust and topology limits**: SSDP advertisements are
+     **unauthenticated LAN broadcasts** (`unauthenticated: true`) and do **not**
+     report firmware version (`firmware_verified: false`). Unqualified models
+     are listed with `qualified_model: false` so you can see why pairing will
+     reject them. Multicast discovery works only within the same local network
+     segment; across routed VLANs, Wi-Fi client isolation, VPNs, firewalls
+     blocking UDP `1900`, or multi-homed hosts whose default route points
+     elsewhere (without `--interface IPv4`), discovery exits `0` with an empty
+     `printers` list. In those topologies, use the printer's IPv4 address from
+     the panel directly in step 3.
+
+3. **Pair into a new named profile with explicit TLS fingerprint consent**:
+
+   ```sh
+   ./kobra-lan printer pair --name bench --default --host 192.0.2.10
+   ```
+
+   Review the observed server SHA-256 fingerprint on stderr and enter `y` or
+   `yes` (or supply `--trust-sha256 EXPECTED_SHA256` obtained via a trusted
+   path for unattended setup).
+
+4. **Verify health and read live status**:
+
+   ```sh
+   ./kobra-lan doctor
+   ./kobra-lan status
+   ```
+
+   `doctor` runs eight read-only checks (`configuration` through
+   `compatibility`) and confirms Kobra X model `20030` / firmware `2.0.2.2`
+   qualification before `status` queries live printer state.
+
 ### LAN onboarding and initial trust
 
 Pairing targets a printer already in LAN mode at a known IPv4 address, reachable
@@ -185,6 +251,59 @@ external reference. Preserve and review ambiguous files manually. Local removal,
 new names and re-pairing never delete upload receipts or start attempt markers;
 identities remain based on `printer_id`, including with explicit `--state-dir`.
 Never clear markers to retry an uncertain operation.
+
+## Credential lifecycle, client limits, and non-destructive replacement
+
+Static inspection of `AnycubicSlicerNext 1:2.0.0.6` on 2026-11-26 established
+two firmware `2.0.2.2` credential-lifecycle boundaries:
+
+- **No client-side credential revocation endpoint**: Although the decrypted
+  `/ctrl` response schema includes an `accountDeleteUrl` field, the official
+  LAN client never calls it when deleting a printer—it only closes local MQTT
+  and removes local state. `kobra-lan printer remove` therefore deletes local
+  files only (`device_credentials_revoked: false`) and does not send speculative
+  revocation requests. To revoke previously issued device credentials on the
+  printer, toggle or reset **LAN Mode** on the printer panel.
+- **Printer LAN client limit (`code 19002`)**: Firmware `2.0.2.2` rejects
+  `POST /ctrl` with integer `code: 19002` when the printer's LAN client
+  connection limit is reached. `printer pair` fails with exit `2`
+  (`validation_failed`) and a dedicated diagnostic without echoing raw payloads.
+  Do not repeat blind pairing retries; toggle LAN mode on the printer panel to
+  clear stale clients before pairing again.
+
+When a printer's IPv4 address changes, its TLS certificate changes, or you need
+fresh credentials, replace access **without overwriting an existing profile or
+auto-updating a mismatched TLS pin**:
+
+1. Pair into a fresh unused profile name on a trusted network and explicitly
+   verify the TLS fingerprint:
+
+   ```sh
+   kobra-lan printer pair --name bench-v2 --host 192.0.2.20
+   ```
+
+2. Verify the new profile read-only while preserving your previous profile:
+
+   ```sh
+   kobra-lan --printer bench-v2 doctor
+   kobra-lan --printer bench-v2 status
+   ```
+
+3. Switch the default selection once verified:
+
+   ```sh
+   kobra-lan printer use bench-v2
+   ```
+
+4. Remove the superseded local profile after confirming normal operation:
+
+   ```sh
+   kobra-lan printer remove bench
+   ```
+
+This workflow keeps your previous working profile intact if pairing fails,
+never weakens TLS pin checking, and preserves all `printer_id`-scoped upload
+receipts, start attempt markers, and watch observations across the transition.
 
 ## Diagnose without pairing again
 

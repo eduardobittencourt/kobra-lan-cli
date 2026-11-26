@@ -16,7 +16,7 @@ Modeling, mesh editing, orientation, supports, toolpaths and slicing profiles be
 
 | Area | Implemented behavior |
 | --- | --- |
-| Access | Explicit-address named pairing, [first-use trust](docs/pairing.md), pinned authentication, local profiles, explicit/default selection and confirmed local removal |
+| Access | Read-only same-subnet SSDP discovery (`printer discover`), explicit-address named pairing (`code 19002` client-limit diagnostics), [first-use trust](docs/pairing.md), pinned authentication, local profiles, explicit/default selection, confirmed local removal, and documented credential-replacement/revocation boundaries |
 | Diagnostics | Bounded read-only `doctor`, fresh status, qualified model/firmware checks and disclosure of optional MQTT identifiers omitted by firmware |
 | Filament inventory | Read-only onboard four-slot inventory (`slots list`) and multicolor-aware offline `gcode inspect` (`paint_info`, tools, weights) |
 | Stored files | `files list`, `files info`, local `gcode inspect`, reviewed execution-only `files upload`, and guarded `files delete --execute` (no LAN download endpoint found on stock FW `2.0.2.2`) |
@@ -35,17 +35,19 @@ The CLI and JSON automation interface remain subject to documented changes durin
 
 Hardware evidence covers Kobra X model 20030 / firmware 2.0.2.2, Next-generated G-code (Linux `2.0.0.3`, `2.0.0.5`, `2.0.0.6`), `PLA High Speed` prints with automatic leveling on, vibration compensation off, and flow calibration off — both single-filament starts on onboard slots 1, 2, and 4 (`0=1|2|4`) and an operator-confirmed 4-color contiguous 1:1 print (`0=1, 1=2, 2=3, 3=4`, exercising slot 3 at `ams_index: 2`) — plus reviewed intentional reprints (`--reprint-from`), read-only `print watch` observation persistence, offline `jobs list|info`, live `print pause|resume|cancel` wire transitions (`pause`, `resume`, `stop`), and live `files delete` wire confirmation plus byte-for-byte local state/permission preservation (`deleteBatch` `success`/200, follow-up `files list` removal, and unchanged local receipts, markers, and watch observations), with operator-confirmed completion of both runs in a two-slot reprint cycle and the 4-color run. Single-filament slot 3, cross-remapped/sparse/shared/subset multicolor, non-zero single paint indices, other materials and preparation combinations, and external ACE units remain unqualified. Package acceptance and offline tests do not expand hardware evidence.
 
-## Milestone 1 — Independent onboarding
+## Milestone 1 — Independent onboarding (complete)
 
-Implemented: named pairing by explicit IPv4 address for an already LAN-enabled qualified printer, explicit first-use trust, private atomic publication, local selection/removal and read-only diagnosis. Installed synthetic probes verify the onboarding path without contacting a printer.
+Implemented:
 
-Remaining work:
+- Strictly read-only same-subnet SSDP multicast discovery (`kobra-lan printer discover [--timeout 1..15] [--interface IPv4]`) over `239.255.255.250:1900` (`ST: ac:3dprinter:fdm`) with strict sender-IP validation, `cn`/raw-URL omission, explicit unauthenticated and `firmware_verified: false` disclosures, multicast/VLAN topology limits, and centralized `hardware_discovery_validated: true` on Kobra X model `20030` / firmware `2.0.2.2`.
+- End-to-end fresh-install onboarding walkthrough in [docs/pairing.md](docs/pairing.md) covering printer-panel LAN-mode prerequisites, `printer discover` vs explicit IPv4 pairing, first-use TLS fingerprint consent, private atomic publication, local profile selection/removal, `doctor`, and `status`.
+- Credential-lifecycle research and safeguards (2026-11-26): provisioning distinguishes firmware client-limit rejection (`code 19002`), stock LAN removal (`accountDeleteUrl` unused by `AnycubicSlicerNext`) is documented alongside panel-side LAN-mode toggle/reset for credential revocation, and [docs/pairing.md](docs/pairing.md#credential-lifecycle-client-limits-and-non-destructive-replacement) defines the non-destructive credential/IP/TLS-pin replacement workflow preserving existing access and `printer_id`-scoped attempt markers.
 
-- Verify and document every printer-panel/app step and external prerequisite for initial LAN-mode setup. Do not infer cloud-free initial setup from cloud-independent runtime operation.
-- Investigate discovery across supported network arrangements and add it only with validated protocol behavior.
-- Research credential replacement/revocation and recovery while preserving existing access and device-based attempt protection.
+Recorded unresolved limitation:
 
-Exit evidence: a new owner can follow public instructions from a fresh client installation to a successful status query, with external requirements and unresolved limitations recorded.
+- Factory-new / post-factory-reset first-boot wizard cloud or account requirements have not been tested via destructive factory reset on hardware and remain explicitly documented as unverified rather than inferred from cloud-free runtime operation.
+
+Exit evidence (satisfied 2026-11-26): a new owner can follow [docs/pairing.md](docs/pairing.md) from a fresh client installation through read-only `printer discover` (live-verified on Kobra X `20030` / firmware `2.0.2.2` with zero profile/state writes and zero `LOCATION`/`cn` leakage), explicit `printer pair`, `doctor`, and `status`, with external prerequisites, multicast limits, credential-revocation boundaries, and the untested factory-reset boundary explicitly recorded.
 
 ## Milestone 2 — A coherent CLI and an installable preview
 
@@ -163,7 +165,7 @@ Remaining work:
 - Expand hardware coverage beyond `PLA High Speed` with `auto-leveling on` and vibration/flow off (single-filament slot 3 `0=3`, other materials, and other preparation settings).
 - Qualify non-identity multicolor and non-zero paint-index starts: cross-remapped mappings (`paint_index != ams_index`), 2/3-color subsets, sparse paint indices, and shared physical slots.
 
-External ACE units, discovery and other device controls require separate work.
+External ACE units and other device controls require separate work.
 
 ## Milestone 4 — Broader compatibility and stable releases
 
@@ -193,8 +195,8 @@ Keep one authoritative version and the existing Python implementation. Additiona
 
 ## Open questions
 
-- Which initial setup steps require Anycubic services, an account or physical confirmation?
-- Which discovery, file-management and lifecycle operations does the qualified firmware expose reliably?
+- Which initial factory-reset / first-boot setup steps require Anycubic services, an account, or physical confirmation before LAN mode can be enabled?
+- Which additional file-management and lifecycle operations do future firmware versions expose reliably?
 - How should intentional reprints be represented without weakening durable attempt protection?
 - Which additional platforms and firmware versions can be maintained and physically qualified?
 - When does an additional distribution channel justify its ongoing maintenance?

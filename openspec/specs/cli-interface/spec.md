@@ -7,15 +7,15 @@ Provide a discoverable CLI for people and automation with deliberate commands, p
 ## Requirements
 
 ### Requirement: Canonical command tree
-The CLI SHALL expose `printer pair|list|info|use|remove`, `doctor`, `status`, `slots list`, `camera status|snapshot|pipe`, `files list|info|upload|delete`, `gcode inspect`, `print plan|start|watch|pause|resume|cancel`, `jobs list|info`, and `completion bash|zsh|fish`. It SHALL remove flat `file`, `upload`, `inspect`, `start` and executable bare `files` without aliases or deprecation shims. Bare `slots` and bare `camera` without a subcommand SHALL fail with exit 2 and contextual help.
+The CLI SHALL expose `printer discover|pair|list|info|use|remove`, `doctor`, `status`, `slots list`, `camera status|snapshot|pipe`, `files list|info|upload|delete`, `gcode inspect`, `print plan|start|watch|pause|resume|cancel`, `jobs list|info`, and `completion bash|zsh|fish`. It SHALL remove flat `file`, `upload`, `inspect`, `start` and executable bare `files` without aliases or deprecation shims. Bare `slots`, bare `camera`, and bare `printer` without a subcommand SHALL fail with exit 2 and contextual help.
 
 #### Scenario: Removed invocation
-- **WHEN** a superseded flat command or bare operational group (including bare `slots` or bare `camera`) is invoked
+- **WHEN** a superseded flat command or bare operational group (including bare `printer`, bare `slots`, or bare `camera`) is invoked
 - **THEN** the CLI exits 2 with contextual guidance and performs no network or state mutation
 
 #### Scenario: Group help
-- **WHEN** `files --help`, `slots --help`, `camera --help`, `print --help`, or `jobs --help` is requested
-- **THEN** help lists the group's supported operations and distinguishes read-only inspection, snapshot/stream capture (including optional `startCapture`/`stopCapture` fallback and `--no-start-capture`), local history inspection, network observation, planning, and execution controls (including explicit `--execute` storage deletion under `files`)
+- **WHEN** `printer --help`, `files --help`, `slots --help`, `camera --help`, `print --help`, or `jobs --help` is requested
+- **THEN** help lists the group's supported operations and distinguishes read-only discovery/inspection, pairing, snapshot/stream capture (including optional `startCapture`/`stopCapture` fallback and `--no-start-capture`), local history inspection, network observation, planning, and execution controls (including explicit `--execute` storage deletion under `files`)
 
 ### Requirement: Deterministic presentation
 Operational commands SHALL emit readable English text by default and one JSON document when global `--json` is supplied before the command, EXCEPT `camera pipe`, which writes raw binary HTTP-FLV bytes to stdout and SHALL reject global `--json` with exit 2 before target selection or network access. Piping SHALL NOT change the selected format. Prompts, progress, and `camera pipe` diagnostics SHALL use stderr. Help, version and completion SHALL retain their native textual formats.
@@ -44,7 +44,7 @@ Operational JSON SHALL contain integer `schema_version: 1` and boolean `ok`. Suc
 - **THEN** neither output stream nor exception text exposes that sensitive input
 
 ### Requirement: Consistent errors and exit classes
-The CLI SHALL use exit 0 for success (and `camera pipe` downstream pipe closure), 2 for argument/selection/trust/protocol validation, 3 for configuration/dependency/I/O/network failure, and 130 for foreground interruption of `print watch` or `camera pipe`. Operational argument errors with global `--json` SHALL use the machine envelope without argparse usage prose on stdout, and SHALL fail before side effects.
+The CLI SHALL use exit 0 for success (and `camera pipe` downstream pipe closure), 2 for argument/selection/trust/protocol validation, 3 for configuration/dependency/I/O/network failure, and 130 for foreground interruption of `printer discover`, `print watch`, or `camera pipe`. Operational argument errors with global `--json` SHALL use the machine envelope without argparse usage prose on stdout, and SHALL fail before side effects.
 
 #### Scenario: Missing execution option
 - **WHEN** an execution command omits a required hash or `--execute` in JSON mode
@@ -61,6 +61,10 @@ The CLI SHALL use exit 0 for success (and `camera pipe` downstream pipe closure)
 #### Scenario: Interrupted watch in JSON mode
 - **WHEN** the user interrupts `print watch` with global `--json`
 - **THEN** it exits 130 and stdout holds one failure envelope with a safe partial result when available
+
+#### Scenario: Interrupted discovery in JSON mode
+- **WHEN** the user interrupts `printer discover` with global `--json`
+- **THEN** it exits 130 and stdout holds one failure envelope (`code: "interrupted"`)
 
 #### Scenario: Missing ffmpeg dependency on camera snapshot
 - **WHEN** `camera snapshot --output frame.jpg` runs without `ffmpeg` available on `PATH` in text or JSON mode
@@ -85,7 +89,7 @@ Target-dependent commands SHALL share explicit selectors and a saved named defau
 - **THEN** canonical commands and options can be completed offline without contacting any printer
 
 ### Requirement: Discoverable installed workflow
-Help and English documentation SHALL show setup, target selection, diagnosis, filament slot inventory, camera inspection/snapshot/piping, inspection, upload, stored-file deletion, plan, start, watch, pause/resume/cancel lifecycle controls, and local job history examples, including global option placement and execution guards. Python and Debian packages SHALL expose the same help, formats and completion generator outside the checkout using declared dependencies.
+Help and English documentation SHALL show LAN discovery, setup, target selection, diagnosis, filament slot inventory, camera inspection/snapshot/piping, inspection, upload, stored-file deletion, plan, start, watch, pause/resume/cancel lifecycle controls, and local job history examples, including global option placement and execution guards. Python and Debian packages SHALL expose the same help, formats and completion generator outside the checkout using declared dependencies.
 
 #### Scenario: Installed acceptance
 - **WHEN** clean supported installations exercise help, version, completion, local inspection, invalid commands and synthetic diagnosis
@@ -151,3 +155,10 @@ Installed help and English documentation SHALL expose `camera status`, `camera s
 #### Scenario: Discover camera offline on clean installation
 - **WHEN** `camera --help`, `camera status --help`, `camera snapshot --help`, `camera pipe --help`, or `completion bash|zsh|fish` runs without a printer configuration, state directory, or `ffmpeg` installed
 - **THEN** help and generated completions expose `camera`, `status`, `snapshot`, `pipe`, `--output`, `--timeout`, `--overwrite`, `--max-bytes`, and `--no-start-capture` with no network access and no state writes
+
+### Requirement: Discover LAN printer discovery
+Installed help and English documentation SHALL expose `printer discover` with optional `--timeout` and `--interface`, stating that discovery is strictly read-only over same-subnet SSDP multicast (`ac:3dprinter:fdm`), unauthenticated, does not verify firmware, and never pairs automatically. Offline bash, zsh, and fish completion SHALL expose `discover`, `--timeout`, and `--interface` under `printer` without configuration, state writes, or network access.
+
+#### Scenario: Discover printer discover offline on clean installation
+- **WHEN** `printer --help`, `printer discover --help`, or `completion bash|zsh|fish` runs without a printer configuration or state directory
+- **THEN** help and generated completions expose `discover`, `--timeout`, and `--interface` under `printer` with no network access and no state writes

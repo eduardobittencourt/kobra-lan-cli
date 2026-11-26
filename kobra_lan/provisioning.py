@@ -103,7 +103,13 @@ def exchange(host):
     """Fetch identity and send exactly one signed credential request."""
     token = identity(host)
     response = request_json(host, "POST", "/ctrl?" + urlencode(signed_parameters(token)))
-    if type(response.get("code")) is not int or response["code"] != 200 or not isinstance(response.get("data"), dict):
+    code = response.get("code")
+    if type(code) is int and code == 19002:
+        raise ProtocolError(
+            "Provisioning: printer rejected credential request (client connection limit reached, code 19002); "
+            "toggle LAN mode on the printer panel to clear stale clients before pairing again"
+        )
+    if type(code) is not int or code != 200 or not isinstance(response.get("data"), dict):
         raise ProtocolError("Provisioning: credential request rejected")
     return token, response["data"]
 
