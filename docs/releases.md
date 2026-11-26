@@ -10,9 +10,9 @@ package release; source versions, merged PRs and CI artifacts are not publicatio
 
 The source of truth is the literal `__version__` in `kobra_lan/__init__.py`.
 Python metadata and `kobra-lan --version` derive from it. A release accepts only
-final `X.Y.Z` versions (for example `0.5.0`), matching `vX.Y.Z` tags and Debian
-version `X.Y.Z-1`. Leading zeroes, prereleases (`0.5.0-rc.1`, `0.5.0rc1`) and
-build metadata (`0.5.0+build`) fail validation. They need explicit Python/Debian
+final `X.Y.Z` versions (for example `0.6.0`), matching `vX.Y.Z` tags and Debian
+version `X.Y.Z-1`. Leading zeroes, prereleases (`0.6.0-rc.1`, `0.6.0rc1`) and
+build metadata (`0.6.0+build`) fail validation. They need explicit Python/Debian
 ordering rules before they can be supported. Do not use packaging-only revisions:
 changed published bytes require a new application version.
 
@@ -31,7 +31,7 @@ migration and hardware limitations in `CHANGELOG.md` under `## X.Y.Z`. Update th
 literal version, move the relevant Unreleased notes into that section, then run:
 
 ```sh
-python3 scripts/release_version.py --tag v0.5.0  # after setting version 0.5.0
+python3 scripts/release_version.py --tag v0.6.0  # after setting version 0.6.0
 python3 -m unittest discover -s tests -v
 ```
 
@@ -59,10 +59,10 @@ apt-get update
 apt-get install --no-install-recommends build-essential debhelper dh-sequence-python3 \
   pybuild-plugin-pyproject python3-all python3-setuptools python3-wheel \
   python3-build python3-venv python3-cryptography lintian
-python3 scripts/release_version.py --tag v0.5.0
-python3 scripts/build_deb.py --output build/debian --tag v0.5.0
-python3 scripts/check_deb.py build/debian/kobra-lan-cli_0.5.0-1_all.deb
-lintian build/debian/kobra-lan-cli_0.5.0-1_all.deb
+python3 scripts/release_version.py --tag v0.6.0
+python3 scripts/build_deb.py --output build/debian --tag v0.6.0
+python3 scripts/check_deb.py build/debian/kobra-lan-cli_0.6.0-1_all.deb
+lintian build/debian/kobra-lan-cli_0.6.0-1_all.deb
 (cd build/debian && sha256sum --check SHA256SUMS)
 python3 scripts/check_python.py build/python-acceptance
 ```
@@ -137,11 +137,11 @@ performed by `kobra-lan` itself.
 
 Download the package and `SHA256SUMS` from the same GitHub version release into
 an empty directory, verify, and install the local package. The example uses
-0.5.0; use the actual `.deb` filename from your selected release:
+0.6.0; use the actual `.deb` filename from your selected release:
 
 ```sh
 sha256sum --check SHA256SUMS
-sudo apt install ./kobra-lan-cli_0.5.0-1_all.deb
+sudo apt install ./kobra-lan-cli_0.6.0-1_all.deb
 /usr/bin/kobra-lan --version
 /usr/bin/kobra-lan --help
 command -v kobra-lan
@@ -250,3 +250,29 @@ Native shell tests explicitly record unavailable shells. Package availability
 does not authorize pairing, upload or physical printer operations. Creating a
 version tag and publishing a release remain explicit maintainer actions through
 the gated workflow above.
+
+## Print cycle, multicolor, and camera preview 0.6.0
+
+Version 0.6.0 expands the experimental 0.x CLI with `print watch`, reviewed
+intentional reprints (`--reprint-from`), offline `jobs list|info`, guarded
+`print pause|resume|cancel`, guarded `files delete --execute`, read-only
+`slots list`, multicolor-aware `gcode inspect`, reviewed multicolor
+`print plan|start`, centralized qualification (`kobra_lan/qualification.py` and
+[docs/compatibility.md](compatibility.md)), and LAN camera commands
+(`camera status|snapshot|pipe`).
+
+Breaking 0.x change: repeatable `--slot-map PAINT_INDEX=SLOT` replaces
+`--slot` on `print plan` and `print start`, `slot_mapping` replaces
+`selected_slot` on `print plan`, `print start`, and `jobs info`, and
+`jobs info` reports `material_type` per `slot_mapping` entry. Existing upload
+receipts, start receipts, attempt markers, watch observations, and reprint
+chains remain readable in place without migration.
+
+Runtime dependencies remain unchanged (`python3 >= 3.11` and
+`python3-cryptography >= 41` / `cryptography>=41`). The Debian package adds
+optional `Suggests: ffmpeg` for `camera snapshot`; `camera status` and
+`camera pipe` require no external video binaries. Stored-file download
+(`files download`) remains unimplemented because the 2026-11-25 investigation
+of stock Kobra X firmware 2.0.2.2 found no LAN download endpoint. Creating the `v0.6.0` tag and publishing the
+release remain explicit maintainer actions through the gated workflow above
+after code review and package checks pass.
