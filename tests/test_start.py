@@ -453,17 +453,32 @@ class StartTests(unittest.TestCase):
         plan = self.plan()
         root_identity = attempt_id(plan['device_digest'], plan['file_sha256'], None)
         for with_attempt_id in (False, True):
-            with self.subTest(with_attempt_id=with_attempt_id):
-                marker, receipt = self.legacy_file_keyed(with_attempt_id=with_attempt_id)
-                before = [(p.read_bytes(), stat.S_IMODE(p.stat().st_mode)) for p in (marker, receipt)]
-                code, planned = self.invoke_route('plan')
-                self.assertEqual(code, 0)
-                self.assertNotIn('attempt_id', planned['result'])
-                self.assertNotIn('start_status', planned['result'])
-                self.assertEqual(self.invoke_route('plan', previous=root_identity)[0], 2)
-                self.assertEqual(self.invoke_route('start', digest=plan['plan_sha256'], previous=root_identity)[0], 2)
-                self.assertEqual([(p.read_bytes(), stat.S_IMODE(p.stat().st_mode)) for p in (marker, receipt)], before)
-                self.assertEqual(Client.starts, 0)
+            for present in ('both', 'marker_only', 'receipt_only'):
+                with self.subTest(with_attempt_id=with_attempt_id, present=present):
+                    marker, receipt = self.legacy_file_keyed(with_attempt_id=with_attempt_id)
+                    if present == 'marker_only':
+                        receipt.unlink()
+                        tracked = (marker,)
+                    elif present == 'receipt_only':
+                        marker.unlink()
+                        tracked = (receipt,)
+                    else:
+                        tracked = (marker, receipt)
+                    before = [(p.read_bytes(), stat.S_IMODE(p.stat().st_mode)) for p in tracked]
+                    code, planned = self.invoke_route('plan')
+                    self.assertEqual(code, 0)
+                    self.assertNotIn('attempt_id', planned['result'])
+                    self.assertNotIn('start_status', planned['result'])
+                    # Ordinary start --execute must refuse when legacy root start state exists.
+                    code, ordinary = self.invoke_route('start', digest=plan['plan_sha256'])
+                    self.assertEqual(code, 2)
+                    self.assertIn('Legacy start state exists', ordinary['error']['message'])
+                    self.assertEqual(self.invoke_route('plan', previous=root_identity)[0], 2)
+                    self.assertEqual(self.invoke_route('start', digest=plan['plan_sha256'], previous=root_identity)[0], 2)
+                    self.assertFalse((marker.parent / (root_identity + '.attempt')).exists())
+                    self.assertFalse((marker.parent / (root_identity + '.json')).exists())
+                    self.assertEqual([(p.read_bytes(), stat.S_IMODE(p.stat().st_mode)) for p in tracked], before)
+                    self.assertEqual(Client.starts, 0)
 
     def test_direct_reprint_accepts_canonical_root_receipt_in_place(self):
         marker, receipt = self.canonical_root()

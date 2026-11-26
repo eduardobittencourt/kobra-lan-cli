@@ -62,4 +62,4 @@ Today `kobra-lan` carries three pre-`v1` compatibility shims across six modules 
 
 ## Migration Plan
 
-No automated state migration is performed. Existing `~/.local/share/kobra-lan/uploads/` files are left untouched; any new `print start` creates `<attempt_id>.attempt` and `<attempt_id>.json`, and any new mutating command acquires only `.device.lock`. If the operator wants a clean local history after upgrading, preexisting legacy files under `starts/` or stale `.upload.lock`/`.start.lock` files can be inspected or removed manually at their discretion.
+No automated state migration is performed. Existing `~/.local/share/kobra-lan/uploads/` files are left untouched; any new `print start` creates `<attempt_id>.attempt` and `<attempt_id>.json`, and any new mutating command acquires only `.device.lock`. Keep preexisting files under `starts/` in place to preserve start evidence and duplicate protection; only obsolete `.upload.lock` or `.start.lock` files confirmed not to be held by any running process should be cleaned up manually if desired.

@@ -109,7 +109,7 @@ The CLI SHALL preserve configuration, credentials, device-based receipts, permis
 
 #### Scenario: Unrecognized legacy file-keyed start files are neither migrated nor eligible
 - **WHEN** `starts/<device>/` contains a pre-v1 file-keyed (`<file_sha256>.*`) marker/receipt without canonical `attempt_id` keying
-- **THEN** `print plan` and `print start` do not migrate, modify, or delete those files and do not treat them as an eligible reprint predecessor
+- **THEN** `print plan` and `print start` do not migrate, modify, or delete those files, do not treat them as an eligible reprint predecessor, and `print start --execute` refuses without sending a start command while those files exist
 
 ### Requirement: Evidence stays qualified
 Both formats SHALL distinguish upload listing/metadata verification from remote byte-hash verification, start acknowledgement from observed activity, and activity from completion or physical quality. Qualification SHALL remain Kobra X model 20030 / firmware 2.0.2.2 and the recorded material/preparation evidence (single-filament `0 -> 1|2|4` and 4-color contiguous 1:1 `0..3 -> 1..4` in `PLA High Speed` with `auto-leveling on`, vibration/flow off); unobserved multicolor mappings and non-zero single `paint_index` starts SHALL report `hardware_start_validated: false`.

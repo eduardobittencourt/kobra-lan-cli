@@ -131,8 +131,20 @@ def active_project(info, project, filename):
             and isinstance(filename, str) and isinstance(project, dict) and project.get("filename") == filename)
 
 
+def legacy_root_present(directory_fd, file_sha256):
+    for suffix in (ATTEMPT_SUFFIX, RECEIPT_SUFFIX):
+        try:
+            os.stat(file_sha256 + suffix, dir_fd=directory_fd, follow_symlinks=False)
+            return True
+        except FileNotFoundError:
+            continue
+    return False
+
+
 def reviewed_attempt(plan, directory_fd, previous, execute):
     identity, status, filename = latest_attempt(directory_fd, plan)
+    if execute and directory_fd is not None and legacy_root_present(directory_fd, plan["file_sha256"]):
+        raise ProtocolError("Legacy start state exists for this file; no start was sent")
     if previous is None:
         if execute and identity is not None:
             raise ProtocolError("Start already attempted; inspect print plan for the latest local attempt")
