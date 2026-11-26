@@ -161,44 +161,20 @@ def _extract_slot_mapping(receipt):
 
 
 def _parse_start_candidate(record, storage_key, device_digest, *, is_marker):
-    """Return (file_sha256, previous_attempt_id, identity, record_format, error_issue)."""
+    """Return (file_sha256, previous_attempt_id, identity, error_issue)."""
     sha_field = record.get("sha256") if is_marker else record.get("file_sha256")
     prev = record.get("previous_attempt_id")
     att = record.get("attempt_id")
+    issue = "invalid_successor_identity" if prev is not None else "invalid_start_identity"
 
-    if is_marker:
-        if set(record) == {"sha256", "plan_sha256"} and sha_field == storage_key:
-            return storage_key, None, attempt_id(device_digest, storage_key, None), "legacy", None
-        if prev is None and sha_field == storage_key and "attempt_id" in record:
-            expected = attempt_id(device_digest, storage_key, None)
-            if att == expected and record.get("device_digest") == device_digest:
-                return storage_key, None, expected, "current", None
-            return None, None, None, None, "invalid_successor_identity"
-        if valid_attempt_id(prev) and valid_attempt_id(sha_field):
-            expected = attempt_id(device_digest, sha_field, prev)
-            if att == storage_key and expected == storage_key and record.get("device_digest") == device_digest:
-                return sha_field, prev, storage_key, "current", None
-            return None, None, None, None, "invalid_successor_identity"
-        if prev is not None or att is not None:
-            return None, None, None, None, "invalid_successor_identity"
-        return None, None, None, None, None
-
-    # Receipt parsing
-    if "attempt_id" not in record and "previous_attempt_id" not in record:
-        if sha_field == storage_key and record.get("device_digest") == device_digest:
-            return storage_key, None, attempt_id(device_digest, storage_key, None), "legacy", None
-        return None, None, None, None, None
-    if prev is None and sha_field == storage_key:
-        expected = attempt_id(device_digest, storage_key, None)
-        if att == expected and record.get("device_digest") == device_digest:
-            return storage_key, None, expected, "current", None
-        return None, None, None, None, "invalid_successor_identity"
-    if valid_attempt_id(prev) and valid_attempt_id(sha_field):
-        expected = attempt_id(device_digest, sha_field, prev)
-        if att == storage_key and expected == storage_key and record.get("device_digest") == device_digest:
-            return sha_field, prev, storage_key, "current", None
-        return None, None, None, None, "invalid_successor_identity"
-    return None, None, None, None, "invalid_successor_identity"
+    if (not valid_attempt_id(sha_field)
+            or (prev is not None and not valid_attempt_id(prev))
+            or att != storage_key
+            or record.get("device_digest") != device_digest):
+        return None, None, None, issue
+    if attempt_id(device_digest, sha_field, prev) != storage_key:
+        return None, None, None, issue
+    return sha_field, prev, storage_key, None
 
 
 def _empty_upload_provenance():
@@ -262,7 +238,6 @@ def _build_unreadable_start(storage_key, device_digest, issues):
     return {
         "record_id": f"unreadable-{storage_key}",
         "record_kind": "start",
-        "record_format": None,
         "completeness": "incomplete",
         "client_attribution": "cli",
         "device_digest": device_digest,
@@ -313,10 +288,10 @@ def _reconstruct_start_entry(storage_key, marker, receipt, device_digest):
     m_cand = _parse_start_candidate(marker_dict, storage_key, device_digest, is_marker=True) if marker_dict is not None else None
     r_cand = _parse_start_candidate(receipt_dict, storage_key, device_digest, is_marker=False) if receipt_dict is not None else None
 
-    if m_cand is not None and m_cand[4] is not None:
-        _add_issue(issues, m_cand[4])
-    if r_cand is not None and r_cand[4] is not None:
-        _add_issue(issues, r_cand[4])
+    if m_cand is not None and m_cand[3] is not None:
+        _add_issue(issues, m_cand[3])
+    if r_cand is not None and r_cand[3] is not None:
+        _add_issue(issues, r_cand[3])
 
     m_id = m_cand[2] if m_cand is not None else None
     r_id = r_cand[2] if r_cand is not None else None
@@ -325,7 +300,7 @@ def _reconstruct_start_entry(storage_key, marker, receipt, device_digest):
         if marker_dict is not None and receipt_dict is not None and not issues:
             _add_issue(issues, "receipt_mismatch")
         elif not issues:
-            _add_issue(issues, "invalid_successor_identity")
+            _add_issue(issues, "invalid_start_identity")
         return _build_unreadable_start(storage_key, device_digest, issues)
 
     if m_id is not None and r_id is not None:
@@ -334,13 +309,12 @@ def _reconstruct_start_entry(storage_key, marker, receipt, device_digest):
             if m_id != r_id:
                 return _build_unreadable_start(storage_key, device_digest, issues)
         file_sha256, previous, identity = m_cand[0], m_cand[1], m_cand[2]
-        record_format = m_cand[3] if m_cand[3] == r_cand[3] else None
     elif m_id is not None:
-        file_sha256, previous, identity, record_format = m_cand[0], m_cand[1], m_cand[2], m_cand[3]
+        file_sha256, previous, identity = m_cand[0], m_cand[1], m_cand[2]
         if receipt_dict is not None:
             _add_issue(issues, "receipt_mismatch")
     else:
-        file_sha256, previous, identity, record_format = r_cand[0], r_cand[1], r_cand[2], r_cand[3]
+        file_sha256, previous, identity = r_cand[0], r_cand[1], r_cand[2]
         if marker_dict is not None:
             _add_issue(issues, "receipt_mismatch")
 
@@ -392,7 +366,6 @@ def _reconstruct_start_entry(storage_key, marker, receipt, device_digest):
     return {
         "record_id": identity,
         "record_kind": "start",
-        "record_format": record_format,
         "completeness": completeness,
         "client_attribution": "cli",
         "device_digest": device_digest,

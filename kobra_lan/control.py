@@ -92,7 +92,7 @@ def control_print(config, action, state_dir, *, expected_filename=None):
     device_digest = hashlib.sha256(config.printer_id.encode()).hexdigest()
     device_dir = Path(state_dir) / device_digest[:16]
     with ExitStack() as resources:
-        device_fd = resources.enter_context(device_lock(device_dir, "control"))
+        device_fd = resources.enter_context(device_lock(device_dir))
         ensure_directory_bound(device_dir, device_fd, action)
         client = resources.enter_context(MQTT(config))
         info = payload_data(client.query("info", require_fresh=True))

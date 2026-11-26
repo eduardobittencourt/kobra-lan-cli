@@ -117,12 +117,6 @@ def inspect_gcode_filaments(data, *, return_raw_colors=False):
             filaments.append({**entry, "filament_used_g": weight})
     tool_indices = sorted({int(match.group(1)) for match in TOOL_RE.finditer(data)})
     multicolor = len(filaments) > 1 or len(tool_indices) > 1
-    single_filament_start_compatible = (
-        paint_info_present
-        and len(filaments) == 1
-        and filaments[0]["paint_index"] == 0
-        and set(tool_indices) <= {0}
-    )
     result = {
         "paint_info_present": paint_info_present,
         "filaments": filaments,
@@ -130,7 +124,6 @@ def inspect_gcode_filaments(data, *, return_raw_colors=False):
         "multicolor": multicolor,
         "tool_indices": tool_indices,
         "total_filament_used_g": total_filament_used_g,
-        "single_filament_start_compatible": single_filament_start_compatible,
     }
     if return_raw_colors:
         return result, (parsed_lines[0][1] if parsed_lines else {})

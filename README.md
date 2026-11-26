@@ -85,8 +85,7 @@ execution controls.
 `slots list` inspects the qualified Kobra X onboard four-slot filament box
 (slots `1..4`, idle or printing) over one pinned MQTT session without writing
 local state; `gcode inspect` reports parsed `paint_info` filaments/colors,
-`T<n>` tool indices, optional weights, `multicolor`, and
-`single_filament_start_compatible` offline.
+`T<n>` tool indices, optional weights, and `multicolor` offline.
 
 For multicolor prints, use `gcode inspect` to get the file hash and paint
 indices, then `slots list` to find loaded, material-compatible slots. After

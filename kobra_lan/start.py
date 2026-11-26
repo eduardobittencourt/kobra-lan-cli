@@ -80,14 +80,10 @@ def matching_receipt(marker, receipt, identity, previous, device, file_sha256):
     if (not valid_attempt_id(digest) or marker.get("sha256") != file_sha256
             or receipt.get("plan_sha256") != digest or receipt.get("device_digest") != device
             or receipt.get("file_sha256") != file_sha256 or receipt.get("dry_run") is not False
-            or not isinstance(receipt.get("payload"), dict)):
-        return False
-    if previous is None and set(marker) == {"sha256", "plan_sha256"}:
-        if "attempt_id" in receipt or "previous_attempt_id" in receipt:
-            return False
-    elif (marker.get("attempt_id") != identity or marker.get("device_digest") != device
-          or marker.get("previous_attempt_id") != previous or receipt.get("attempt_id") != identity
-          or receipt.get("previous_attempt_id") != previous):
+            or not isinstance(receipt.get("payload"), dict)
+            or marker.get("attempt_id") != identity or marker.get("device_digest") != device
+            or marker.get("previous_attempt_id") != previous or receipt.get("attempt_id") != identity
+            or receipt.get("previous_attempt_id") != previous):
         return False
     try:
         return review_digest(receipt, previous) == digest
@@ -117,9 +113,8 @@ def latest_attempt(directory_fd, plan):
     previous = None
     while True:
         identity = attempt_id(device, file_sha256, previous)
-        key = file_sha256 if previous is None else identity
-        marker = state_record(directory_fd, key + ATTEMPT_SUFFIX)
-        receipt = state_record(directory_fd, key + RECEIPT_SUFFIX)
+        marker = state_record(directory_fd, identity + ATTEMPT_SUFFIX)
+        receipt = state_record(directory_fd, identity + RECEIPT_SUFFIX)
         if marker is MISSING and receipt is MISSING:
             return latest
         if previous is None or latest[1] == ACTIVE:
@@ -136,8 +131,20 @@ def active_project(info, project, filename):
             and isinstance(filename, str) and isinstance(project, dict) and project.get("filename") == filename)
 
 
+def legacy_root_present(directory_fd, file_sha256):
+    for suffix in (ATTEMPT_SUFFIX, RECEIPT_SUFFIX):
+        try:
+            os.stat(file_sha256 + suffix, dir_fd=directory_fd, follow_symlinks=False)
+            return True
+        except FileNotFoundError:
+            continue
+    return False
+
+
 def reviewed_attempt(plan, directory_fd, previous, execute):
     identity, status, filename = latest_attempt(directory_fd, plan)
+    if execute and directory_fd is not None and legacy_root_present(directory_fd, plan["file_sha256"]):
+        raise ProtocolError("Legacy start state exists for this file; no start was sent")
     if previous is None:
         if execute and identity is not None:
             raise ProtocolError("Start already attempted; inspect print plan for the latest local attempt")
@@ -256,7 +263,7 @@ def start(config, path, name, slot_map, auto_leveling, vibration, flow, state_di
     starts_dir = Path(state_dir) / "starts" / device
     with ExitStack() as resources:
         if execute:
-            device_fd = resources.enter_context(device_lock(device_dir, "start"))
+            device_fd = resources.enter_context(device_lock(device_dir))
         starts_fd = open_starts(resources, starts_dir)
         if execute:
             ensure_directory_bound(device_dir, device_fd, "start")
@@ -300,14 +307,13 @@ def publish_start(client, plan, starts_dir, starts_fd, device_dir, device_fd, pr
 
     file_sha256 = plan["file_sha256"]
     identity = attempt_id(plan["device_digest"], file_sha256, previous)
-    key = file_sha256 if previous is None else identity
-    attempt = starts_dir / (key + RECEIPT_SUFFIX)
+    attempt = starts_dir / (identity + RECEIPT_SUFFIX)
     receipt = {field: value for field, value in plan.items() if field != "start_status"}
     receipt.update(attempt_id=identity, dry_run=False, status="start_reserved", timestamp=int(time.time()))
     marker = {field: receipt[field] for field in ("attempt_id", "device_digest", "plan_sha256")}
     marker.update(sha256=file_sha256, previous_attempt_id=previous)
     check_state()
-    reserve_at(starts_fd, marker, key=key, operation="start")
+    reserve_at(starts_fd, marker, key=identity, operation="start")
     try:
         atomic_json(attempt, receipt, directory_fd=starts_fd)
         check_state()
