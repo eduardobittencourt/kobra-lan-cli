@@ -98,7 +98,7 @@ class DeleteFileTests(unittest.TestCase):
         self.assertEqual(result["status"], "delete_observed_removed")
         self.assertTrue(result["experimental"])
         self.assertFalse(result["dry_run"])
-        self.assertFalse(result["hardware_delete_validated"])
+        self.assertTrue(result["hardware_delete_validated"])
         self.assertEqual(result["before_listing"], self.entry)
         self.assertNotIn("urls", result["before"])
         self.assertEqual(result["ack"], self.ack)

@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- Promote `hardware_delete_validated` to `true` for qualified Kobra X model
+  20030 / firmware 2.0.2.2 (remaining `false` for unqualified models and
+  firmwares) after live 2026-11-26 verification of `files delete --execute`
+  confirmed both remote removal (`deleteBatch` `success` / 200 and follow-up
+  `files list` absence) and byte-for-byte preservation of local upload/start
+  receipts, `.attempt` markers, watch observations, and directory/file
+  permissions.
+- Record live 2026-11-26 post-reboot cold-start camera verification on Kobra X
+  model 20030 / firmware 2.0.2.2 (with no prior app, slicer, or CLI capture),
+  confirming direct read-only HTTP-FLV availability immediately after boot
+  across `camera status`, `camera pipe --no-start-capture`, `camera snapshot`
+  (1280×720 JPEG in `direct` mode), and `camera pipe` with zero URL/token
+  exposure and healthy post-capture status.
+
 ## 0.6.0
 
 - Experimental release for testing and feedback; the CLI and JSON automation

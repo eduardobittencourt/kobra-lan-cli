@@ -25,8 +25,8 @@ The CLI SHALL compute `hardware_start_validated`, `hardware_control_validated`, 
 - **THEN** only the observed single-filament and 4-color contiguous 1:1 cases report `hardware_start_validated: true`, and every unobserved combination reports `hardware_start_validated: false`
 
 #### Scenario: Control and delete hardware validation reflect recorded evidence
-- **WHEN** guarded `print pause|resume|cancel` and `files delete` build results on the qualified Kobra X model `20030` / firmware `2.0.2.2` target
-- **THEN** lifecycle controls report `hardware_control_validated: true` and stored-file deletion reports `hardware_delete_validated: false` from the centralized qualification profile
+- **WHEN** guarded `print pause|resume|cancel` and `files delete` build results on the qualified Kobra X model `20030` / firmware `2.0.2.2` target (versus an unqualified model or firmware)
+- **THEN** lifecycle controls report `hardware_control_validated: true` and stored-file deletion reports `hardware_delete_validated: true` from the centralized qualification profile on `20030` / `2.0.2.2`, and both report `false` for unqualified models or firmwares
 
 #### Scenario: Camera hardware validation reflects recorded evidence
 - **WHEN** `camera status` or `camera snapshot` builds results on the qualified Kobra X model `20030` / firmware `2.0.2.2` target

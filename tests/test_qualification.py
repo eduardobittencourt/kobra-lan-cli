@@ -210,9 +210,12 @@ class QualificationRegistryTests(unittest.TestCase):
         self.assertFalse(q.is_control_hardware_validated(20030, "2.0.2.3"))
         self.assertFalse(q.is_control_hardware_validated(20031, "2.0.2.2"))
 
-        self.assertFalse(q.is_delete_hardware_validated(20030, "2.0.2.2"))
+        self.assertTrue(q.KOBRA_X.delete_hardware_validated)
+        self.assertTrue(q.is_delete_hardware_validated(20030, "2.0.2.2"))
         self.assertFalse(q.is_delete_hardware_validated(20030, "2.0.2.3"))
         self.assertFalse(q.is_delete_hardware_validated(20031, "2.0.2.2"))
+        self.assertFalse(q.is_delete_hardware_validated(20030, None))
+        self.assertFalse(q.is_delete_hardware_validated(True, "2.0.2.2"))
 
         self.assertTrue(q.KOBRA_X.camera_hardware_validated)
         self.assertTrue(q.is_camera_hardware_validated(20030, "2.0.2.2"))

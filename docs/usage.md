@@ -53,7 +53,7 @@ from a filename or network acknowledgement.
 | `files info` | `filename` and available safe file details |
 | `gcode inspect` | `sha256`, `md5`, `size_bytes`, `remote_filename`, nullable `layer_count`, `slicer_version`, filament/color metadata (`paint_info_present`, ordered `filaments`, `filament_count`, `multicolor`, `tool_indices`, nullable `total_filament_used_g`), operation/qualification flags |
 | `files upload` | Manifest, verification/status flags, timestamp and `receipt_path` |
-| `files delete` | `filename`, `device_digest`, model/firmware, `status`, `dry_run: false`, `experimental: true`, `hardware_delete_validated: false`, `local_state`, sanitized `before`/`before_listing`, `ack`/`report`, and `after`/`after_listing` when available |
+| `files delete` | `filename`, `device_digest`, model/firmware, `status`, `dry_run: false`, `experimental: true`, `hardware_delete_validated: true`, `local_state`, sanitized `before`/`before_listing`, `ack`/`report`, and `after`/`after_listing` when available |
 | `print plan` | `file_sha256`, `device_digest`, model/firmware, canonical `payload`, `plan_sha256`, `slot_mapping`, `multicolor`, qualification flags, latest local `attempt_id` and `start_status` when available, and `previous_attempt_id` for a reprint review |
 | `print start` | Plan fields, `dry_run: false`, local `attempt_id`, `previous_attempt_id` for a reprint, status/ack/observation evidence and `receipt_path`; an uncertain error may return a subset of that evidence |
 | `print watch` | `outcome`, `reason`, verified `phase`, `progress` (percent), `current_layer`, `total_layers` when available, plus `observation_recorded` and `observation_id` when an active job was observed |
@@ -205,7 +205,9 @@ Choose one root-level filename from `files list`. The command requires
 Kobra X model 20030 / firmware 2.0.2.2. It requires state `free` with no active
 project and refuses an active target, a directory, or a name that is missing
 or appears more than once. The result carries `dry_run: false`,
-`experimental: true` and `hardware_delete_validated: false`.
+`experimental: true`, and centralized `hardware_delete_validated` (`true` on
+qualified Kobra X model 20030 / firmware 2.0.2.2, `false` on unqualified
+targets).
 
 The command sends once and waits for a correlated ACK and a successful delete
 report. It checks the root listing up to three times, waiting one second
@@ -542,8 +544,20 @@ after the operation. One delete request received a correlated ACK (code 0)
 and a `deleteBatch` report with state `success` and code 200. The CLI returned
 `delete_observed_removed` (exit 0), and a separate `files list` request confirmed
 the file was absent. The local summary counted one matching upload receipt
-and one matching start receipt. Byte-for-byte preservation was verified in
-offline tests with synthetic state.
+and one matching start receipt. A follow-up live verification on 2026-11-26
+uploaded a disposable Next `2.0.0.6` Kobra X G-code file (40,559 bytes, 5
+layers) into an isolated `0700` `--state-dir`, seeded `0600` canonical start
+marker/receipt and watch observation records referencing that filename, and
+executed `files delete --execute` on the idle Kobra X (`20030` / `2.0.2.2`).
+The command exited 0 with correlated ACK (code 0), `deleteBatch` `success` /
+200, `delete_observed_removed`, `local_state` (`preserved: true`, 1 matching
+upload receipt, 1 matching start receipt), and follow-up `files list` absence;
+cryptographic hashing and permission checks confirmed identical `(mode, size,
+sha256)` byte-for-byte across all 12 entries in the `--state-dir` tree before
+and after deletion, identical `jobs list`/`jobs info` output, and exit-2
+duplicate-upload refusal on the preserved `.attempt` marker. Stored-file
+deletion therefore reports `hardware_delete_validated: true` on Kobra X model
+20030 / firmware 2.0.2.2.
 
 End-to-end 4-color validation on 2026-11-24 used a `by object` Cool Plate
 G-code sliced with Anycubic Slicer Next Linux `2.0.0.6` for Kobra X (9,257,439
@@ -576,9 +590,21 @@ directly, downstream broken-pipe exit `0`, foreground `SIGINT` exit `130`, and
 refusal exit `2` without `--overwrite`, atomic replacement with
 `--overwrite --no-start-capture`, and exit `3` before network access when
 `ffmpeg` was absent). Camera commands therefore report
-`hardware_camera_validated: true` on Kobra X model 20030 / firmware 2.0.2.2
-(post-reboot cold-start behavior without prior capture remains unverified and
-is covered by the automatic `startCapture`/`stopCapture` fallback).
+`hardware_camera_validated: true` on Kobra X model 20030 / firmware 2.0.2.2.
+A follow-up post-reboot cold-start verification on 2026-11-26 (immediately after
+a clean printer reboot with no prior app, slicer, or CLI camera capture)
+confirmed `doctor` (8/8 checks passing), read-only `camera status`
+(`camera_present: true`, `timelapse_supported: true`,
+`stream_url_announced: true`, `stream_protocol: "http-flv"`,
+`stream_port: 18088`), direct read-only `camera pipe --max-bytes 65536
+--no-start-capture` (exit `0`, 65,536 valid FLV v1 video-only bytes without
+`startCapture`), `camera snapshot` (exit `0`, valid 1280×720 JPEG, 31,390 bytes
+in `direct` mode with `start_capture_used: false`, `stop_capture_sent: false`),
+default `camera pipe --max-bytes 65536` (exit `0`, 65,536 valid FLV v1 bytes),
+zero stream URL or token exposure across stdout/stderr/JSON, and healthy
+post-capture `status` and `camera status`. Automatic single-shot
+`startCapture`/`stopCapture` fallback remains in place for states where direct
+read is unavailable.
 
 Stored-file download investigation on 2026-11-25 evaluated whether stock Kobra X
 model 20030 / firmware 2.0.2.2 exposes a LAN mechanism to retrieve stored
