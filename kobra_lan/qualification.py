@@ -25,6 +25,8 @@ class StartHardwareEvidence:
     auto_leveling: bool
     vibration_compensation: bool
     flow_calibration: bool
+    allow_any_distinct_onboard_slot_map: bool = False
+    allow_shared_onboard_slots: bool = False
 
 
 @dataclass(frozen=True)
@@ -53,15 +55,44 @@ KOBRA_X = PrinterQualification(
     onboard_box=OnboardBoxTopology(box_id=-1, box_kind="onboard", slot_count=4),
     start_evidence=(
         StartHardwareEvidence(
-            slot_maps=frozenset({((0, 1),), ((0, 2),), ((0, 4),)}),
+            slot_maps=frozenset(),
             materials=frozenset({"PLA High Speed"}),
             auto_leveling=True,
             vibration_compensation=False,
             flow_calibration=False,
+            allow_any_distinct_onboard_slot_map=True,
+            allow_shared_onboard_slots=True,
         ),
         StartHardwareEvidence(
-            slot_maps=frozenset({((0, 1), (1, 2), (2, 3), (3, 4))}),
+            slot_maps=frozenset(),
             materials=frozenset({"PLA High Speed"}),
+            auto_leveling=False,
+            vibration_compensation=False,
+            flow_calibration=False,
+            allow_any_distinct_onboard_slot_map=True,
+            allow_shared_onboard_slots=True,
+        ),
+        StartHardwareEvidence(
+            slot_maps=frozenset(),
+            materials=frozenset({"PLA High Speed"}),
+            auto_leveling=False,
+            vibration_compensation=True,
+            flow_calibration=False,
+            allow_any_distinct_onboard_slot_map=True,
+            allow_shared_onboard_slots=True,
+        ),
+        StartHardwareEvidence(
+            slot_maps=frozenset(),
+            materials=frozenset({"PLA High Speed"}),
+            auto_leveling=False,
+            vibration_compensation=False,
+            flow_calibration=True,
+            allow_any_distinct_onboard_slot_map=True,
+            allow_shared_onboard_slots=True,
+        ),
+        StartHardwareEvidence(
+            slot_maps=frozenset({((0, 4),)}),
+            materials=frozenset({"PETG"}),
             auto_leveling=True,
             vibration_compensation=False,
             flow_calibration=False,
@@ -184,6 +215,16 @@ def is_valid_onboard_slot(model_id, slot):
     return topology is not None and type(slot) is int and 1 <= slot <= topology.slot_count
 
 
+def _evidence_matches_slot_map(evidence, normalized_map):
+    if normalized_map in evidence.slot_maps:
+        return True
+    slots = [slot for _, slot in normalized_map]
+    has_shared_slot = len(set(slots)) < len(slots)
+    if has_shared_slot:
+        return evidence.allow_shared_onboard_slots
+    return evidence.allow_any_distinct_onboard_slot_map
+
+
 def is_start_hardware_validated(
     model_id,
     firmware,
@@ -210,13 +251,14 @@ def is_start_hardware_validated(
     for paint_index, slot in slot_map.items():
         if (
             type(paint_index) is not int
+            or paint_index < 0
             or not is_valid_onboard_slot(model_id, slot)
             or type(materials[paint_index]) is not str
         ):
             return False
     normalized_map = tuple(sorted(slot_map.items()))
     return any(
-        normalized_map in evidence.slot_maps
+        _evidence_matches_slot_map(evidence, normalized_map)
         and all(materials[paint_index] in evidence.materials for paint_index in slot_map)
         and auto_leveling is evidence.auto_leveling
         and vibration_compensation is evidence.vibration_compensation

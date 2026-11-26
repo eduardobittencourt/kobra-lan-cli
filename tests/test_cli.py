@@ -543,6 +543,62 @@ class PrinterDiscoverCliTests(unittest.TestCase):
             else:
                 self.assertIn("Error (interrupted):", out.getvalue())
 
+    def test_print_plan_renders_updated_hardware_start_validated_flag(self):
+        import json
+        fake_cfg = object()
+        @contextlib.contextmanager
+        def fake_access(_config, _name):
+            yield fake_cfg, None
+
+        for validated, expected_text in ((True, "Hardware start validated: yes"), (False, "Hardware start validated: no")):
+            plan_result = {
+                "file_sha256": "a" * 64,
+                "device_digest": "b" * 64,
+                "model": "Anycubic Kobra X",
+                "firmware": "2.0.2.2",
+                "payload": {
+                    "filename": "chip.gcode",
+                    "ams_settings": {"use_ams": True, "ams_box_mapping": []},
+                    "task_settings": {"auto_leveling": 0, "vibration_compensation": 1, "flow_calibration": 0},
+                },
+                "plan_sha256": "c" * 64,
+                "dry_run": True,
+                "experimental": True,
+                "hardware_start_validated": validated,
+                "slot_mapping": [
+                    {
+                        "paint_index": 0,
+                        "slot": 2,
+                        "ams_index": 1,
+                        "gcode_material_type": "PLA",
+                        "gcode_color_hex": "#FF0000",
+                        "slot_material_type": "PLA High Speed",
+                        "slot_color_hex": "#009639",
+                    }
+                ],
+                "multicolor": False,
+                "upload_performed": False,
+            }
+            for mode in ([], ["--json"]):
+                out, err = io.StringIO(), io.StringIO()
+                with patch("kobra_lan.cli.Registry") as registry_cls, \
+                        patch("kobra_lan.cli.start", return_value=plan_result), \
+                        contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                    registry_cls.return_value.access.side_effect = fake_access
+                    rc = main([
+                        *mode, "--printer", "bench", "print", "plan", "chip.gcode",
+                        "--name", "chip.gcode", "--slot-map", "0=2", "--auto-leveling", "off",
+                        "--vibration-compensation", "on", "--flow-calibration", "off",
+                    ])
+                self.assertEqual(rc, 0)
+                self.assertEqual(err.getvalue(), "")
+                if mode:
+                    report = json.loads(out.getvalue())
+                    self.assertTrue(report["ok"])
+                    self.assertIs(report["result"]["hardware_start_validated"], validated)
+                else:
+                    self.assertIn(expected_text, out.getvalue())
+
 
 class NamedOnlySetupTests(unittest.TestCase):
     def test_no_name_pairing_fails_before_registry_or_provisioning(self):

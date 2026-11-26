@@ -112,15 +112,15 @@ The CLI SHALL preserve configuration, credentials, device-based receipts, permis
 - **THEN** `print plan` and `print start` do not migrate, modify, or delete those files, do not treat them as an eligible reprint predecessor, and `print start --execute` refuses without sending a start command while those files exist
 
 ### Requirement: Evidence stays qualified
-Both formats SHALL distinguish upload listing/metadata verification from remote byte-hash verification, start acknowledgement from observed activity, and activity from completion or physical quality. Qualification SHALL remain Kobra X model 20030 / firmware 2.0.2.2 and the recorded material/preparation evidence (single-filament `0 -> 1|2|4` and 4-color contiguous 1:1 `0..3 -> 1..4` in `PLA High Speed` with `auto-leveling on`, vibration/flow off); unobserved multicolor mappings and non-zero single `paint_index` starts SHALL report `hardware_start_validated: false`.
+Both formats SHALL distinguish upload listing/metadata verification from remote byte-hash verification, start acknowledgement from observed activity, and activity from completion or physical quality. `hardware_start_validated` SHALL reflect only the live-observed Kobra X `20030` / firmware `2.0.2.2` slot-mapping classes, materials, and preparation-flag combinations recorded in the centralized qualification registry; unobserved combinations SHALL report `hardware_start_validated: false`.
 
 #### Scenario: Successful submission
 - **WHEN** an upload is metadata-verified or a start is observed active
 - **THEN** output labels that evidence accurately without claiming remote byte equality, completed printing, or assessed part quality
 
 #### Scenario: Multicolor or non-zero paint_index qualification boundary
-- **WHEN** `print plan` or `print start` succeeds for an unobserved multicolor mapping (such as a 2/3-color subset, cross-remapped `paint_index != ams_index`, sparse indices, or shared physical slot) or a single-filament G-code whose `paint_index` is not `0` (even when using PLA High Speed with auto-leveling on and vibration/flow calibration off)
-- **THEN** output reports `experimental: true` and `hardware_start_validated: false`
+- **WHEN** `print plan` or `print start` runs on Kobra X `20030` / firmware `2.0.2.2` with a live-observed material, a live-observed preparation-flag tuple, and a live-observed onboard slot-mapping class (including single-filament slot `3`, cross-remapped 2-color subset, sparse `paint_index`, non-zero single `paint_index`, and shared physical slots if live-confirmed) versus an untested material, untested preparation-flag tuple, or unconfirmed mapping pattern
+- **THEN** live-observed combinations report `experimental: true` and `hardware_start_validated: true`, while every unobserved combination reports `experimental: true` and `hardware_start_validated: false`
 
 ### Requirement: Local identity for each start attempt
 Each durably reserved start SHALL have a deterministic local `attempt_id` independent of firmware task IDs. Both root starts and reprints SHALL be stored under `starts/<device>/<attempt_id>.attempt` and `<attempt_id>.json`, SHALL record `attempt_id` in marker and receipt, SHALL bind device, file, plan, and any reprint predecessor, and SHALL expose safe attempt references in text and JSON.
