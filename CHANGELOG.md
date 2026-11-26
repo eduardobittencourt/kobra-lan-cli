@@ -29,7 +29,10 @@
 - Breaking: unify per-device mutation concurrency locking on a single
   `.device.lock` lease across `files upload`, `print start`,
   `print pause|resume|cancel`, and `files delete`; stop creating `.upload.lock`
-  and `.start.lock` and remove `upload_lock()`.
+  and `.start.lock` and remove `upload_lock()`. Because 0.5.0 (and earlier
+  pre-0.6.0) binaries do not hold `.device.lock`, mixed-version processes for
+  the same device do not exclude each other — stop all 0.5.0 / older processes
+  for a device before running any 0.6.0 mutating command against it.
 - Add read-only `print watch` for an active job, saving sanitized local
   observations under `--state-dir` and reporting `unknown` when firmware
   telemetry cannot establish terminal outcomes (Kobra X firmware 2.0.2.2

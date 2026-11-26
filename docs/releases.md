@@ -267,7 +267,9 @@ Breaking 0.x changes: repeatable `--slot-map PAINT_INDEX=SLOT` replaces
 `jobs info` reports `material_type` per `slot_mapping` entry. Both root starts
 and reprints now use canonical attempt-keyed local records under
 `starts/<device>/<attempt_id>.*`, and mutating device commands share a single
-`.device.lock` lease (stopping creation of `.upload.lock` and `.start.lock`).
+`.device.lock` lease (stopping creation of `.upload.lock` and `.start.lock`;
+stop all 0.5.0 / older processes for a device before running 0.6.0 mutating
+commands because mixed-version binaries do not share `.device.lock`).
 Existing upload receipts/markers, watch observations, and canonical
 attempt-keyed start receipts and reprint chains remain readable in place without
 migration; preexisting legacy file-keyed (`<file_sha256>.*`) or pre-`attempt_id`
