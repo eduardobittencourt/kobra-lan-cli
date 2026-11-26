@@ -94,15 +94,18 @@ indices, then `slots list` to find loaded, material-compatible slots. After
 `files upload`, use one `--slot-map PAINT_INDEX=SLOT` per declared index
 on both `print plan` and `print start`. For example, `--slot-map 0=1
 --slot-map 2=3` maps two sparse indices to onboard slots 1 and 3. On Kobra X
-model `20030` / firmware `2.0.2.2`, `PLA High Speed` starts across valid onboard
-slot mappings (single-filament `1..4`, non-zero indices, contiguous, subset,
-cross-remapped, sparse, and shared physical slots) with baseline preparation
-(`on/off/off`), single-filament `PLA High Speed` (`0=1`) with observed
-alternative preparation flags (`off/off/off`, `off/on/off`, `off/off/on`), and
-single-filament `PETG` `0=4` (`on/off/off`) report `hardware_start_validated:
-true`; unobserved preparation cross-products or multi-flag combinations, mixed
-materials, other `PETG` cases, and untested materials report
-`hardware_start_validated: false`. External ACE units remain outside the
+model `20030` / firmware `2.0.2.2`, `hardware_start_validated: true` covers
+`PLA High Speed` with baseline preparation (`on/off/off`) across valid onboard
+slot-mapping classes generalized from representative live runs across slots
+`1..4` (single-filament `0=1..4` and non-zero `2=3`, 4-color `0..3 -> 1..4`,
+2-color cross-remapped `0=2, 1=1`, 2-color sparse `0=1, 2=3`, and shared
+physical slot `0=1, 1=1`, where firmware natively skipped filament changes —
+not every individual slot permutation is physically printed), single-filament
+`PLA High Speed` (`0=1`) with observed alternative preparation flags
+(`off/off/off`, `off/on/off`, `off/off/on`), and single-filament `PETG` `0=4`
+(`on/off/off`). Unobserved preparation cross-products or multi-flag
+combinations, mixed materials, other `PETG` cases, and untested materials
+report `hardware_start_validated: false`. External ACE units remain outside the
 supported topology. See the [multicolor workflow](docs/usage.md#plan-and-start-a-multicolor-print).
 
 This 0.x change replaces `--slot` with `--slot-map`. Read `slot_mapping`

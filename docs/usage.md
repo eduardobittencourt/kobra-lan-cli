@@ -257,11 +257,14 @@ order of the `--slot-map` arguments preserves the hash.
 Plans and starts report `experimental: true`. `hardware_start_validated: true`
 applies only to live-observed Kobra X model `20030` / firmware `2.0.2.2`
 configurations:
-- `PLA High Speed` across valid onboard slot mappings (`1..4`, including
-  single-filament slots `1..4` with zero or non-zero `paint_index`, contiguous
-  multicolor, 2/3-color subsets, cross-remapped `paint_index != ams_index`,
-  sparse indices, and shared physical slots) with baseline preparation
-  `(--auto-leveling on, --vibration-compensation off, --flow-calibration off)`.
+- `PLA High Speed` with baseline preparation `(--auto-leveling on,
+  --vibration-compensation off, --flow-calibration off)` across valid onboard
+  slot-mapping classes (`1..4`, distinct or shared physical slots, zero or
+  non-zero `paint_index`), generalized at the mapping-class level from
+  representative live runs (`0=1..4`, `2=3`, `0..3 -> 1..4`, `0=2, 1=1`,
+  `0=1, 2=3`, and shared-slot `0=1, 1=1` where firmware natively skipped
+  superfluous filament changes; individual untested permutations within these
+  classes are covered by the class rule rather than separate physical prints).
 - `PLA High Speed` single-filament `0=1` with any of the three live-observed
   alternative preparation-flag combinations: `(off, off, off)`, `(off, on, off)`,
   or `(off, off, on)`.
