@@ -260,16 +260,18 @@ configurations:
 - `PLA High Speed` across valid onboard slot mappings (`1..4`, including
   single-filament slots `1..4` with zero or non-zero `paint_index`, contiguous
   multicolor, 2/3-color subsets, cross-remapped `paint_index != ams_index`,
-  sparse indices, and shared physical slots) with any of the four live-observed
-  preparation-flag combinations: `(auto-leveling on, vibration-compensation off,
-  flow-calibration off)`, `(off, off, off)`, `(off, on, off)`, or `(off, off,
-  on)`.
-- `PETG` single-filament `0=4` with `--auto-leveling on`,
-  `--vibration-compensation off`, and `--flow-calibration off`.
+  sparse indices, and shared physical slots) with baseline preparation
+  `(--auto-leveling on, --vibration-compensation off, --flow-calibration off)`.
+- `PLA High Speed` single-filament `0=1` with any of the three live-observed
+  alternative preparation-flag combinations: `(off, off, off)`, `(off, on, off)`,
+  or `(off, off, on)`.
+- `PETG` single-filament `0=4` with baseline preparation `(--auto-leveling on,
+  --vibration-compensation off, --flow-calibration off)`.
 
-Unobserved preparation-flag combinations (for example `auto-leveling on`
-combined with `vibration-compensation on` or `flow-calibration on`), mixed
-materials (`PLA High Speed` + `PETG`), `PETG` on untested slots, multicolor, or
+Unobserved cross-products (such as multicolor, shared-slot, or other-slot
+mappings under alternative preparation flags), unobserved multi-flag preparation
+combinations (`auto+vib`, `auto+flow`, `vib+flow`, `all-on`), mixed materials
+(`PLA High Speed` + `PETG`), `PETG` on untested slots, multicolor, or
 alternative preparation flags, and other loaded materials (`PLA`, `TPU`, `ABS`,
 and so on) report `hardware_start_validated: false`. External ACE and multi-box
 configurations are rejected.

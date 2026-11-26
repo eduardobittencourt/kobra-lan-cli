@@ -9,6 +9,10 @@ from dataclasses import dataclass
 from types import MappingProxyType
 
 QUALIFIED_FIRMWARE = "2.0.2.2"
+_PLA_HIGH_SPEED_MATERIALS = frozenset({"PLA High Speed"})
+_PETG_MATERIALS = frozenset({"PETG"})
+_SINGLE_SLOT_1 = frozenset({((0, 1),)})
+_SINGLE_SLOT_4 = frozenset({((0, 4),)})
 
 
 @dataclass(frozen=True)
@@ -56,7 +60,7 @@ KOBRA_X = PrinterQualification(
     start_evidence=(
         StartHardwareEvidence(
             slot_maps=frozenset(),
-            materials=frozenset({"PLA High Speed"}),
+            materials=_PLA_HIGH_SPEED_MATERIALS,
             auto_leveling=True,
             vibration_compensation=False,
             flow_calibration=False,
@@ -64,35 +68,29 @@ KOBRA_X = PrinterQualification(
             allow_shared_onboard_slots=True,
         ),
         StartHardwareEvidence(
-            slot_maps=frozenset(),
-            materials=frozenset({"PLA High Speed"}),
+            slot_maps=_SINGLE_SLOT_1,
+            materials=_PLA_HIGH_SPEED_MATERIALS,
             auto_leveling=False,
             vibration_compensation=False,
             flow_calibration=False,
-            allow_any_distinct_onboard_slot_map=True,
-            allow_shared_onboard_slots=True,
         ),
         StartHardwareEvidence(
-            slot_maps=frozenset(),
-            materials=frozenset({"PLA High Speed"}),
+            slot_maps=_SINGLE_SLOT_1,
+            materials=_PLA_HIGH_SPEED_MATERIALS,
             auto_leveling=False,
             vibration_compensation=True,
             flow_calibration=False,
-            allow_any_distinct_onboard_slot_map=True,
-            allow_shared_onboard_slots=True,
         ),
         StartHardwareEvidence(
-            slot_maps=frozenset(),
-            materials=frozenset({"PLA High Speed"}),
+            slot_maps=_SINGLE_SLOT_1,
+            materials=_PLA_HIGH_SPEED_MATERIALS,
             auto_leveling=False,
             vibration_compensation=False,
             flow_calibration=True,
-            allow_any_distinct_onboard_slot_map=True,
-            allow_shared_onboard_slots=True,
         ),
         StartHardwareEvidence(
-            slot_maps=frozenset({((0, 4),)}),
-            materials=frozenset({"PETG"}),
+            slot_maps=_SINGLE_SLOT_4,
+            materials=_PETG_MATERIALS,
             auto_leveling=True,
             vibration_compensation=False,
             flow_calibration=False,

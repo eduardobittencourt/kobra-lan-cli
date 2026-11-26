@@ -71,7 +71,7 @@ Mutating device operations sharing a device state directory SHALL hold one exclu
 
 #### Scenario: Review a stored multicolor file with --slot-map
 - **WHEN** the qualified target is idle and `print plan` runs with repeatable `--slot-map PAINT_INDEX=SLOT` covering every `paint_index` declared in the G-code (contiguous or non-contiguous, such as `1` and `3`, or mixed compatible materials such as `PLA` and `PETG`)
-- **THEN** a plan is returned with `multicolor: true`, `hardware_start_validated: false`, ordered `slot_mapping` and `ams_box_mapping` entries sorted by `paint_index`, and a deterministic `plan_sha256` independent of `--slot-map` argument order
+- **THEN** a plan is returned with `multicolor: true`, `hardware_start_validated` reflecting centralized recorded evidence (`true` for qualified combinations such as `PLA High Speed` baseline preparation, `false` for unqualified combinations such as mixed `PLA` and `PETG`), ordered `slot_mapping` and `ams_box_mapping` entries sorted by `paint_index`, and a deterministic `plan_sha256` independent of `--slot-map` argument order
 
 #### Scenario: Incompatible plan
 - **WHEN** the target is busy, firmware is unsupported, file/remote metadata do not match, a mapped slot is not loaded, or any mapped slot material family differs from its corresponding G-code `paint_index` material
@@ -90,7 +90,7 @@ Mutating device operations sharing a device state directory SHALL hold one exclu
 
 #### Scenario: Execute a reviewed multicolor start and intentional reprint
 - **WHEN** `print start` runs with `--slot-map` matching a reviewed multicolor `plan_sha256`, `--execute`, a verified upload receipt, and fresh idle telemetry (and optionally `--reprint-from` for an eligible observed-active predecessor)
-- **THEN** it durably reserves the attempt, publishes one start command carrying the full ordered `ams_box_mapping`, and records `slot_mapping`, `multicolor`, and `hardware_start_validated: false` in the start receipt
+- **THEN** it durably reserves the attempt, publishes one start command carrying the full ordered `ams_box_mapping`, and records `slot_mapping`, `multicolor`, and centralized `hardware_start_validated` in the start receipt
 
 #### Scenario: Ambiguous start
 - **WHEN** the start request or subsequent bounded observation is uncertain
@@ -170,11 +170,11 @@ Each durably reserved start SHALL have a deterministic local `attempt_id` indepe
 
 #### Scenario: Map multiple paint indices to the same physical slot
 - **WHEN** a multicolor G-code declares `paint_index` `0` (`PLA`) and `1` (`PLA`) and `print plan` runs with `--slot-map 0=1 --slot-map 1=1` against a loaded `PLA High Speed` slot `1`
-- **THEN** planning succeeds with two `ams_box_mapping` entries (`paint_index: 0` and `paint_index: 1`, both with `ams_index: 0`), `multicolor: true`, ordered `slot_mapping`, and `hardware_start_validated: false`
+- **THEN** planning succeeds with two `ams_box_mapping` entries (`paint_index: 0` and `paint_index: 1`, both with `ams_index: 0`), `multicolor: true`, ordered `slot_mapping`, and `hardware_start_validated` matching centralized evidence (`true` for baseline preparation on `20030` / `2.0.2.2`, `false` for unobserved preparation combinations or materials)
 
 #### Scenario: Map a single-filament G-code on a non-zero paint index
 - **WHEN** a single-filament G-code declares only `paint_index: 2` (`PLA`, with `T2`) and `print plan` runs with `--slot-map 2=4`
-- **THEN** planning succeeds with one `ams_box_mapping` entry (`paint_index: 2`, `ams_index: 3`), `multicolor: false`, a one-entry `slot_mapping`, and `hardware_start_validated: false`
+- **THEN** planning succeeds with one `ams_box_mapping` entry (`paint_index: 2`, `ams_index: 3`), `multicolor: false`, a one-entry `slot_mapping`, and `hardware_start_validated` matching centralized evidence (`true` for `PLA High Speed` with baseline preparation on `20030` / `2.0.2.2`, `false` for unobserved preparation combinations or materials)
 
 #### Scenario: Missing, extra, or undeclared tool mapping fails validation
 - **WHEN** `--slot-map` omits a declared `paint_index`, specifies a `paint_index` not present in `; paint_info =`, or the G-code contains a `T<n>` command absent from `; paint_info =`

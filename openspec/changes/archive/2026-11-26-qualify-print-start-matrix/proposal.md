@@ -11,7 +11,7 @@ After completing Milestone 1 (`feat/complete-independent-onboarding`) and retiri
   - Alternative preparation-flag combinations on Kobra X: `auto-leveling off`, `vibration-compensation on`, and `flow-calibration on` (observing real printer preparation phases and physical completion).
   - Non-identity multicolor and non-zero `paint_index` mappings:
     - 2-color subset with cross-remapping (`paint_index != ams_index`, e.g., `0=2, 1=1`),
-    - Sparse non-contiguous `paint_index` mapping (e.g., `0=1, 2=4`),
+    - Sparse non-contiguous `paint_index` mapping (e.g., `0=1, 2=3`),
     - Single-filament non-zero `paint_index` mapping (e.g., `2=3` with `T2` only),
     - Shared physical slot mapping (e.g., `0=1, 1=1`), verifying whether firmware `2.0.2.2` prints cleanly without anomalous filament changes or requires a CLI guard/refusal.
   - Optional additional loaded materials (e.g., standard `PLA`, `PETG`, `TPU`) if physically available and authorized by the operator during the session; untested materials remain explicitly unqualified (`hardware_start_validated: false`).
@@ -37,4 +37,4 @@ Out of scope:
 - **Code**: `kobra_lan/qualification.py` (update `StartHardwareEvidence` / `is_start_hardware_validated` strictly from observed live evidence); `kobra_lan/start.py` only if live testing reveals a firmware-rejected pattern requiring a refusal guard.
 - **Tests**: `tests/test_qualification.py`, `tests/test_start.py`, `tests/test_cli.py` (and `tests/test_jobs.py` if receipt assertions touch `hardware_start_validated`).
 - **Documentation & Specs**: `docs/compatibility.md`, `docs/usage.md`, `README.md`, `ROADMAP.md`, `CHANGELOG.md`, and delta specs under `openspec/changes/qualify-print-start-matrix/specs/`.
-- **Hardware / Safety**: Requires an operator-authorized, schedule-agreed live printing session on Kobra X (`20030` / `2.0.2.2`) using tiny disposable test chips, an isolated `--state-dir` under `~/research/kobra-lan-cli/qualify-print-start-matrix/`, explicit reviewed upload/plan/start hashes per run, and zero modification of existing profiles, credentials, or production attempt markers.
+- **Hardware / Safety**: Requires an operator-authorized, schedule-agreed live printing session on Kobra X (`20030` / `2.0.2.2`) using tiny disposable test chips, an isolated `--state-dir` under `<isolated-workspace>/`, explicit reviewed upload/plan/start hashes per run, and zero modification of existing profiles, credentials, or production attempt markers.

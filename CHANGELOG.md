@@ -5,21 +5,22 @@
 - Expand live Kobra X model `20030` / firmware `2.0.2.2` `print start` hardware
   qualification in `kobra_lan/qualification.py` (`StartHardwareEvidence` and
   `is_start_hardware_validated`) after a 9-run live hardware session on
-  2026-11-26: `hardware_start_validated: true` now covers `PLA High Speed`
-  across all four onboard slots (`1..4`) and all onboard slot-mapping classes
-  (single-filament including `0=3` and non-zero `2=3`, contiguous multicolor,
-  2/3-color subsets, cross-remapped `0=2, 1=1`, sparse `0=1, 2=3`, and shared
-  physical slot `0=1, 1=1`, where firmware `2.0.2.2` natively skipped all
-  superfluous filament changes) across the four observed preparation-flag
-  combinations (`auto=on/vib=off/flow=off`, `off/off/off`, `off/on/off` with
-  observed `vibrating`, and `off/off/on` with observed `flow_calibrating`),
-  plus single-filament `PETG` on slot `4` (`0=4`, baseline prep, 75 °C /
-  230 °C). Unobserved multi-flag preparation combinations, mixed-material jobs,
-  other `PETG` cases, and untested materials remain `hardware_start_validated:
-  false`. Document sanitized hardware evidence across `docs/usage.md`,
-  `docs/compatibility.md`, `README.md`, and `ROADMAP.md` (completing Milestone
-  3 exit evidence with explicit firmware `2.0.2.2` and untested-material
-  boundaries).
+  2026-11-26: `hardware_start_validated: true` now covers `PLA High Speed` with
+  baseline preparation (`auto=on/vib=off/flow=off`) across all four onboard
+  slots (`1..4`) and all onboard slot-mapping classes (single-filament
+  including `0=3` and non-zero `2=3`, contiguous multicolor, 2/3-color subsets,
+  cross-remapped `0=2, 1=1`, sparse `0=1, 2=3`, and shared physical slot
+  `0=1, 1=1`, where firmware `2.0.2.2` natively skipped all superfluous
+  filament changes), single-filament `PLA High Speed` (`0=1`) across the three
+  observed alternative preparation combinations (`off/off/off`, `off/on/off` with
+  observed `vibrating`, and `off/off/on` with observed `flow_calibrating`), and
+  single-filament `PETG` on slot `4` (`0=4`, baseline prep, 75 °C / 230 °C).
+  Unobserved preparation cross-products or multi-flag combinations,
+  mixed-material jobs, other `PETG` cases, and untested materials remain
+  `hardware_start_validated: false`. Document sanitized hardware evidence
+  across `docs/usage.md`, `docs/compatibility.md`, `README.md`, and `ROADMAP.md`
+  (completing Milestone 3 exit evidence with explicit firmware `2.0.2.2` and
+  untested-material boundaries).
 - Add strictly read-only same-subnet LAN SSDP discovery
   (`kobra-lan printer discover [--timeout SECONDS] [--interface IPv4]`) over
   `239.255.255.250:1900` (`ST: ac:3dprinter:fdm`) with strict sender-IP and

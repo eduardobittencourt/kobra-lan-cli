@@ -246,9 +246,6 @@ class StartTests(unittest.TestCase):
             ({3: 4, 0: 1, 2: 3, 1: 2}, (True, False, False)),
             ({0: 2, 1: 1, 2: 3, 3: 4}, (True, False, False)),
             ({0: 1, 1: 1, 2: 3, 3: 4}, (True, False, False)),
-            ({0: 1, 1: 2, 2: 3, 3: 4}, (False, False, False)),
-            ({0: 1, 1: 2, 2: 3, 3: 4}, (False, True, False)),
-            ({0: 1, 1: 2, 2: 3, 3: 4}, (False, False, True)),
         ):
             with self.subTest(validated_slot_map=slot_map, flags=flags):
                 plan = build_plan(config(), four_slot, self.file, "test.gcode", slot_map, *flags)
@@ -256,6 +253,10 @@ class StartTests(unittest.TestCase):
                 self.assertTrue(plan["hardware_start_validated"])
 
         for slot_map, flags in (
+            ({0: 1, 1: 2, 2: 3, 3: 4}, (False, False, False)),
+            ({0: 1, 1: 2, 2: 3, 3: 4}, (False, True, False)),
+            ({0: 1, 1: 2, 2: 3, 3: 4}, (False, False, True)),
+            ({0: 1, 1: 1, 2: 3, 3: 4}, (False, True, False)),
             ({0: 1, 1: 2, 2: 3, 3: 4}, (True, True, False)),
             ({0: 1, 1: 2, 2: 3, 3: 4}, (True, False, True)),
             ({0: 1, 1: 2, 2: 3, 3: 4}, (False, True, True)),

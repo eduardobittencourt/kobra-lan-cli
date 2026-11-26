@@ -144,13 +144,8 @@ class QualificationRegistryTests(unittest.TestCase):
         self.assertFalse(q.is_valid_onboard_slot(20031, 1))
 
     def test_start_control_and_delete_hardware_validation_predicates(self):
-        observed_pla_prep_flags = (
-            (True, False, False),
-            (False, False, False),
-            (False, True, False),
-            (False, False, True),
-        )
-        observed_pla_maps = (
+        # Observed baseline-prep (auto=on, vib=off, flow=off) PLA High Speed across all onboard mapping classes.
+        observed_baseline_pla_maps = (
             ("slot 1 single", {0: 1}),
             ("slot 2 single", {0: 2}),
             ("slot 3 single", {0: 3}),
@@ -164,21 +159,35 @@ class QualificationRegistryTests(unittest.TestCase):
             ("shared physical slot 2-color", {0: 1, 1: 1}),
             ("shared physical slot 4-color", {0: 1, 1: 1, 2: 3, 3: 4}),
         )
-        for label, slot_map in observed_pla_maps:
+        for label, slot_map in observed_baseline_pla_maps:
             materials = {paint_index: "PLA High Speed" for paint_index in slot_map}
-            for auto, vib, flow in observed_pla_prep_flags:
-                with self.subTest(case=label, flags=(auto, vib, flow)):
-                    self.assertTrue(
-                        q.is_start_hardware_validated(
-                            20030,
-                            "2.0.2.2",
-                            slot_map=slot_map,
-                            materials=materials,
-                            auto_leveling=auto,
-                            vibration_compensation=vib,
-                            flow_calibration=flow,
-                        )
+            with self.subTest(case=label):
+                self.assertTrue(
+                    q.is_start_hardware_validated(
+                        20030,
+                        "2.0.2.2",
+                        slot_map=slot_map,
+                        materials=materials,
+                        auto_leveling=True,
+                        vibration_compensation=False,
+                        flow_calibration=False,
                     )
+                )
+
+        # Observed single-filament slot 1 PLA High Speed across alternative single-flag prep tuples.
+        for auto, vib, flow in ((False, False, False), (False, True, False), (False, False, True)):
+            with self.subTest(alt_prep=(auto, vib, flow)):
+                self.assertTrue(
+                    q.is_start_hardware_validated(
+                        20030,
+                        "2.0.2.2",
+                        slot_map={0: 1},
+                        materials={0: "PLA High Speed"},
+                        auto_leveling=auto,
+                        vibration_compensation=vib,
+                        flow_calibration=flow,
+                    )
+                )
 
         # Observed single-filament PETG on onboard slot 4 with baseline prep flags.
         self.assertTrue(
@@ -196,6 +205,12 @@ class QualificationRegistryTests(unittest.TestCase):
         four_color_materials = {0: "PLA High Speed", 1: "PLA High Speed", 2: "PLA High Speed", 3: "PLA High Speed"}
         # Unobserved combinations must remain False.
         negative_cases = (
+            ("alt prep unobserved slot 3 off/off/off", dict(model_id=20030, firmware="2.0.2.2", slot_map={0: 3}, materials={0: "PLA High Speed"}, auto_leveling=False, vibration_compensation=False, flow_calibration=False)),
+            ("alt prep shared slot off/on/off", dict(model_id=20030, firmware="2.0.2.2", slot_map={0: 1, 1: 1}, materials={0: "PLA High Speed", 1: "PLA High Speed"}, auto_leveling=False, vibration_compensation=True, flow_calibration=False)),
+            ("alt prep shared slot off/off/on", dict(model_id=20030, firmware="2.0.2.2", slot_map={0: 1, 1: 1}, materials={0: "PLA High Speed", 1: "PLA High Speed"}, auto_leveling=False, vibration_compensation=False, flow_calibration=True)),
+            ("alt prep multicolor off/off/off", dict(model_id=20030, firmware="2.0.2.2", slot_map={0: 1, 1: 2, 2: 3, 3: 4}, materials=four_color_materials, auto_leveling=False, vibration_compensation=False, flow_calibration=False)),
+            ("alt prep multicolor off/on/off", dict(model_id=20030, firmware="2.0.2.2", slot_map={0: 1, 1: 2, 2: 3, 3: 4}, materials=four_color_materials, auto_leveling=False, vibration_compensation=True, flow_calibration=False)),
+            ("alt prep multicolor off/off/on", dict(model_id=20030, firmware="2.0.2.2", slot_map={0: 1, 1: 2, 2: 3, 3: 4}, materials=four_color_materials, auto_leveling=False, vibration_compensation=False, flow_calibration=True)),
             ("unobserved prep auto+vib", dict(model_id=20030, firmware="2.0.2.2", slot_map={0: 1}, materials={0: "PLA High Speed"}, auto_leveling=True, vibration_compensation=True, flow_calibration=False)),
             ("unobserved prep auto+flow", dict(model_id=20030, firmware="2.0.2.2", slot_map={0: 1}, materials={0: "PLA High Speed"}, auto_leveling=True, vibration_compensation=False, flow_calibration=True)),
             ("unobserved prep vib+flow", dict(model_id=20030, firmware="2.0.2.2", slot_map={0: 1}, materials={0: "PLA High Speed"}, auto_leveling=False, vibration_compensation=True, flow_calibration=True)),

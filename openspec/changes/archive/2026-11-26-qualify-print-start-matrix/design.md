@@ -11,7 +11,7 @@ All other onboard slot mappings (`0=3`, non-zero single `paint_index`, 2/3-color
 ## Goals / Non-Goals
 
 **Goals:**
-- Execute a compact, low-waste, operator-authorized live qualification matrix on Kobra X (`20030` / `2.0.2.2`) using tiny `AnycubicSlicerNext` CLI-sliced chips (via the `kobra-x-slicing` workflow) and an isolated `--state-dir` under `~/research/kobra-lan-cli/qualify-print-start-matrix/`.
+- Execute a compact, low-waste, operator-authorized live qualification matrix on Kobra X (`20030` / `2.0.2.2`) using tiny `AnycubicSlicerNext` CLI-sliced chips (via the `kobra-x-slicing` workflow) and an isolated `--state-dir` under `<isolated-workspace>/`.
 - Record concrete physical and telemetry evidence per run before promoting any `hardware_start_validated` predicate.
 - Keep `kobra_lan/qualification.py` expressive enough to represent observed mapping classes, observed preparation-flag tuples, and observed materials cleanly without over-generalizing to untested materials, untested preparation combinations, or rejected mapping patterns.
 - Close Milestone 3 in `ROADMAP.md` once the Kobra X print-start matrix is verified, while preserving explicit boundaries for untested materials, firmware `2.0.2.2` telemetry/download limits, and external ACE units.
@@ -33,7 +33,7 @@ Each test uses a minimal geometry (e.g., 15×15×1.2 mm single-color or 20×12×
 | C | `vibration-compensation on` | `[0]` | `0=1` | `off`, `on`, `off` | `PLA High Speed` |
 | D | `flow-calibration on` | `[0]` | `0=1` | `off`, `off`, `on` | `PLA High Speed` |
 | E | 2-color cross-remapped subset | `[0, 1]` | `0=2 1=1` | `on`, `off`, `off` | `PLA High Speed` |
-| F | 2-color sparse indices | `[0, 2]` | `0=1 2=4` | `on`, `off`, `off` | `PLA High Speed` |
+| F | 2-color sparse indices | `[0, 2]` | `0=1 2=3` | `on`, `off`, `off` | `PLA High Speed` |
 | G | Single-filament non-zero index | `[2]` | `2=3` | `on`, `off`, `off` | `PLA High Speed` |
 | H | Shared physical slot | `[0, 1]` | `0=1 1=1` | `on`, `off`, `off` | `PLA High Speed` |
 | I* | Optional extra material(s) | `[0]` | `0=<slot>` | `on`, `off`, `off` | Operator-supplied (e.g., `PLA`, `PETG`, `TPU`) |

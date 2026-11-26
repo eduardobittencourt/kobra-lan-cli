@@ -4,7 +4,7 @@ A direct Anycubic Kobra X LAN client with readable text and opt-in JSON for auto
 
 **Status: experimental, under active development.** The CLI and its JSON automation interface are intended for testing and feedback. Commands, output and stored-state contracts can change during 0.x; read each version's [compatibility notes](https://github.com/eduardobittencourt/kobra-lan-cli/releases) before upgrading. A downloadable package does not imply stable or broadly qualified printer support.
 
-Upload, print start, reviewed intentional reprints (`--reprint-from`), read-only `print watch` observation persistence, offline `jobs list|info`, guarded `print pause|resume|cancel`, stored-file deletion (`files delete`), LAN camera access (`camera status|snapshot|pipe`), and read-only SSDP discovery (`printer discover`) were observed on Kobra X hardware (`20030` / firmware `2.0.2.2`). Live `print start` qualification covers `PLA High Speed` across all four onboard slots (`1..4`, single-filament including `0=3` and non-zero `2=3`, 4-color contiguous 1:1, 2-color cross-remapped `0=2, 1=1`, 2-color sparse `0=1, 2=3`, and shared physical slot `0=1, 1=1` cleanly skipping filament changes) across the four observed preparation-flag combinations (`auto=on/vib=off/flow=off`, `off/off/off`, `off/on/off`, `off/off/on`), plus single-filament `PETG` (`0=4`, baseline preparation). Unobserved preparation-flag combinations, mixed-material prints, `PETG` on untested slots/multicolor/prep flags, other materials (`PLA`, `TPU`, `ABS`, etc.), and external ACE units remain unqualified.
+Upload, print start, reviewed intentional reprints (`--reprint-from`), read-only `print watch` observation persistence, offline `jobs list|info`, guarded `print pause|resume|cancel`, stored-file deletion (`files delete`), LAN camera access (`camera status|snapshot|pipe`), and read-only SSDP discovery (`printer discover`) were observed on Kobra X hardware (`20030` / firmware `2.0.2.2`). Live `print start` qualification covers `PLA High Speed` with baseline preparation (`auto=on/vib=off/flow=off`) across all four onboard slots (`1..4`, single-filament including `0=3` and non-zero `2=3`, 4-color contiguous 1:1, 2-color cross-remapped `0=2, 1=1`, 2-color sparse `0=1, 2=3`, and shared physical slot `0=1, 1=1` cleanly skipping filament changes), single-filament `PLA High Speed` (`0=1`) across alternative preparation flags (`off/off/off`, `off/on/off`, `off/off/on`), and single-filament `PETG` (`0=4`, baseline preparation). Unobserved preparation-flag cross-products or multi-flag combinations, mixed-material prints, `PETG` on untested slots/multicolor/prep flags, other materials (`PLA`, `TPU`, `ABS`, etc.), and external ACE units remain unqualified.
 
 See the [compatibility matrix](docs/compatibility.md) for supported models, firmwares, materials, preparation flags and host platforms, the [roadmap](ROADMAP.md) for implemented capabilities and future work, and the [release guide](docs/releases.md) for supported installation targets, package checks and recovery.
 
@@ -96,10 +96,11 @@ on both `print plan` and `print start`. For example, `--slot-map 0=1
 --slot-map 2=3` maps two sparse indices to onboard slots 1 and 3. On Kobra X
 model `20030` / firmware `2.0.2.2`, `PLA High Speed` starts across valid onboard
 slot mappings (single-filament `1..4`, non-zero indices, contiguous, subset,
-cross-remapped, sparse, and shared physical slots) with any of the four observed
-preparation-flag combinations (`on/off/off`, `off/off/off`, `off/on/off`,
-`off/off/on`) and single-filament `PETG` `0=4` (`on/off/off`) report
-`hardware_start_validated: true`; unobserved preparation combinations, mixed
+cross-remapped, sparse, and shared physical slots) with baseline preparation
+(`on/off/off`), single-filament `PLA High Speed` (`0=1`) with observed
+alternative preparation flags (`off/off/off`, `off/on/off`, `off/off/on`), and
+single-filament `PETG` `0=4` (`on/off/off`) report `hardware_start_validated:
+true`; unobserved preparation cross-products or multi-flag combinations, mixed
 materials, other `PETG` cases, and untested materials report
 `hardware_start_validated: false`. External ACE units remain outside the
 supported topology. See the [multicolor workflow](docs/usage.md#plan-and-start-a-multicolor-print).
