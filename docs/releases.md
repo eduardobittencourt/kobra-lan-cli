@@ -261,12 +261,19 @@ intentional reprints (`--reprint-from`), offline `jobs list|info`, guarded
 [docs/compatibility.md](compatibility.md)), and LAN camera commands
 (`camera status|snapshot|pipe`).
 
-Breaking 0.x change: repeatable `--slot-map PAINT_INDEX=SLOT` replaces
+Breaking 0.x changes: repeatable `--slot-map PAINT_INDEX=SLOT` replaces
 `--slot` on `print plan` and `print start`, `slot_mapping` replaces
 `selected_slot` on `print plan`, `print start`, and `jobs info`, and
-`jobs info` reports `material_type` per `slot_mapping` entry. Existing upload
-receipts, start receipts, attempt markers, watch observations, and reprint
-chains remain readable in place without migration.
+`jobs info` reports `material_type` per `slot_mapping` entry. Both root starts
+and reprints now use canonical attempt-keyed local records under
+`starts/<device>/<attempt_id>.*`, and mutating device commands share a single
+`.device.lock` lease (stopping creation of `.upload.lock` and `.start.lock`).
+Existing upload receipts/markers, watch observations, and canonical
+attempt-keyed start receipts and reprint chains remain readable in place without
+migration; preexisting legacy file-keyed (`<file_sha256>.*`) or pre-`attempt_id`
+start files remain untouched and read-only on disk, surface as `incomplete` in
+`jobs list|info`, and refuse `print start --execute` for that file rather than
+bypassing them.
 
 Runtime dependencies remain unchanged (`python3 >= 3.11` and
 `python3-cryptography >= 41` / `cryptography>=41`). The Debian package adds
