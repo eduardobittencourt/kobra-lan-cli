@@ -255,8 +255,12 @@ reports `paint_index`, `slot`, `ams_index`, `gcode_material_type`,
 order of the `--slot-map` arguments preserves the hash.
 
 Plans and starts report `experimental: true`. `hardware_start_validated: true`
-applies only to live-observed Kobra X model `20030` / firmware `2.0.2.2`
-configurations:
+applies only to Kobra X model `20030` / firmware `2.0.2.2` configurations
+covered by the centralized qualification registry — either exact live-observed
+runs or the class-level onboard slot-mapping rule backed by representative live
+runs below (distinguishing individual untested slot permutations within an
+observed mapping class from unobserved materials, unobserved preparation
+combinations, and unobserved mapping classes, which remain `false`):
 - `PLA High Speed` with baseline preparation `(--auto-leveling on,
   --vibration-compensation off, --flow-calibration off)` across valid onboard
   slot-mapping classes (`1..4`, distinct or shared physical slots, zero or
