@@ -272,7 +272,7 @@ Runtime dependencies remain unchanged (`python3 >= 3.11` and
 `python3-cryptography >= 41` / `cryptography>=41`). The Debian package adds
 optional `Suggests: ffmpeg` for `camera snapshot`; `camera status` and
 `camera pipe` require no external video binaries. Stored-file download
-(`files download`) remains unimplemented because stock Kobra X firmware 2.0.2.2
-exposes no LAN download endpoint. Creating the `v0.6.0` tag and publishing the
+(`files download`) remains unimplemented because the 2026-11-25 investigation
+of stock Kobra X firmware 2.0.2.2 found no LAN download endpoint. Creating the `v0.6.0` tag and publishing the
 release remain explicit maintainer actions through the gated workflow above
 after code review and package checks pass.

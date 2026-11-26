@@ -58,9 +58,11 @@
 - Centralize hardware qualification rules in `kobra_lan/qualification.py` and
   publish the maintained compatibility matrix in `docs/compatibility.md`.
 - Record the 2026-11-25 stored-file download investigation for Kobra X model
-  20030 / firmware 2.0.2.2: stock LAN mode exposes no HTTP or MQTT endpoint to
-  download stored `.gcode` files (or timelapse `.mp4` videos) from printer
-  storage, so `files download` is deferred unless future firmware adds support.
+  20030 / firmware 2.0.2.2: static client inspection, public references, and
+  read-only LAN probes found no HTTP or MQTT endpoint for downloading stored
+  `.gcode` files (or timelapse `.mp4` videos) from printer storage, so
+  `files download` is deferred unless a supported LAN endpoint is identified or
+  added by future firmware.
 - Preserve private profiles, credentials, receipts, attempt markers, watch
   observations, and permissions during normal operations and package upgrades.
   Never clear markers or automatically repeat uncertain actions. Hardware

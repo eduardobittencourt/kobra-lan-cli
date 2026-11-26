@@ -522,7 +522,7 @@ the same `printer_id` and `--state-dir` see identical local history.
   Other clients or state directories do not share this lock, and firmware-side
   atomic rejection of an existing filename has not been established.
 - Existing remote files are not overwritten. Names must be safe ASCII basenames; only `.gcode` files up to 128 MiB are accepted.
-- Remote verification checks filename, size, layers, and printer model. The endpoints used did not provide a checksum of stored bytes: `remote_byte_hash_verified=false` explicitly indicates that the internal copy was not downloaded and independently hashed. Investigation of stock Kobra X model 20030 / firmware 2.0.2.2 LAN mode confirmed no HTTP or MQTT endpoint for downloading stored `.gcode` files (or stored timelapse `.mp4` videos); `files download` is therefore unsupported on this firmware (see [validation evidence](#validation-evidence)).
+- Remote verification checks filename, size, layers, and printer model. The endpoints used did not provide a checksum of stored bytes: `remote_byte_hash_verified=false` explicitly indicates that the internal copy was not downloaded and independently hashed. Investigation of stock Kobra X model 20030 / firmware 2.0.2.2 LAN mode found no HTTP or MQTT endpoint for downloading stored `.gcode` files (or stored timelapse `.mp4` videos); `files download` therefore remains unsupported on this firmware (see [validation evidence](#validation-evidence)).
 - Firmware 2.0.2.2 sends a correlated ACK followed by a report with a different msgid. Queries are synchronous and accept a fresh report after the ACK. An idle printer does not produce a report for `print/query`; status uses `info/report`.
 - There is no transactional lock against another computer between a query and an action. Credentials/pins may change after firmware or LAN-mode changes; reassess provisioning.
 
@@ -599,8 +599,9 @@ candidate MQTT `file/*` download actions received only the generic empty
 `fileKey` equals `md5(filename)` rather than a content checksum or download
 handle (`file/fileDetails` exposes embedded base64 preview images when present
 in a G-code file, and `file/listUdisk` / `file/listVideo` expose read-only
-metadata only). Stored-file download (`files download`) is therefore deferred
-as unsupported on stock firmware `2.0.2.2`.
+metadata only). Because no LAN download endpoint was identified across these
+checks, stored-file download (`files download`) is deferred on stock firmware
+`2.0.2.2`.
 
 ## Saved target selection
 

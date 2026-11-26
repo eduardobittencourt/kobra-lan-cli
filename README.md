@@ -133,8 +133,9 @@ Kobra X with no active job. It preserves local receipts, attempt markers, and
 watch observations. Results include `experimental: true` and
 `hardware_delete_validated: false`. After an uncertain or unconfirmed result,
 inspect `files list` before taking further action. The CLI never resends the
-delete command automatically. Stock Kobra X LAN firmware 2.0.2.2 exposes no
-stored-file download endpoint, so `files download` is unsupported. See
+delete command automatically. The 2026-11-25 investigation of stock Kobra X LAN
+firmware 2.0.2.2 found no stored-file download endpoint, so `files download`
+remains unsupported. See
 [stored-file deletion](docs/usage.md#delete-a-stored-file) and
 [validation evidence](docs/usage.md#validation-evidence).
 

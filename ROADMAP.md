@@ -19,9 +19,9 @@ Modeling, mesh editing, orientation, supports, toolpaths and slicing profiles be
 | Access | Explicit-address named pairing, [first-use trust](docs/pairing.md), pinned authentication, local profiles, explicit/default selection and confirmed local removal |
 | Diagnostics | Bounded read-only `doctor`, fresh status, qualified model/firmware checks and disclosure of optional MQTT identifiers omitted by firmware |
 | Filament inventory | Read-only onboard four-slot inventory (`slots list`) and multicolor-aware offline `gcode inspect` (`paint_info`, tools, weights) |
-| Stored files | `files list`, `files info`, local `gcode inspect`, reviewed execution-only `files upload`, and guarded `files delete --execute` (`files download` unsupported by stock FW `2.0.2.2`) |
+| Stored files | `files list`, `files info`, local `gcode inspect`, reviewed execution-only `files upload`, and guarded `files delete --execute` (no LAN download endpoint found on stock FW `2.0.2.2`) |
 | Print submission | Read-only `print plan` and experimental `print start` (single-filament, multicolor `--slot-map`, and reviewed `--reprint-from`), with explicit material/slot/preparation choices and reviewed hashes |
-| Observation & control | Read-only `print watch` with local observation persistence, offline `jobs list|info`, and experimental guarded `print pause|resume|cancel` |
+| Observation & control | Read-only `print watch` with local observation persistence, offline `jobs list\|info`, and experimental guarded `print pause\|resume\|cancel` |
 | Camera access | Read-only `camera status`, atomic JPEG/PNG `camera snapshot` (optional `ffmpeg`), and raw HTTP-FLV `camera pipe` with strict host validation and token redaction |
 | Compatibility | Centralized hardware qualification rules (`kobra_lan/qualification.py`) and the maintained [compatibility matrix](docs/compatibility.md) |
 | Automation | English text by default, root `--json` version-1 envelope, documented error/exit contracts and offline bash/zsh/fish completion |
@@ -141,12 +141,12 @@ read-only FLV delivery, `--max-bytes`, broken-pipe exit `0`, `SIGINT` exit
 A stored-file download investigation on 2026-11-25 (static inspection of
 `AnycubicSlicerNext` `1:2.0.0.6` SDK/UI binaries, public `anycubic-lan` /
 `anycubic_kobrax` references, and strictly read-only live probes on Kobra X
-model 20030 / firmware 2.0.2.2) confirmed that stock LAN mode exposes no HTTP
-(`:18910`/`:18088`) or MQTT `file/*` endpoint to download stored `.gcode` files
-or timelapse `.mp4` videos (`listLocal`'s `fileKey` is `md5(filename)` rather
-than a content checksum or download handle). Stored-file download
-(`files download`) is therefore deferred unless a future firmware adds LAN
-download support. See [validation evidence](docs/usage.md#validation-evidence)
+model 20030 / firmware 2.0.2.2) found no LAN HTTP (`:18910`/`:18088`) or MQTT
+`file/*` endpoint for downloading stored `.gcode` files or timelapse `.mp4`
+videos (`listLocal`'s `fileKey` is `md5(filename)` rather than a content
+checksum or download handle). Stored-file download (`files download`) is
+therefore deferred unless a supported LAN download endpoint is identified or
+added by future firmware. See [validation evidence](docs/usage.md#validation-evidence)
 and [compatibility matrix](docs/compatibility.md).
 
 Remaining work:
