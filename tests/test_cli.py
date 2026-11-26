@@ -18,7 +18,7 @@ class CommandTreeTests(unittest.TestCase):
             self.assertNotIn("--slot", out.getvalue().split())
 
     def test_every_leaf_has_help_without_operations(self):
-        leaves = [("printer", c) for c in ("pair", "list", "info", "use", "remove")]
+        leaves = [("printer", c) for c in ("discover", "pair", "list", "info", "use", "remove")]
         leaves += [("slots", "list")]
         leaves += [("camera", c) for c in ("status", "snapshot", "pipe")]
         leaves += [("files", c) for c in ("list", "info", "upload", "delete")]
@@ -67,6 +67,9 @@ class CommandTreeTests(unittest.TestCase):
             (["camera", "status"], ("Read-only", "18088", "hardware_camera_validated: true")),
             (["camera", "snapshot"], ("--output PATH", "--timeout SECONDS", "--overwrite", "--no-start-capture", "ffmpeg")),
             (["camera", "pipe"], ("--timeout SECONDS", "--max-bytes BYTES", "--no-start-capture", "--json")),
+            (["printer"], ("discover", "pair", "list", "info", "use", "remove", "read-only")),
+            (["printer", "discover"], ("ac:3dprinter:fdm", "--timeout SECONDS", "--interface IPv4",
+                                       "unauthenticated", "hardware_discovery_validated: true", "printer pair")),
         ):
             with self.subTest(argv=argv), patch("kobra_lan.cli.Registry") as registry:
                 out = io.StringIO()
@@ -146,6 +149,13 @@ class SafeArgumentTests(unittest.TestCase):
         import json
         secret = "https://example.test/?token=SYNTHETIC_PRIVATE\x1b[31m"
         cases = [[secret], ["slots", secret], ["camera", secret], ["files", secret], ["printer", "pair"],
+                 ["printer", "discover", "--timeout", "0"],
+                 ["printer", "discover", "--timeout", "16"],
+                 ["printer", "discover", "--timeout", secret],
+                 ["printer", "discover", "--interface", secret],
+                 ["printer", "discover", "--interface", "not-an-ip"],
+                 ["printer", "discover", "--interface", "192.0.2.010"],
+                 ["printer", "discover", secret],
                  ["camera", "snapshot"],
                  ["camera", "snapshot", "--output", "frame.bmp"],
                  ["camera", "snapshot", "--output", "frame.jpg", "--timeout", "0"],
@@ -426,6 +436,112 @@ class CameraCliTests(unittest.TestCase):
                 else:
                     self.assertIn("Error (operation_failed):", out.getvalue())
                     self.assertIn("ffmpeg", out.getvalue())
+
+
+class PrinterDiscoverCliTests(unittest.TestCase):
+    def test_discover_rejects_global_target_selectors_before_network(self):
+        import json
+        for flag_args in (["--printer", "bench"], ["--config", "/tmp/unused.json"]):
+            for mode in ([], ["--json"]):
+                out, err = io.StringIO(), io.StringIO()
+                with self.subTest(flag_args=flag_args, mode=mode), \
+                        patch("kobra_lan.cli.Registry") as registry, \
+                        patch("kobra_lan.cli.discover_printers") as discover_fn, \
+                        contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                    self.assertEqual(main([*mode, *flag_args, "printer", "discover"]), 2)
+                registry.assert_not_called()
+                discover_fn.assert_not_called()
+                self.assertEqual(err.getvalue(), "")
+                if mode:
+                    report = json.loads(out.getvalue())
+                    self.assertFalse(report["ok"])
+                    self.assertEqual(report["error"]["code"], "validation_failed")
+                else:
+                    self.assertIn("Error (validation_failed):", out.getvalue())
+
+    def test_discover_success_socket_error_and_interrupt_in_both_formats(self):
+        import json
+        from kobra_lan.discovery import DiscoveryError
+
+        sample_result = {
+            "protocol": "ssdp",
+            "search_target": "ac:3dprinter:fdm",
+            "timeout_seconds": 3,
+            "interface": "192.0.2.5",
+            "hardware_discovery_validated": True,
+            "unauthenticated_lan_advertisement": True,
+            "firmware_verified": False,
+            "printers": [
+                {
+                    "host": "192.0.2.10",
+                    "port": 18910,
+                    "model_id": 20030,
+                    "model_name": "Anycubic Kobra X",
+                    "device_name": "Anycubic Kobra X",
+                    "mac": "02:00:00:00:00:01",
+                    "ctrl_type": "lan",
+                    "qualified_model": True,
+                    "firmware_verified": False,
+                    "unauthenticated": True,
+                }
+            ],
+            "limitations": ["Same-subnet multicast only."],
+        }
+
+        for mode in ([], ["--json"]):
+            out, err = io.StringIO(), io.StringIO()
+            with patch("kobra_lan.cli.Registry") as registry, \
+                    patch("kobra_lan.cli.discover_printers", return_value=sample_result) as discover_fn, \
+                    contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                self.assertEqual(
+                    main([*mode, "printer", "discover", "--timeout", "3", "--interface", "192.0.2.5"]),
+                    0,
+                )
+            registry.assert_not_called()
+            discover_fn.assert_called_once_with(timeout=3, interface="192.0.2.5")
+            self.assertEqual(err.getvalue(), "")
+            if mode:
+                report = json.loads(out.getvalue())
+                self.assertTrue(report["ok"])
+                self.assertEqual(report["result"]["printers"][0]["model_id"], 20030)
+                self.assertTrue(report["result"]["hardware_discovery_validated"])
+                self.assertFalse(report["result"]["firmware_verified"])
+            else:
+                self.assertIn("192.0.2.10", out.getvalue())
+                self.assertIn("Hardware discovery validated: yes", out.getvalue())
+                self.assertIn("Firmware verified: no", out.getvalue())
+
+        # Socket error -> exit 3, operation_failed
+        for mode in ([], ["--json"]):
+            out, err = io.StringIO(), io.StringIO()
+            with patch("kobra_lan.cli.Registry") as registry, \
+                    patch("kobra_lan.cli.discover_printers", side_effect=DiscoveryError("Discovery: local UDP multicast socket operation failed")), \
+                    contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                self.assertEqual(main([*mode, "printer", "discover"]), 3)
+            registry.assert_not_called()
+            self.assertEqual(err.getvalue(), "")
+            if mode:
+                report = json.loads(out.getvalue())
+                self.assertFalse(report["ok"])
+                self.assertEqual(report["error"]["code"], "operation_failed")
+            else:
+                self.assertIn("Error (operation_failed):", out.getvalue())
+
+        # KeyboardInterrupt -> exit 130, interrupted
+        for mode in ([], ["--json"]):
+            out, err = io.StringIO(), io.StringIO()
+            with patch("kobra_lan.cli.Registry") as registry, \
+                    patch("kobra_lan.cli.discover_printers", side_effect=KeyboardInterrupt()), \
+                    contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                self.assertEqual(main([*mode, "printer", "discover"]), 130)
+            registry.assert_not_called()
+            self.assertEqual(err.getvalue(), "")
+            if mode:
+                report = json.loads(out.getvalue())
+                self.assertFalse(report["ok"])
+                self.assertEqual(report["error"]["code"], "interrupted")
+            else:
+                self.assertIn("Error (interrupted):", out.getvalue())
 
 
 class NamedOnlySetupTests(unittest.TestCase):

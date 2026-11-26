@@ -84,6 +84,30 @@ class HTTPTests(unittest.TestCase):
             with patch.object(p, 'request_json', side_effect=[INFO, result]):
                 self.assertRaises(ProtocolError, p.exchange, HOST)
 
+    def test_client_limit_code_19002_diagnostic(self):
+        """Distinguish firmware client-limit code 19002 without echoing raw payloads."""
+        raw_reply = {'code': 19002, 'msg': 'raw-secret-msg', 'data': {'secret': 'raw-secret-data'}}
+        with patch.object(p, 'request_json', side_effect=[INFO, raw_reply]):
+            with self.assertRaises(ProtocolError) as ctx:
+                p.exchange(HOST)
+        message = str(ctx.exception)
+        self.assertIn('client connection limit reached', message)
+        self.assertIn('19002', message)
+        self.assertIn('LAN mode', message)
+        self.assertNotIn('raw-secret-msg', message)
+        self.assertNotIn('raw-secret-data', message)
+
+        for non_19002 in (
+            {'code': '19002', 'data': {}},
+            {'code': 19002.0, 'data': {}},
+            {'code': 500, 'msg': 'raw-other-msg'},
+            {'code': True, 'data': {}},
+        ):
+            with self.subTest(reply=non_19002), patch.object(p, 'request_json', side_effect=[INFO, non_19002]):
+                with self.assertRaises(ProtocolError) as ctx:
+                    p.exchange(HOST)
+                self.assertEqual(str(ctx.exception), 'Provisioning: credential request rejected')
+
     def test_timeout_never_replayed(self):
         """Close the connection after a timeout without replaying the POST."""
         conn = Mock(); conn.getresponse.side_effect = socket.timeout('sensitive')

@@ -40,6 +40,7 @@ class PrinterQualification:
     control_hardware_validated: bool
     delete_hardware_validated: bool
     camera_hardware_validated: bool = False
+    discovery_hardware_validated: bool = False
 
 
 KOBRA_X = PrinterQualification(
@@ -69,6 +70,7 @@ KOBRA_X = PrinterQualification(
     control_hardware_validated=True,
     delete_hardware_validated=True,
     camera_hardware_validated=True,
+    discovery_hardware_validated=True,
 )
 
 QUALIFIED_PRINTERS = MappingProxyType({KOBRA_X.model_id: KOBRA_X})
@@ -253,4 +255,15 @@ def is_camera_hardware_validated(model_id, firmware):
         and type(firmware) is str
         and firmware in profile.firmware_versions
         and profile.camera_hardware_validated
+    )
+
+
+def is_discovery_hardware_validated(model_id, firmware):
+    """Return True when LAN discovery is hardware-validated for model_id and firmware."""
+    profile = qualification_for_model_id(model_id)
+    return (
+        profile is not None
+        and type(firmware) is str
+        and firmware in profile.firmware_versions
+        and profile.discovery_hardware_validated
     )

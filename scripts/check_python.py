@@ -22,9 +22,9 @@ RUNTIME_LOCK = ROOT / "requirements-runtime.txt"
 SYNTHETIC_HOSTILE_URL = "https://example.test/?token=SYNTHETIC_PRIVATE"
 
 MODULES = {f"kobra_lan/{name}.py" for name in
-           ("__init__", "camera", "cli", "cli_output", "completions", "config", "control", "delete_file", "filaments",
-            "jobs", "mqtt", "printer", "qualification", "start", "upload", "provisioning", "pairing", "profiles",
-            "diagnostics", "watch")}
+           ("__init__", "camera", "cli", "cli_output", "completions", "config", "control", "delete_file", "discovery",
+            "filaments", "jobs", "mqtt", "printer", "qualification", "start", "upload", "provisioning", "pairing",
+            "profiles", "diagnostics", "watch")}
 DOCS = {
     "README.md", "LICENSE", "NOTICE.md", "CHANGELOG.md", "ROADMAP.md", "CONTRIBUTING.md",
     "AGENTS.md", "SECURITY.md", "CODE_OF_CONDUCT.md", "docs/README.md", "docs/compatibility.md", "docs/pairing.md",
@@ -138,6 +138,19 @@ def main():
     empty_home = outside / "empty-home"
     empty_home.mkdir()
     probe_env = dict(env, HOME=str(empty_home))
+    printer_help = subprocess.check_output([str(command), "printer", "--help"],
+                                           cwd=outside, env=probe_env, text=True)
+    assert "discover" in printer_help
+    discover_help = subprocess.check_output([str(command), "printer", "discover", "--help"],
+                                            cwd=outside, env=probe_env, text=True)
+    assert all(flag in discover_help for flag in ("--timeout", "--interface", "ac:3dprinter:fdm"))
+    for mode in ([], ["--json"]):
+        failure = subprocess.run([str(command), *mode, "printer", "discover", "--interface", SYNTHETIC_HOSTILE_URL],
+                                 cwd=outside, env=probe_env, text=True, capture_output=True)
+        assert failure.returncode == 2 and not failure.stderr
+        assert "SYNTHETIC_PRIVATE" not in failure.stdout
+        if mode:
+            assert json.loads(failure.stdout)["error"]["code"] == "invalid_arguments"
     slots_help = subprocess.check_output([str(command), "slots", "--help"],
                                          cwd=outside, env=probe_env, text=True)
     assert "list" in slots_help

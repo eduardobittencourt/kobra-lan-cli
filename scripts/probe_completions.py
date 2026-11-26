@@ -3,10 +3,14 @@ import re
 
 
 def check_completion(completion, shell):
-    assert all(word in completion for word in ("kobra-lan", "slots", "camera", "snapshot", "pipe", "output",
+    assert all(word in completion for word in ("kobra-lan", "discover", "interface",
+                                               "slots", "camera", "snapshot", "pipe", "output",
                                                "overwrite", "max-bytes", "no-start-capture",
                                                "watch", "timeout", "pause", "resume", "cancel",
                                                "execute", "filename", "jobs", "observation", "limit"))
+    assert "printer:discover" in completion
+    assert "printer discover:--timeout" in completion
+    assert "printer discover:--interface" in completion
     assert "slots:list" in completion
     assert "camera:status" in completion
     assert "camera:snapshot" in completion
@@ -14,9 +18,13 @@ def check_completion(completion, shell):
     assert "files:delete" in completion
     lines = completion.splitlines()
     if shell == "fish":
+        assert any("xprinter discover" in line and " -l timeout -r" in line for line in lines)
+        assert any("xprinter discover" in line and " -l interface -r" in line for line in lines)
         assert any("xfiles delete" in line and line.endswith(" -l execute") for line in lines)
         assert any("xcamera snapshot" in line and " -l output -r -F" in line for line in lines)
     else:
+        assert any("'printer discover') candidates=" in line
+                   and "--timeout" in line and "--interface" in line for line in lines)
         assert "'files delete') candidates='-h --help --execute'" in completion
         assert "'camera snapshot:--output')" in completion
     assert all(f"print {action}:--reprint-from" in completion for action in ("plan", "start"))

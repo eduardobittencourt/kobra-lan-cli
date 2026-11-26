@@ -20,6 +20,14 @@ from .cli_output import emit, safe_text
 from .config import ProtocolError
 from .control import control_print, validate_filename
 from .delete_file import delete_file
+from .discovery import (
+    DEFAULT_DISCOVER_TIMEOUT,
+    MAX_DISCOVER_TIMEOUT,
+    DiscoveryArgumentError,
+    DiscoveryError,
+    discover_printers,
+    validate_interface,
+)
 from .filaments import inspect_gcode_filaments, list_slots
 from .jobs import DEFAULT_LIMIT, KINDS, MAX_LIMIT, job_info, list_jobs, valid_record_id
 from .mqtt import MQTT, validate_delete_filename
@@ -35,6 +43,7 @@ from .qualification import (
     is_camera_hardware_validated,
     is_control_hardware_validated,
     is_delete_hardware_validated,
+    is_discovery_hardware_validated,
     is_valid_onboard_slot,
     onboard_topology,
 )
@@ -57,6 +66,8 @@ class Parser(argparse.ArgumentParser):
                 prog = f"{prog} print {parsed.print_command}"
             elif getattr(parsed, "command", None) == "camera" and parsed.camera_command in ("status", "snapshot", "pipe"):
                 prog = f"{prog} camera {parsed.camera_command}"
+            elif getattr(parsed, "command", None) == "printer" and parsed.printer_command == "discover":
+                prog = f"{prog} printer discover"
             self.error("Unrecognized arguments", prog=prog)
         return parsed
 
@@ -64,6 +75,8 @@ class Parser(argparse.ArgumentParser):
         # argparse interpolates arbitrary supplied values; never publish its message.
         prog = prog or self.prog
         guidance = {
+            "kobra-lan printer": "; choose discover, pair, list, info, use, or remove",
+            "kobra-lan printer discover": f"; --timeout accepts whole seconds from 1 to {MAX_DISCOVER_TIMEOUT} and --interface accepts a bare IPv4 address",
             "kobra-lan printer pair": "; supply --name NAME and --host IPv4",
             "kobra-lan camera": "; choose status, snapshot, or pipe",
             "kobra-lan camera snapshot": f"; supply --output PATH (.jpg, .jpeg, or .png) and optional --timeout (1 to {MAX_SNAPSHOT_TIMEOUT})",
@@ -129,6 +142,17 @@ def watch_timeout(value):
     return _bounded_positive_int(value, MAX_TIMEOUT, "observation timeout")
 
 
+def discover_timeout(value):
+    return _bounded_positive_int(value, MAX_DISCOVER_TIMEOUT, "discovery timeout")
+
+
+def discover_interface(value):
+    try:
+        return validate_interface(value)
+    except DiscoveryArgumentError:
+        raise argparse.ArgumentTypeError("Invalid interface") from None
+
+
 def camera_snapshot_timeout(value):
     return _bounded_positive_int(value, MAX_SNAPSHOT_TIMEOUT, "snapshot timeout")
 
@@ -165,6 +189,7 @@ def slot_map_entry(value):
 def build_parser():
     """Build the canonical command metadata without opening access or state."""
     slot_count = onboard_topology().slot_count
+    discovery_validated = "true" if is_discovery_hardware_validated(KOBRA_X.model_id, QUALIFIED_FIRMWARE) else "false"
     camera_validated = "true" if is_camera_hardware_validated(KOBRA_X.model_id, QUALIFIED_FIRMWARE) else "false"
     control_validated = "true" if is_control_hardware_validated(KOBRA_X.model_id, QUALIFIED_FIRMWARE) else "false"
     delete_validated = "true" if is_delete_hardware_validated(KOBRA_X.model_id, QUALIFIED_FIRMWARE) else "false"
@@ -175,8 +200,37 @@ def build_parser():
     parser.add_argument("--printer", dest="selected_printer", help="Named local profile")
     parser.add_argument("--state-dir", type=Path, default=Path.home() / ".local/share/kobra-lan/uploads")
     sub = parser.add_subparsers(dest="command", required=True)
-    p = sub.add_parser("printer", help="Set up direct LAN access")
+    p = sub.add_parser(
+        "printer",
+        help="Discover LAN printers or manage direct LAN profiles",
+        description="discover is strictly read-only over same-subnet SSDP multicast (unauthenticated; never auto-pairs). "
+                    "pair creates a new managed profile after explicit TLS fingerprint verification. "
+                    "list, info, use, and remove manage local profiles without contacting printers.",
+    )
     printer = p.add_subparsers(dest="printer_command", required=True)
+    p = printer.add_parser(
+        "discover",
+        help="Discover LAN-enabled printers on the local subnet via read-only SSDP; never auto-pairs",
+        description=f"Strictly read-only same-subnet SSDP multicast discovery (ac:3dprinter:fdm) "
+                    f"(hardware_discovery_validated: {discovery_validated}). "
+                    "Advertisements are unauthenticated and do not verify firmware; "
+                    "pair explicitly with kobra-lan printer pair --name NAME --host IPv4 and verify the TLS fingerprint. "
+                    "Never contacts port 18910 or 9883, and never reads or writes profiles or state.",
+    )
+    p.add_argument(
+        "--timeout",
+        type=discover_timeout,
+        default=DEFAULT_DISCOVER_TIMEOUT,
+        metavar="SECONDS",
+        help=f"Listen window in seconds (1 to {MAX_DISCOVER_TIMEOUT}, default {DEFAULT_DISCOVER_TIMEOUT})",
+    )
+    p.add_argument(
+        "--interface",
+        type=discover_interface,
+        default=None,
+        metavar="IPv4",
+        help="Optional local IPv4 address to bind the multicast search socket",
+    )
     p = printer.add_parser("pair", help="Pair an already LAN-enabled printer; never controls or uploads")
     p.add_argument("--host", required=True, help="Bare printer IPv4 address")
     p.add_argument("--trust-sha256", help="Expected server certificate SHA-256; required without a terminal")
@@ -353,6 +407,7 @@ def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
     json_mode = root_json(argv)
     pipe_mode = (not json_mode) and argv_is_camera_pipe(argv)
+    discover_mode = False
     watch = None
     state_dir = None
     try:
@@ -409,6 +464,15 @@ def main(argv=None):
         if args.command == "completion":
             from .completions import generate
             print(generate(parser, args.shell), end="")
+            return 0
+        if args.command == "printer" and args.printer_command == "discover":
+            if args.config is not None or args.selected_printer is not None:
+                raise ProtocolError(
+                    "LAN discovery rejects --printer and --config; it is read-only and does not use saved profiles"
+                )
+            discover_mode = True
+            result = discover_printers(timeout=args.timeout, interface=args.interface)
+            emit(json_mode, result)
             return 0
         registry = Registry()
         explicit = args.config is not None or args.selected_printer is not None
@@ -480,7 +544,7 @@ def main(argv=None):
         partial = watch.record(watch.partial(code), state_dir) if watch else getattr(error, "result", None)
         _emit_error(json_mode, pipe_mode, code=code, message=str(error), partial=partial)
         return status
-    except (PairingLocalError, ProfileLocalError) as error:
+    except (PairingLocalError, ProfileLocalError, DiscoveryError) as error:
         _emit_error(json_mode, pipe_mode, code="operation_failed", message=str(error),
                     partial=getattr(error, "result", None))
         return 3
@@ -493,6 +557,9 @@ def main(argv=None):
     except KeyboardInterrupt:
         if pipe_mode:
             print("Error (interrupted): Camera pipe interrupted", file=sys.stderr)
+            return 130
+        if discover_mode:
+            emit(json_mode, code="interrupted", message="LAN printer discovery interrupted")
             return 130
         if watch is None:
             raise

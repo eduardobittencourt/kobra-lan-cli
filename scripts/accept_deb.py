@@ -68,6 +68,16 @@ def installed_probes(probe, version, home, work, before):
     empty_home.mkdir(exist_ok=True)
     home_owner = home.stat()
     os.chown(empty_home, home_owner.st_uid, home_owner.st_gid)
+    assert "discover" in probe("printer", "--help", probe_home=empty_home)
+    discover_help = probe("printer", "discover", "--help", probe_home=empty_home)
+    assert all(flag in discover_help for flag in ("--timeout", "--interface", "ac:3dprinter:fdm"))
+    hostile = "https://example.test/?token=SYNTHETIC_PRIVATE"
+    for mode in ([], ["--json"]):
+        output = probe(*mode, "printer", "discover", "--interface", hostile, code=2,
+                       probe_home=empty_home, quiet_stderr=True)
+        assert "SYNTHETIC_PRIVATE" not in output
+        if mode:
+            assert json.loads(output)["error"]["code"] == "invalid_arguments"
     slots_help = probe("slots", "--help", probe_home=empty_home)
     assert "list" in slots_help
     assert "onboard" in probe("slots", "list", "--help", probe_home=empty_home).lower()

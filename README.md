@@ -34,6 +34,8 @@ Python >=3.11 with `cryptography>=41`; no daemon. Python package installers reso
 git clone https://github.com/eduardobittencourt/kobra-lan-cli.git
 cd kobra-lan-cli
 ./kobra-lan --help
+# Optionally discover LAN-enabled printers on the same subnet (read-only SSDP; never auto-pairs):
+./kobra-lan printer discover
 # Set up a named profile, with explicit initial trust on a terminal:
 ./kobra-lan printer pair --name bench --host 192.0.2.10 --default
 # Local inspection needs no configuration (hashes, metadata, and filament/color info):
@@ -76,10 +78,10 @@ with `print plan` or `jobs list`, then review and explicitly execute a new plan
 with `--reprint-from PREVIOUS_ATTEMPT_ID` on both commands. See the
 [reprint workflow](docs/usage.md#deliberately-reprint-a-stored-file) for eligibility and safety checks.
 
-The canonical tree is `printer pair|list|info|use|remove`, `doctor`, `status`,
+The canonical tree is `printer discover|pair|list|info|use|remove`, `doctor`, `status`,
 `slots list`, `camera status|snapshot|pipe`, `files list|info|upload|delete`,
 `gcode inspect`, `print plan|start|watch|pause|resume|cancel`, `jobs list|info`,
-and `completion bash|zsh|fish`. Group `--help` describes read-only inventory,
+and `completion bash|zsh|fish`. Group `--help` describes read-only discovery/inventory,
 camera inspection/capture, local history inspection, observation, planning and
 execution controls.
 `slots list` inspects the qualified Kobra X onboard four-slot filament box
@@ -108,7 +110,7 @@ job history are local and read-only; planning queries the printer without changi
 it. Text is the default; root `--json` selects the versioned machine contract.
 Exit codes are 0 (success, or `camera pipe` downstream pipe closure), 2
 (arguments/protocol/validation), 3 (configuration/dependency/network failure),
-and 130 (interrupted print observation, `camera pipe`, lifecycle control, or
+and 130 (interrupted `printer discover`, `print watch`, `camera pipe`, lifecycle control, or
 stored-file deletion after publish).
 Global `--config`, `--printer`, `--state-dir` and `--json` precede the command.
 These examples describe the workflow; automated checks use synthetic fixtures.
@@ -160,7 +162,7 @@ labeled unattributed, and incomplete or unreadable records remain visible. See
 
 ## Setup and safe operation
 
-Pairing and status access require private configuration. Read [LAN onboarding and initial trust](docs/pairing.md) before connecting: initial HTTP provisioning is unauthenticated and exposes credentials on the network. Provision only on a trusted network and establish the TLS fingerprint explicitly.
+Pairing and status access require private configuration. Read [LAN onboarding and initial trust](docs/pairing.md) before connecting: initial HTTP provisioning is unauthenticated and exposes credentials on the network. Provision only on a trusted network and establish the TLS fingerprint explicitly. `printer discover` locates LAN-enabled printers on the same subnet via strictly read-only SSDP multicast (`ac:3dprinter:fdm`) without auto-pairing, verifying firmware, or touching profiles/state; across routed VLANs, VPNs, or firewalls blocking UDP `1900`, pair directly with explicit `--host <IPv4>`.
 
 Every new pairing requires `--name`; unnamed access and automatic root-config
 fallback are unsupported. A fresh inventory is empty with a null default.

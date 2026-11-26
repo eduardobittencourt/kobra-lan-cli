@@ -100,3 +100,55 @@ cleanup with no committed flag, and an unreadable ownership check. The saved
 config remains loadable with complete private PEMs after a committed operation;
 unpublished material is removed when absence can be established. Abrupt process
 termination can still leave private staging, as documented in the pairing guide.
+
+## Read-only SSDP discovery boundary
+
+`kobra-lan printer discover` sends bounded UDP multicast SSDP `M-SEARCH` probes
+(`239.255.255.250:1900`, `ST: ac:3dprinter:fdm`) and listens for unicast replies
+on the local network segment. SSDP is unauthenticated UDP: any host on the
+broadcast domain can emit forged advertisements.
+
+`kobra_lan/discovery.py` constrains that attack surface as follows:
+
+- Strictly read-only: discovery never connects to HTTP port `18910` or MQTT
+  port `9883`, never auto-pairs, never reads or mutates profiles or state, and
+  rejects global `--config` and `--printer` selectors with exit `2` before
+  opening sockets.
+- Sender-IP pinning and strict URL validation: replies are accepted only when
+  they have status `HTTP/1.x 200`, header `ST: ac:3dprinter:fdm`, query
+  `ctrlType=lan`, and a `LOCATION` URL using scheme `http`, port `18910`, path
+  `/info`, no userinfo/fragment/control characters, and BOTH the `LOCATION`
+  host and the `ip` query parameter matching the UDP packet's source IPv4
+  address. Spoofed cross-host, cloud-only, wrong-port, wrong-ST, or malformed
+  datagrams are silently ignored.
+- Sanitization and redaction: `modelName` and `deviceName` pass through
+  `safe_text` with a length cap; `USN` MACs are normalized via strict regex;
+  raw `LOCATION` URLs and cloud binding codes (`cn`) are never returned in text
+  or JSON output.
+- Explicit untrusted disclosures: every result marks
+  `unauthenticated_lan_advertisement: true` / `unauthenticated: true` and
+  `firmware_verified: false`, and never initiates pairing automatically.
+  Pairing still requires explicit
+  `kobra-lan printer pair --name NAME --host IPv4` on a trusted network, where
+  the initial unauthenticated HTTP exchange requests the provisioned client
+  certificate for TLS observation and explicit TLS fingerprint consent precedes
+  MQTT username/password authentication and config publication.
+
+Evidence: `ParseSSDPResponseTests` and `DiscoverPrintersTests` in
+`tests/test_discovery.py` and `PrinterDiscoverCliTests` in `tests/test_cli.py`.
+
+## Credential lifecycle and revocation boundary (2026-11-26)
+
+Static inspection of `AnycubicSlicerNext 1:2.0.0.6` (`libWorkbench.so`,
+`/usr/bin/AnycubicSlicerNext`) confirmed that while the decrypted `/ctrl`
+credential bundle schema includes an `accountDeleteUrl` field, stock LAN
+clients never invoke it on printer removal and instead perform local-only
+deletion. `kobra-lan` therefore does not invoke unverified `accountDeleteUrl`
+endpoints, keeps `device_credentials_revoked: false` on `printer remove`,
+distinguishes firmware client-limit rejection (`code: 19002`) in
+`kobra_lan/provisioning.py:exchange()` without echoing raw payloads, and
+documents panel-side LAN-mode toggle/reset plus non-destructive profile
+replacement under a new unused name.
+
+Evidence: `HTTPTests.test_client_limit_code_19002_diagnostic` in
+`tests/test_provisioning.py`.

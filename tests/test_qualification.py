@@ -223,6 +223,14 @@ class QualificationRegistryTests(unittest.TestCase):
         self.assertFalse(q.is_camera_hardware_validated(20031, "2.0.2.2"))
         self.assertFalse(q.is_camera_hardware_validated(20030, None))
         self.assertFalse(q.is_camera_hardware_validated(True, "2.0.2.2"))
+
+        self.assertTrue(q.KOBRA_X.discovery_hardware_validated)
+        self.assertTrue(q.is_discovery_hardware_validated(20030, "2.0.2.2"))
+        self.assertFalse(q.is_discovery_hardware_validated(20030, "2.0.2.3"))
+        self.assertFalse(q.is_discovery_hardware_validated(20031, "2.0.2.2"))
+        self.assertFalse(q.is_discovery_hardware_validated(20030, None))
+        self.assertFalse(q.is_discovery_hardware_validated(True, "2.0.2.2"))
+
         default_profile = q.PrinterQualification(
             model_id=99999,
             model_name="Synthetic",
@@ -236,6 +244,7 @@ class QualificationRegistryTests(unittest.TestCase):
             delete_hardware_validated=False,
         )
         self.assertFalse(default_profile.camera_hardware_validated)
+        self.assertFalse(default_profile.discovery_hardware_validated)
 
 
 if __name__ == "__main__":

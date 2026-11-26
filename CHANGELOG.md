@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+- Add strictly read-only same-subnet LAN SSDP discovery
+  (`kobra-lan printer discover [--timeout SECONDS] [--interface IPv4]`) over
+  `239.255.255.250:1900` (`ST: ac:3dprinter:fdm`) with strict sender-IP and
+  `LOCATION` validation, sanitization, omission of raw `LOCATION` URLs and
+  cloud binding codes (`cn`), explicit `unauthenticated` /
+  `firmware_verified: false` and multicast/VLAN limitation disclosures, global
+  `--config`/`--printer` rejection (exit `2`), socket failure mapping
+  (exit `3`), interrupt handling (exit `130`), offline `bash`/`zsh`/`fish`
+  completions, and centralized `hardware_discovery_validated: true` on Kobra X
+  model `20030` / firmware `2.0.2.2` (live-verified read-only on 2026-11-26).
+- Distinguish firmware client-limit rejection (`code: 19002`) during
+  `printer pair` provisioning with a safe diagnostic directing operators to
+  toggle LAN mode on the printer panel rather than repeating blind retries, and
+  document the 2026-11-26 fresh-install onboarding walkthrough, unverified
+  factory-reset boundary, credential-revocation findings (`accountDeleteUrl`
+  unused by stock LAN clients), and non-destructive profile replacement
+  workflow in `docs/pairing.md` and `docs/pairing-security-review.md`
+  (completing Milestone 1 exit evidence).
 - Promote `hardware_delete_validated` to `true` for qualified Kobra X model
   20030 / firmware 2.0.2.2 (remaining `false` for unqualified models and
   firmwares) after live 2026-11-26 verification of `files delete --execute`

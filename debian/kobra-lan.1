@@ -29,6 +29,13 @@ Select durable state (default ~/.local/share/kobra-lan/uploads).
 Emit one schema_version: 1 operational envelope; place before command.
 Help, version and completion remain native text.
 .SH COMMANDS
+.B printer discover [--timeout SECONDS] [--interface IPv4]
+performs strictly read-only same-subnet SSDP multicast discovery
+(239.255.255.250:1900, ST: ac:3dprinter:fdm) without contacting port 18910 or
+9883, auto-pairing, or writing profiles/state. Timeout accepts 1 to 15 seconds
+(default 5). Advertisements are unauthenticated and do not verify firmware;
+pair explicitly with printer pair --name NAME --host IPv4 and verify the TLS
+fingerprint. Rejects global --config and --printer with exit 2.
 .B printer pair|list|info|use|remove
 manages private access locally and establishes explicit trust.
 .B status
@@ -150,8 +157,8 @@ revoke access on the printer. Never remove operational attempt markers.
 .SH EXIT STATUS
 0 indicates success (or downstream pipe closure on camera pipe); 2 indicates
 argument/protocol/validation failure; 3 indicates configuration/dependency/network
-failure. Interrupting print watch, camera pipe, or an in-flight lifecycle control
-or stored-file deletion returns 130.
+failure. Interrupting printer discover, print watch, camera pipe, or an in-flight
+lifecycle control or stored-file deletion returns 130.
 Exit 0 for print watch means a result was returned, which can include an
 unknown print outcome. Operations are never retried automatically.
 .SH FILES
