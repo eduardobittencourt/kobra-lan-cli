@@ -266,16 +266,16 @@ Breaking 0.x changes: repeatable `--slot-map PAINT_INDEX=SLOT` replaces
 `selected_slot` on `print plan`, `print start`, and `jobs info`, and
 `jobs info` reports `material_type` per `slot_mapping` entry. Both root starts
 and reprints now use canonical attempt-keyed local records under
-`starts/<device>/<attempt_id>.*`, and mutating device commands share a single
-`.device.lock` lease (stopping creation of `.upload.lock` and `.start.lock`;
-stop all 0.5.0 / older processes for a device before running 0.6.0 mutating
-commands because mixed-version binaries do not share `.device.lock`).
+`starts/<device>/<attempt_id>.*`, and mutating device commands sharing a
+`--state-dir` hold a single per-device `.device.lock` lease (stopping creation
+of `.upload.lock` and `.start.lock`; different `--state-dir` paths, other
+clients, and 0.5.0 / older binaries do not share `.device.lock`, so stop all
+0.5.0 / older processes for a device before running 0.6.0 mutating commands).
 Existing upload receipts/markers, watch observations, and canonical
 attempt-keyed start receipts and reprint chains remain readable in place without
-migration; preexisting legacy file-keyed (`<file_sha256>.*`) or pre-`attempt_id`
-start files remain untouched and read-only on disk, surface as `incomplete` in
-`jobs list|info`, and refuse `print start --execute` for that file rather than
-bypassing them.
+migration; preexisting legacy file-keyed (`<file_sha256>.*`) start files remain
+untouched and read-only on disk, surface as `incomplete` in `jobs list|info`,
+and refuse `print start --execute` for that file rather than bypassing them.
 
 Runtime dependencies remain unchanged (`python3 >= 3.11` and
 `python3-cryptography >= 41` / `cryptography>=41`). The Debian package adds

@@ -23,16 +23,19 @@
   `attempt_id` (`<attempt_id>.attempt` and `<attempt_id>.json`), dropping legacy
   file-keyed (`<file_sha256>.*`) and pre-`attempt_id` start parsing from
   `print plan`, `print start`, `jobs list|info`, and `files delete`. Preexisting
-  legacy start files on disk remain untouched and read-only, surface as
-  `incomplete` (`unreadable-<storage-key>`) in `jobs list|info`, and cause
-  `print start --execute` for that file to refuse rather than bypass them.
-- Breaking: unify per-device mutation concurrency locking on a single
-  `.device.lock` lease across `files upload`, `print start`,
-  `print pause|resume|cancel`, and `files delete`; stop creating `.upload.lock`
-  and `.start.lock` and remove `upload_lock()`. Because 0.5.0 (and earlier
-  pre-0.6.0) binaries do not hold `.device.lock`, mixed-version processes for
-  the same device do not exclude each other — stop all 0.5.0 / older processes
-  for a device before running any 0.6.0 mutating command against it.
+  legacy file-keyed (`<file_sha256>.*`) start files on disk remain untouched and
+  read-only, surface as `incomplete` (`unreadable-<storage-key>`) in
+  `jobs list|info`, and cause `print start --execute` for that file to refuse
+  rather than bypass them.
+- Breaking: unify per-device mutation concurrency locking within a shared
+  `--state-dir` on a single `.device.lock` lease across `files upload`,
+  `print start`, `print pause|resume|cancel`, and `files delete`; stop creating
+  `.upload.lock` and `.start.lock` and remove `upload_lock()`. The lease
+  coordinates only 0.6.0+ processes sharing the same `--state-dir` (processes
+  using different `--state-dir` paths, other clients, and 0.5.0 / pre-0.6.0
+  binaries do not share `.device.lock` and do not exclude each other — stop all
+  0.5.0 / older processes for a device before running any 0.6.0 mutating command
+  against it).
 - Add read-only `print watch` for an active job, saving sanitized local
   observations under `--state-dir` and reporting `unknown` when firmware
   telemetry cannot establish terminal outcomes (Kobra X firmware 2.0.2.2
