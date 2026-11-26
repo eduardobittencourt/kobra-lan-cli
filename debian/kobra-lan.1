@@ -64,10 +64,9 @@ downstream pipe closure exits 0 and foreground interruption exits 130.
 .B gcode inspect FILE [--name NAME]
 inspects local immutable bytes without configuration or network, reporting
 hashes, layer/slicer metadata, and filament/color metadata (paint_info entries,
-T<n> tool indices, optional weights, multicolor, and
-single_filament_start_compatible). Only recorded single-filament and 4-color
-contiguous 1:1 PLA High Speed combinations are hardware-validated; see
-compatibility.md.
+T<n> tool indices, optional weights, and multicolor). Only recorded
+single-filament and 4-color contiguous 1:1 PLA High Speed combinations are
+hardware-validated; see compatibility.md.
 .B files upload FILE [--name NAME] --sha256 HASH --execute
 uploads inspected bytes once; never starts a print and has no implicit dry run.
 .B files delete NAME --execute
@@ -116,12 +115,13 @@ automatic retry; inspect status before taking further action.
 and
 .B jobs info RECORD_ID
 inspect local device-scoped job history offline without network access or state
-writes. They reconstruct legacy and current start receipts/markers, correlate
-upload provenance, surface incomplete or unreadable records (using
-unreadable-<storage-key> when no attempt_id can be parsed), and list saved
-unattributed watch observations. Limit accepts 1 to 500 (default 50). Firmware
-2.0.2.2 provides no direct LAN history; unwatched prints started by other
-clients are absent and start receipts never prove completion.
+writes. They reconstruct canonical attempt-keyed start receipts/markers,
+correlate upload provenance, surface non-canonical, incomplete, or unreadable
+records read-only (using unreadable-<storage-key> when no canonical attempt_id
+matches the storage key), and list saved unattributed watch observations. Limit
+accepts 1 to 500 (default 50). Firmware 2.0.2.2 provides no direct LAN history;
+unwatched prints started by other clients are absent and start receipts never
+prove completion.
 .B completion bash|zsh|fish
 generates offline shell scripts without configuration or device queries.
 See usage.md for user-level installation; startup files are not modified.

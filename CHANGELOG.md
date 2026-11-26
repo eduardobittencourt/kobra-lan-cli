@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- Breaking: unify `print start` local state records under `starts/<device>/` so
+  both root starts and reprints are stored and looked up by their deterministic
+  `attempt_id` (`<attempt_id>.attempt` and `<attempt_id>.json`), and drop legacy
+  file-keyed (`<file_sha256>.*`) and pre-`attempt_id` start parsing from
+  `print plan`, `print start`, `jobs list|info`, and `files delete`. Preexisting
+  legacy files on disk remain untouched and read-only, surfaced by `jobs list`
+  and `jobs info` as `incomplete` (`unreadable-<storage-key>`).
+- Breaking: remove `record_format` from `jobs info` output.
+- Breaking: unify per-device mutation concurrency locking on a single
+  `.device.lock` lease across `files upload`, `print start`,
+  `print pause|resume|cancel`, and `files delete`; stop creating `.upload.lock`
+  and `.start.lock` and remove `upload_lock()`.
+- Breaking: remove `single_filament_start_compatible` from `gcode inspect`
+  output.
+
 ## 0.6.0
 
 - Experimental release for testing and feedback; the CLI and JSON automation

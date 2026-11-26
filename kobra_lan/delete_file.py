@@ -58,7 +58,7 @@ def _matching_start_receipt(key, record, device_prefix, filename):
     if previous is not None and not valid_attempt_id(previous):
         return False
     identity = attempt_id(device, file_sha, previous)
-    if key != (file_sha if previous is None else identity) or record.get("attempt_id", identity) != identity:
+    if key != identity or record.get("attempt_id") != identity:
         return False
     try:
         return record.get("plan_sha256") == review_digest(record, previous)
@@ -107,7 +107,7 @@ def delete_file(config, filename, state_dir):
     device_dir = Path(state_dir) / device_prefix
     result = None
     try:
-        with device_lock(device_dir, "delete") as device_fd:
+        with device_lock(device_dir) as device_fd:
             ensure_directory_bound(device_dir, device_fd, "delete")
             local_state = summarize_local_state(device_fd, state_dir, device_prefix, filename)
             with MQTT(config) as client:

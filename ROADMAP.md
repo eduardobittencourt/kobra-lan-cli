@@ -67,8 +67,8 @@ It preserves verified progress, saves a sanitized local observation under
 cannot identify the same attempt. See
 [watch outcomes and evidence](docs/usage.md#watch-an-active-print).
 The source CLI also includes reviewed intentional reprints (`--reprint-from`)
-with durable local per-attempt identities while preserving legacy file-keyed
-markers and receipts, offline read-only `jobs list|info` over local start
+with canonical attempt-keyed start markers and receipts (`<attempt_id>.*`),
+offline read-only `jobs list|info` over local start
 receipts/markers, upload provenance, and saved watch observations with explicit
 local-only coverage, unattributed other-client observations, and incomplete
 record visibility, and experimental guarded lifecycle controls
@@ -102,14 +102,15 @@ The source CLI also includes read-only onboard four-slot filament inventory
 (`slots list`) over one pinned MQTT session without requiring idle state or
 writing local state, plus multicolor-aware offline `gcode inspect` reporting
 validated `; paint_info =` filament/color entries, `T<n>` tool indices,
-optional filament weights, `multicolor`, and `single_filament_start_compatible`
-while keeping `files upload` byte-preserving. The multicolor workflow
+optional filament weights, and `multicolor` while keeping `files upload`
+byte-preserving. The multicolor workflow
 uses `gcode inspect`, `slots list`, `files upload`, `print plan --slot-map`,
 and `print start --slot-map`. The 0.x interface replaces `--slot` with repeatable
 `--slot-map PAINT_INDEX=SLOT` and exposes `slot_mapping` in place of
 `selected_slot` on plan, start and job details. On `jobs info`, material is
-reported per entry in `slot_mapping`. Existing receipts and reprint chains are
-readable in place. A live end-to-end 4-color CLI print on 2026-11-24
+reported per entry in `slot_mapping`. Canonical attempt-keyed start receipts
+and reprint chains are readable in place (preexisting pre-v1 file-keyed files
+remain untouched and surface read-only as `incomplete`). A live end-to-end 4-color CLI print on 2026-11-24
 (`--slot-map 0=1 --slot-map 1=2 --slot-map 2=3 --slot-map 3=4`, `PLA High Speed`,
 `auto-leveling on`, vibration/flow off, `AnycubicSlicerNext 2.0.0.6`) completed
 with operator-confirmed physical quality across all four slots (including slot 3

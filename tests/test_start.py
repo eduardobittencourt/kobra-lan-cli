@@ -403,22 +403,70 @@ class StartTests(unittest.TestCase):
         self.assertEqual(Client.starts, 0)
         self.assertFalse((self.root/'state'/'starts').exists())
 
-    def legacy(self):
+    def canonical_root(self):
         plan = self.plan()
-        plan.pop("slot_mapping")
-        plan.pop("multicolor")
-        plan["selected_slot"] = 1
+        identity = attempt_id(plan["device_digest"], plan["file_sha256"], None)
         directory = self.root/'state'/'starts'/plan['device_digest'][:16]
         directory.mkdir(parents=True, mode=0o700)
-        marker = directory/(plan['file_sha256'] + '.attempt')
+        marker = directory/(identity + '.attempt')
         receipt = marker.with_suffix('.json')
-        atomic_json(marker, {'sha256': plan['file_sha256'], 'plan_sha256': plan['plan_sha256']})
-        atomic_json(receipt, {**plan, 'dry_run': False, 'status': 'start_observed_active',
-                             'after': {'state': 'printing'}, 'project': {'filename': 'test.gcode'}})
+        atomic_json(marker, {
+            'attempt_id': identity,
+            'device_digest': plan['device_digest'],
+            'plan_sha256': plan['plan_sha256'],
+            'sha256': plan['file_sha256'],
+            'previous_attempt_id': None,
+        })
+        atomic_json(receipt, {
+            **plan, 'attempt_id': identity, 'dry_run': False, 'status': 'start_observed_active',
+            'after': {'state': 'printing'}, 'project': {'filename': 'test.gcode'},
+        })
         return marker, receipt
 
-    def test_direct_reprint_accepts_legacy_receipt_in_place(self):
-        marker, receipt = self.legacy()
+    def legacy_file_keyed(self, *, with_attempt_id=False):
+        plan = self.plan()
+        directory = self.root/'state'/'starts'/plan['device_digest'][:16]
+        directory.mkdir(parents=True, mode=0o700, exist_ok=True)
+        marker = directory/(plan['file_sha256'] + '.attempt')
+        receipt = marker.with_suffix('.json')
+        if with_attempt_id:
+            identity = attempt_id(plan['device_digest'], plan['file_sha256'], None)
+            atomic_json(marker, {
+                'attempt_id': identity, 'device_digest': plan['device_digest'],
+                'plan_sha256': plan['plan_sha256'], 'sha256': plan['file_sha256'],
+                'previous_attempt_id': None,
+            })
+            atomic_json(receipt, {
+                **plan, 'attempt_id': identity, 'dry_run': False, 'status': 'start_observed_active',
+                'after': {'state': 'printing'}, 'project': {'filename': 'test.gcode'},
+            })
+        else:
+            atomic_json(marker, {'sha256': plan['file_sha256'], 'plan_sha256': plan['plan_sha256']})
+            atomic_json(receipt, {
+                **plan, 'dry_run': False, 'status': 'start_observed_active',
+                'after': {'state': 'printing'}, 'project': {'filename': 'test.gcode'},
+            })
+        return marker, receipt
+
+    def test_unrecognized_legacy_file_keyed_start_files_remain_untouched_and_ineligible(self):
+        self.receipt()
+        plan = self.plan()
+        root_identity = attempt_id(plan['device_digest'], plan['file_sha256'], None)
+        for with_attempt_id in (False, True):
+            with self.subTest(with_attempt_id=with_attempt_id):
+                marker, receipt = self.legacy_file_keyed(with_attempt_id=with_attempt_id)
+                before = [(p.read_bytes(), stat.S_IMODE(p.stat().st_mode)) for p in (marker, receipt)]
+                code, planned = self.invoke_route('plan')
+                self.assertEqual(code, 0)
+                self.assertNotIn('attempt_id', planned['result'])
+                self.assertNotIn('start_status', planned['result'])
+                self.assertEqual(self.invoke_route('plan', previous=root_identity)[0], 2)
+                self.assertEqual(self.invoke_route('start', digest=plan['plan_sha256'], previous=root_identity)[0], 2)
+                self.assertEqual([(p.read_bytes(), stat.S_IMODE(p.stat().st_mode)) for p in (marker, receipt)], before)
+                self.assertEqual(Client.starts, 0)
+
+    def test_direct_reprint_accepts_canonical_root_receipt_in_place(self):
+        marker, receipt = self.canonical_root()
         before = marker.read_bytes(), receipt.read_bytes()
         self.receipt()
         args = (config(), self.file, "test.gcode", {0: 1}, True, False, False, self.root / "state")
@@ -430,11 +478,12 @@ class StartTests(unittest.TestCase):
         self.assertEqual(original["plan_sha256"], LEGACY_PLAN_SHA256)
         self.assertEqual(result["previous_attempt_id"], previous)
         self.assertEqual(result["status"], "start_observed_active")
+        self.assertEqual(Path(result["receipt_path"]).name, result["attempt_id"] + ".json")
         self.assertEqual(before, (marker.read_bytes(), receipt.read_bytes()))
         self.assertEqual(Client.starts, 1)
 
-    def test_legacy_plan_preserves_evidence_digest_and_identity_across_profiles(self):
-        marker, receipt = self.legacy()
+    def test_canonical_root_plan_preserves_evidence_digest_and_identity_across_profiles(self):
+        marker, receipt = self.canonical_root()
         before = [(path.read_bytes(), stat.S_IMODE(path.stat().st_mode)) for path in (marker, receipt)]
         state = self.root/'state'
         custom = self.root/'custom'
@@ -452,20 +501,25 @@ class StartTests(unittest.TestCase):
             self.assertEqual(code, 0)
             self.assertEqual(reprint['result']['previous_attempt_id'], identity)
             self.assertNotEqual(reprint['result']['plan_sha256'], plan['plan_sha256'])
-        state_paths = {path.relative_to(custom) for path in custom.rglob('*') if path.is_file()}
+            # Ordinary start through another profile is blocked by canonical root attempt.
+            code, blocked = self.invoke_route('start', digest=plan['plan_sha256'], selected=profile, state_dir=custom)
+            self.assertEqual(code, 2)
+            self.assertIn('Start already attempted', blocked['error']['message'])
+        state_paths = {path.relative_to(custom) for path in custom.rglob('*')
+                       if path.is_file() and path.name != '.device.lock'}
         self.assertEqual(state_paths, {marker.relative_to(state), receipt.relative_to(state)})
         state_paths = [custom/path.relative_to(state) for path in (marker, receipt)]
         self.assertEqual(before, [(path.read_bytes(), stat.S_IMODE(path.stat().st_mode)) for path in state_paths])
         self.assertFalse(state.exists())
 
-    def test_incomplete_or_inconsistent_legacy_evidence_blocks_all_starts(self):
-        marker, receipt = self.legacy()
+    def test_incomplete_or_inconsistent_canonical_evidence_blocks_all_starts(self):
+        marker, receipt = self.canonical_root()
         marker_data, receipt_data = json.loads(marker.read_text()), json.loads(receipt.read_text())
         identity = self.invoke_route('plan')[1]['result']['attempt_id']
         digest = self.plan()['plan_sha256']
         self.receipt()
         for variant in ('missing_marker', 'missing_receipt', 'broken_marker', 'broken_receipt',
-                        'wrong_review', 'wrong_device', 'wrong_observation', 'ack_only'):
+                        'wrong_review', 'wrong_device', 'wrong_observation', 'ack_only', 'missing_attempt_id'):
             with self.subTest(variant=variant):
                 atomic_json(marker, marker_data)
                 atomic_json(receipt, receipt_data)
@@ -483,6 +537,10 @@ class StartTests(unittest.TestCase):
                     atomic_json(receipt, {**receipt_data, 'device_digest': '0'*64})
                 elif variant == 'wrong_observation':
                     atomic_json(receipt, {**receipt_data, 'project': {'filename': 'elsewhere.gcode'}})
+                elif variant == 'missing_attempt_id':
+                    atomic_json(marker, {'sha256': marker_data['sha256'], 'plan_sha256': marker_data['plan_sha256']})
+                    without_id = {k: v for k, v in receipt_data.items() if k != 'attempt_id'}
+                    atomic_json(receipt, without_id)
                 else:
                     atomic_json(receipt, {**receipt_data, 'status': 'start_acknowledged_not_confirmed'})
                 self.assertEqual(self.invoke_route('plan', previous=identity)[0], 2)
@@ -491,7 +549,7 @@ class StartTests(unittest.TestCase):
         self.assertEqual(Client.starts, 0)
 
     def test_wrong_device_or_file_cannot_reprint(self):
-        self.legacy()
+        self.canonical_root()
         identity = self.invoke_route('plan')[1]['result']['attempt_id']
         other = config()
         other.printer_id = 'other'
@@ -507,6 +565,12 @@ class StartTests(unittest.TestCase):
         self.assertEqual(code, 0)
         first = first['result']
         previous = first['attempt_id']
+        self.assertEqual(Path(first['receipt_path']).name, previous + '.json')
+        self.assertNotIn('previous_attempt_id', first)
+        starts_dir = Path(first['receipt_path']).parent
+        self.assertTrue((starts_dir / (previous + '.attempt')).exists())
+        self.assertFalse((starts_dir / (first['file_sha256'] + '.attempt')).exists())
+        self.assertFalse((starts_dir / (first['file_sha256'] + '.json')).exists())
         code, plan = self.invoke_route('plan', previous=previous)
         self.assertEqual(code, 0)
         reprint_digest = plan['result']['plan_sha256']
@@ -515,6 +579,8 @@ class StartTests(unittest.TestCase):
         code, second = self.invoke_route('start', digest=reprint_digest, previous=previous, client=Active)
         self.assertEqual(code, 0)
         second = second['result']
+        self.assertEqual(Path(second['receipt_path']).name, second['attempt_id'] + '.json')
+        self.assertTrue((starts_dir / (second['attempt_id'] + '.attempt')).exists())
         self.assertEqual(second['previous_attempt_id'], previous)
         self.assertNotEqual(second['attempt_id'], previous)
         self.assertEqual(second['status'], 'start_observed_active')
@@ -526,16 +592,18 @@ class StartTests(unittest.TestCase):
         self.assertIn('Attempt id: ' + second['attempt_id'], text)
         self.assertEqual(Client.starts, 2)
         self.assertEqual(uploaded.read_bytes(), provenance)
+        self.assertFalse(list((self.root / 'state').rglob('.start.lock')))
+        self.assertFalse(list((self.root / 'state').rglob('.upload.lock')))
 
-    def legacy_reprint(self):
+    def canonical_reprint(self):
         self.receipt()
-        marker, receipt = self.legacy()
+        marker, receipt = self.canonical_root()
         previous = self.invoke_route('plan')[1]['result']['attempt_id']
         digest = self.invoke_route('plan', previous=previous)[1]['result']['plan_sha256']
         return marker, receipt, previous, digest
 
     def test_competing_review_for_another_profile_is_refused_before_access(self):
-        _, _, previous, digest = self.legacy_reprint()
+        _, _, previous, digest = self.canonical_reprint()
         other = self.invoke_route('plan', previous=previous, slot=2)[1]['result']['plan_sha256']
         test = self
         never_connect = Mock(side_effect=AssertionError('printer access must follow acquisition of the lease'))
@@ -545,16 +613,18 @@ class StartTests(unittest.TestCase):
                 code, report = test.invoke_route('start', digest=other, previous=previous, slot=2,
                                                  selected='other', client=never_connect)
                 test.assertEqual(code, 2)
-                test.assertIn('Another start', report['error']['message'])
+                test.assertIn('Another device operation is active', report['error']['message'])
                 return super().start_once(payload)
 
         self.assertEqual(self.invoke_route('start', digest=digest, previous=previous,
                                            selected='bench', client=Competing)[0], 0)
         never_connect.assert_not_called()
         self.assertEqual(Client.starts, 1)
+        self.assertFalse(list((self.root / 'state').rglob('.start.lock')))
+        self.assertFalse(list((self.root / 'state').rglob('.upload.lock')))
 
     def test_unfinished_successor_is_not_replayed_after_interruption(self):
-        marker, receipt, previous, digest = self.legacy_reprint()
+        marker, receipt, previous, digest = self.canonical_reprint()
         original = marker.read_bytes(), receipt.read_bytes()
         with patch('kobra_lan.start.atomic_json', side_effect=KeyboardInterrupt):
             with self.assertRaises(KeyboardInterrupt):
@@ -571,7 +641,7 @@ class StartTests(unittest.TestCase):
         self.assertEqual(Client.starts, 0)
 
     def test_uncertain_reprint_exposes_partial_result_but_never_replays(self):
-        _, _, previous, digest = self.legacy_reprint()
+        _, _, previous, digest = self.canonical_reprint()
         Client.fail_start = True
         code, report = self.invoke_route('start', digest=digest, previous=previous)
         self.assertEqual(code, 2)
@@ -585,7 +655,7 @@ class StartTests(unittest.TestCase):
         self.assertEqual(Client.starts, 1)
 
     def test_state_path_replacement_before_or_after_reservation_never_publishes(self):
-        marker, _, previous, digest = self.legacy_reprint()
+        marker, _, previous, digest = self.canonical_reprint()
         directory = marker.parent
         detached = directory.with_name('detached')
 
@@ -622,7 +692,7 @@ class StartTests(unittest.TestCase):
         self.assertEqual(Client.starts, 0)
 
     def test_reprint_rechecks_idle_before_reserving_successor(self):
-        marker, _, previous, digest = self.legacy_reprint()
+        marker, _, previous, digest = self.canonical_reprint()
 
         class BusyOnFinalCheck(Active):
             info_calls = 0

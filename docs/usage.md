@@ -51,7 +51,7 @@ from a filename or network acknowledgement.
 | `camera pipe` | Raw binary HTTP-FLV bytes on stdout (`--json` rejected with exit 2); stderr-only diagnostics; exits 0 on EOF, limit, or broken pipe, and 130 on interrupt |
 | `files list` | `records` array of filename/size/directory metadata |
 | `files info` | `filename` and available safe file details |
-| `gcode inspect` | `sha256`, `md5`, `size_bytes`, `remote_filename`, nullable `layer_count`, `slicer_version`, filament/color metadata (`paint_info_present`, ordered `filaments`, `filament_count`, `multicolor`, `tool_indices`, nullable `total_filament_used_g`, `single_filament_start_compatible`), operation/qualification flags |
+| `gcode inspect` | `sha256`, `md5`, `size_bytes`, `remote_filename`, nullable `layer_count`, `slicer_version`, filament/color metadata (`paint_info_present`, ordered `filaments`, `filament_count`, `multicolor`, `tool_indices`, nullable `total_filament_used_g`), operation/qualification flags |
 | `files upload` | Manifest, verification/status flags, timestamp and `receipt_path` |
 | `files delete` | `filename`, `device_digest`, model/firmware, `status`, `dry_run: false`, `experimental: true`, `hardware_delete_validated: false`, `local_state`, sanitized `before`/`before_listing`, `ack`/`report`, and `after`/`after_listing` when available |
 | `print plan` | `file_sha256`, `device_digest`, model/firmware, canonical `payload`, `plan_sha256`, `slot_mapping`, `multicolor`, qualification flags, latest local `attempt_id` and `start_status` when available, and `previous_attempt_id` for a reprint review |
@@ -65,7 +65,9 @@ This 0.x interface uses `--slot-map 0=N` in place of `--slot N` for a
 single filament with paint index 0. Replace reads of `selected_slot` on
 `print plan`, `print start` and `jobs info` with reads of `slot_mapping`.
 On `jobs info`, read `material_type` per entry in `slot_mapping`. The
-version-1 envelope and existing on-disk start records remain compatible.
+version-1 envelope remains compatible; start records under `starts/<device>/`
+use canonical attempt-keyed storage (`<attempt_id>.attempt` and
+`<attempt_id>.json`) without `record_format`.
 
 Both formats preserve full review hashes, experimental qualification and uncertain
 outcomes. Upload metadata confirmation does not prove remote byte equality;
@@ -98,12 +100,10 @@ or conflicting repeated headers with exit 2), extracts sorted unique `T<n>`
 tool indices and optional `; filament used [g]` / `; total filament used [g]`
 summaries, and reports `paint_info_present`, ordered `filaments` (supporting
 non-contiguous `paint_index` values and mixed materials), `filament_count`,
-`multicolor`, `tool_indices`, `total_filament_used_g`, and
-`single_filament_start_compatible`. Minimal Kobra X G-codes omitting
-`; paint_info =` remain inspectable and uploadable via `files upload`.
-For start planning, use the declared paint indices and tool indices. The
-`single_filament_start_compatible` field describes the original single-filament
-paint-index-0 case.
+`multicolor`, `tool_indices`, and `total_filament_used_g`. Minimal Kobra X
+G-codes omitting `; paint_info =` remain inspectable and uploadable via
+`files upload`. For start planning, use the declared paint indices and tool
+indices.
 
 ## Inspect and capture camera video
 
@@ -467,10 +467,11 @@ the same `printer_id` and `--state-dir` see identical local history.
   `terminal_outcomes_verified: false`). Prints started by other clients appear
   only when observed with `print watch` and are always marked
   `client_attribution: "unattributed"`.
-- **Start attempts and reprint chains:** Both legacy file-keyed and current
-  attempt-keyed start records under `<state-dir>/starts/<device-prefix>/` are
-  reconstructed in place without modifying bytes or permissions, deriving the
-  same deterministic `attempt_id` used by `print plan` and `--reprint-from`.
+- **Start attempts and reprint chains:** Canonical attempt-keyed start records
+  (`<attempt_id>.attempt` and `<attempt_id>.json`, where `storage_key == attempt_id`)
+  for both root starts and reprints under `<state-dir>/starts/<device-prefix>/` are
+  reconstructed in place without modifying bytes or permissions, matching the
+  deterministic `attempt_id` used by `print plan` and `--reprint-from`.
   `jobs info <attempt-id>` reports `previous_attempt_id`/`next_attempt_id`,
   plan/file hashes, preparation settings, `start_status`,
   `reprint_eligibility` (`eligible_for_plan`, `superseded`,
@@ -485,13 +486,14 @@ the same `printer_id` and `--state-dir` see identical local history.
   `ams_index`, `material_type`, `gcode_color_hex`, and `slot_color_hex`.
   The mapping is `null` when unavailable or unreadable. `jobs list` keeps
   its compact summary.
-- **Incomplete and unreadable records:** Marker-only reservations, receipt-only
-  files, mismatched pairs, unverified active evidence, orphan successors, and
-  unreadable/corrupt/non-private/symlinked files remain visible with
-  `completeness: "incomplete"`, safe issue codes, and
+- **Incomplete and unreadable records:** Non-canonical (including preexisting
+  pre-v1 file-keyed) files, marker-only reservations, receipt-only files,
+  mismatched pairs, unverified active evidence, orphan successors, and
+  unreadable/corrupt/non-private/symlinked files remain untouched and visible
+  with `completeness: "incomplete"`, safe issue codes, and
   `reprint_eligibility: "blocked_incomplete"`. When neither marker nor receipt
-  establishes a valid `attempt_id` for the selected device, the record is
-  exposed as `unreadable-<storage-key>`.
+  establishes a valid canonical `attempt_id` matching `storage_key` for the
+  selected device, the record is exposed as `unreadable-<storage-key>`.
 - **Record IDs and safety:** `jobs list` supports `--kind all|start|observation`
   (default `all`) and `--limit` from `1` to `500` (default `50`), ordered newest
   first with summary counts (`total_count`, `returned_count`,
@@ -508,10 +510,10 @@ the same `printer_id` and `--state-dir` see identical local history.
 
 - Upload is currently qualified only for model 20030 / firmware 2.0.2.2, Next-generated G-code, and the Kobra X profile. It requires an idle printer with no active project.
 - Hashing and multipart construction use the same bytes in memory. No G-code translation, `print=true` flag, or HTTP redirects.
-- Exclusive reservations are persisted with fsync in `~/.local/share/kobra-lan/uploads/`. Upload and first start use separate device/file markers. A reprint adds an attempt-keyed successor without modifying the original. Each predecessor can be consumed at most once across processes and restarts.
-- Mutating device commands (`files upload`, `files delete`, `print start`, and `print pause|resume|cancel`) sharing a device state directory hold a private shared per-device lease (`.device.lock`, alongside `.upload.lock`/`.start.lock` for upload and start compatibility) from before printer access until post-action observation ends. A concurrent contender fails before printer access, including for different hashes, operations, or profile names. After an ambiguous response, inspect status/files/receipts and preserve all markers. Different state directories, older binaries and other clients do not share this lease.
+- Exclusive reservations are persisted with fsync in `~/.local/share/kobra-lan/uploads/`. Upload receipts and markers are keyed by file SHA-256 under `<device-prefix>/`, while every start attempt (both root starts and reprints) is keyed by its deterministic `attempt_id` under `starts/<device-prefix>/<attempt_id>.attempt` and `<attempt_id>.json` without modifying earlier attempts. Each predecessor can be consumed at most once across processes and restarts.
+- Mutating device commands (`files upload`, `files delete`, `print start`, and `print pause|resume|cancel`) sharing a device state directory hold a single private shared per-device lease (`.device.lock`) from before printer access until post-action observation ends. A concurrent contender fails before printer access, including for different hashes, operations, or profile names. After an ambiguous response, inspect status/files/receipts and preserve all markers. Different state directories, older binaries and other clients do not share this lease.
 - Uploads keep listing, reservation, POST and verification inside that device lease.
-  The lock files are retained; closing their descriptors releases the lease.
+  The lock file is retained; closing its descriptor releases the lease.
   State paths are walked without following symlinks; an existing device directory
   must be user-owned and private (0700). Invalid permissions are refused without
   changing them, and the lock must be a private regular file (0600).

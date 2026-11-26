@@ -376,16 +376,17 @@ class ControlExecutionAndSafetyTests(unittest.TestCase):
                     self.assertNotIn("ack", ctx.exception.result)
                 self.assertEqual(self.client.control_once.call_count, 1)
 
-    def test_lock_contention_against_upload_start_and_sibling_control_refuses_before_mqtt(self):
+    def test_lock_contention_refuses_before_mqtt(self):
         device = hashlib.sha256(self.cfg.printer_id.encode()).hexdigest()[:16]
         device_dir = self.state_dir / device
-        for holder in ("upload", "start", "control"):
-            with self.subTest(holder=holder), \
-                    patch("kobra_lan.control.MQTT", side_effect=AssertionError("must not connect")) as mqtt:
-                with device_lock(device_dir, holder):
-                    with self.assertRaisesRegex(ProtocolError, "Another device operation is active"):
-                        control_print(self.cfg, "pause", self.state_dir)
-                mqtt.assert_not_called()
+        with patch("kobra_lan.control.MQTT", side_effect=AssertionError("must not connect")) as mqtt:
+            with device_lock(device_dir):
+                self.assertEqual({p.name for p in device_dir.iterdir()}, {".device.lock"})
+                with self.assertRaisesRegex(ProtocolError, "Another device operation is active"):
+                    control_print(self.cfg, "pause", self.state_dir)
+            mqtt.assert_not_called()
+        self.assertFalse((device_dir / ".upload.lock").exists())
+        self.assertFalse((device_dir / ".start.lock").exists())
 
     def test_unsafe_or_replaced_state_directory_refuses_before_publish(self):
         device = hashlib.sha256(self.cfg.printer_id.encode()).hexdigest()[:16]

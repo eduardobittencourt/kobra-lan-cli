@@ -106,10 +106,10 @@ class JobsStoreTests(unittest.TestCase):
         })
         return path
 
-    def _write_start(self, file_sha256, *, previous=None, legacy=False, status="start_observed_active",
-                     filename="test.gcode", timestamp=1700000100, slot=1, active=True,
-                     write_marker=True, write_receipt=True, receipt_overrides=None, marker_overrides=None,
-                     mapping=None):
+    def _write_start(self, file_sha256, *, previous=None, legacy=False, storage_key=None,
+                     status="start_observed_active", filename="test.gcode", timestamp=1700000100, slot=1,
+                     active=True, write_marker=True, write_receipt=True, receipt_overrides=None,
+                     marker_overrides=None, mapping=None):
         starts_dir = self._private_dir(self.state_dir / "starts" / self.device16)
         plan = make_plan(self.device_digest, file_sha256, filename=filename, slot=slot)
         if mapping is not None:
@@ -118,7 +118,7 @@ class JobsStoreTests(unittest.TestCase):
             plan["hardware_start_validated"] = False
         identity = attempt_id(self.device_digest, file_sha256, previous)
         digest = review_digest(plan, previous)
-        key = file_sha256 if previous is None else identity
+        key = storage_key if storage_key is not None else (file_sha256 if legacy else identity)
 
         receipt = {**plan, "plan_sha256": digest, "dry_run": False, "status": status}
         if timestamp is not None:
@@ -182,11 +182,11 @@ class JobsStoreTests(unittest.TestCase):
             job_info(self.cfg, self.state_dir, "a" * 64)
         self.assertFalse(self.state_dir.exists())
 
-    def test_legacy_and_current_starts_and_multi_step_reprint_chain_preserve_files(self):
-        legacy_sha = "1" * 64
-        self._write_upload(legacy_sha, filename="legacy.gcode", timestamp=1700000010)
-        legacy_id, _, _ = self._write_start(
-            legacy_sha, legacy=True, filename="legacy.gcode", timestamp=None, status="start_observed_active"
+    def test_canonical_starts_and_multi_step_reprint_chain_preserve_files(self):
+        single_sha = "1" * 64
+        self._write_upload(single_sha, filename="single.gcode", timestamp=1700000010)
+        single_id, _, _ = self._write_start(
+            single_sha, filename="single.gcode", timestamp=None, status="start_observed_active"
         )
 
         chain_sha = "2" * 64
@@ -220,26 +220,26 @@ class JobsStoreTests(unittest.TestCase):
         self.assertEqual(listed["returned_count"], 6)
         self.assertEqual(listed["incomplete_count"], 0)
         self.assertFalse(listed["truncated"])
-        # Newest-first ordering; legacy without timestamp sorts last.
+        # Newest-first ordering; record without timestamp sorts last.
         self.assertEqual(
             [item["record_id"] for item in listed["jobs"]],
-            [reprint2_id, ack_id, reprint1_id, no_upload_id, root_id, legacy_id],
+            [reprint2_id, ack_id, reprint1_id, no_upload_id, root_id, single_id],
         )
 
-        legacy_detail = job_info(self.cfg, self.state_dir, legacy_id)
-        self.assertEqual(legacy_detail["record_format"], "legacy")
-        self.assertEqual(legacy_detail["completeness"], "complete")
-        self.assertEqual(legacy_detail["reprint_eligibility"], "eligible_for_plan")
-        self.assertEqual(legacy_detail["terminal_outcome"], "unknown")
-        self.assertTrue(legacy_detail["upload_provenance"]["verified"])
-        self.assertFalse(legacy_detail["upload_provenance"]["remote_byte_hash_verified"])
-        self.assertEqual(legacy_detail["slot_mapping"], [{
+        single_detail = job_info(self.cfg, self.state_dir, single_id)
+        self.assertNotIn("record_format", single_detail)
+        self.assertEqual(single_detail["completeness"], "complete")
+        self.assertEqual(single_detail["reprint_eligibility"], "eligible_for_plan")
+        self.assertEqual(single_detail["terminal_outcome"], "unknown")
+        self.assertTrue(single_detail["upload_provenance"]["verified"])
+        self.assertFalse(single_detail["upload_provenance"]["remote_byte_hash_verified"])
+        self.assertEqual(single_detail["slot_mapping"], [{
             "paint_index": 0, "slot": 1, "ams_index": 0, "material_type": "PLA High Speed",
             "gcode_color_hex": "#8A949E", "slot_color_hex": "#FFFFFF",
         }])
 
         root_detail = job_info(self.cfg, self.state_dir, root_id)
-        self.assertEqual(root_detail["record_format"], "current")
+        self.assertNotIn("record_format", root_detail)
         self.assertIsNone(root_detail["previous_attempt_id"])
         self.assertEqual(root_detail["next_attempt_id"], reprint1_id)
         self.assertEqual(root_detail["reprint_eligibility"], "superseded")
@@ -247,12 +247,13 @@ class JobsStoreTests(unittest.TestCase):
         self.assertEqual(root_detail["preparation"], {
             "auto_leveling": True, "vibration_compensation": False, "flow_calibration": False
         })
-        self.assertEqual(root_detail["slot_mapping"], legacy_detail["slot_mapping"])
+        self.assertEqual(root_detail["slot_mapping"], single_detail["slot_mapping"])
         self.assertNotIn("selected_slot", root_detail)
         self.assertNotIn("material_type", root_detail)
         self.assertTrue(root_detail["hardware_start_validated"])
 
         reprint1_detail = job_info(self.cfg, self.state_dir, reprint1_id)
+        self.assertNotIn("record_format", reprint1_detail)
         self.assertEqual(reprint1_detail["previous_attempt_id"], root_id)
         self.assertEqual(reprint1_detail["next_attempt_id"], reprint2_id)
         self.assertEqual(reprint1_detail["reprint_eligibility"], "superseded")
@@ -260,6 +261,7 @@ class JobsStoreTests(unittest.TestCase):
         self.assertFalse(reprint1_detail["hardware_start_validated"])
 
         reprint2_detail = job_info(self.cfg, self.state_dir, reprint2_id)
+        self.assertNotIn("record_format", reprint2_detail)
         self.assertEqual(reprint2_detail["previous_attempt_id"], reprint1_id)
         self.assertIsNone(reprint2_detail["next_attempt_id"])
         self.assertEqual(reprint2_detail["reprint_eligibility"], "eligible_for_plan")
@@ -272,6 +274,43 @@ class JobsStoreTests(unittest.TestCase):
             job_info(self.cfg, self.state_dir, no_upload_id)["reprint_eligibility"],
             "blocked_missing_upload_provenance",
         )
+        self.assertEqual(self._snapshot(), before)
+
+    def test_pre_v1_file_keyed_start_files_surfaced_as_unreadable_without_modification(self):
+        legacy_sha = "1" * 64
+        self._write_upload(legacy_sha, filename="legacy.gcode", timestamp=1700000010)
+        legacy_root_id, _, _ = self._write_start(
+            legacy_sha, legacy=True, filename="legacy.gcode", timestamp=1700000100, status="start_observed_active",
+        )
+        file_keyed_sha = "2" * 64
+        self._write_upload(file_keyed_sha, filename="filekeyed.gcode", timestamp=1700000020)
+        file_keyed_root_id, _, _ = self._write_start(
+            file_keyed_sha, storage_key=file_keyed_sha, filename="filekeyed.gcode",
+            timestamp=1700000200, status="start_observed_active",
+        )
+
+        before = self._snapshot()
+        listed = list_jobs(self.cfg, self.state_dir)
+        self.assertEqual(listed["total_count"], 2)
+        self.assertEqual(listed["incomplete_count"], 2)
+        by_id = {item["record_id"]: item for item in listed["jobs"]}
+
+        for sha, root_id in ((legacy_sha, legacy_root_id), (file_keyed_sha, file_keyed_root_id)):
+            ref = f"unreadable-{sha}"
+            self.assertIn(ref, by_id)
+            self.assertEqual(by_id[ref]["completeness"], "incomplete")
+            self.assertEqual(by_id[ref]["reprint_eligibility"], "blocked_incomplete")
+            self.assertIn("invalid_start_identity", by_id[ref]["issues"])
+            detail = job_info(self.cfg, self.state_dir, ref)
+            self.assertNotIn("record_format", detail)
+            self.assertEqual(detail["completeness"], "incomplete")
+            self.assertIsNone(detail["attempt_id"])
+            self.assertEqual(detail["storage_key"], sha)
+            self.assertEqual(detail["reprint_eligibility"], "blocked_incomplete")
+            self.assertIn("invalid_start_identity", detail["issues"])
+            with self.assertRaises(ProtocolError):
+                job_info(self.cfg, self.state_dir, root_id)
+
         self.assertEqual(self._snapshot(), before)
 
     def test_multicolor_history_reconstructs_ordered_mixed_and_shared_mappings(self):
@@ -382,8 +421,8 @@ class JobsStoreTests(unittest.TestCase):
         (starts_dir / f"{corrupt_key}.json").chmod(0o600)
 
         # Stray lock/tmp files must be ignored
-        (starts_dir / ".start.lock").write_text("")
-        (starts_dir / ".start.lock").chmod(0o600)
+        (starts_dir / ".device.lock").write_text("")
+        (starts_dir / ".device.lock").chmod(0o600)
         (starts_dir / f"{corrupt_key}.json.1234.tmp").write_text("{")
         (starts_dir / f"{corrupt_key}.json.1234.tmp").chmod(0o600)
 
@@ -424,6 +463,7 @@ class JobsStoreTests(unittest.TestCase):
         self.assertIn(corrupt_ref, by_id)
         self.assertEqual(by_id[corrupt_ref]["issues"], ["unreadable_marker", "unreadable_receipt"])
         corrupt_detail = job_info(self.cfg, self.state_dir, corrupt_ref)
+        self.assertNotIn("record_format", corrupt_detail)
         self.assertIsNone(corrupt_detail["attempt_id"])
         self.assertEqual(corrupt_detail["storage_key"], corrupt_key)
         self.assertEqual(self._snapshot(), before)

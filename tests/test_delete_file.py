@@ -29,26 +29,27 @@ class DeleteLeaseTests(unittest.TestCase):
         self.device_dir = self.root / "device"
 
     def test_delete_uses_only_the_shared_lease(self):
-        with device_lock(self.device_dir, "delete"):
+        with device_lock(self.device_dir):
             self.assertEqual({p.name for p in self.device_dir.iterdir()}, {".device.lock"})
-            for operation in ("upload", "start", "control", "delete"):
-                with self.subTest(operation=operation), self.assertRaisesRegex(ProtocolError, "active"):
-                    with device_lock(self.device_dir, operation):
-                        self.fail("Concurrent device operation acquired the lease")
+            self.assertFalse((self.device_dir / ".upload.lock").exists())
+            self.assertFalse((self.device_dir / ".start.lock").exists())
+            with self.assertRaisesRegex(ProtocolError, "Another device operation is active"):
+                with device_lock(self.device_dir):
+                    self.fail("Concurrent device operation acquired the lease")
 
     def test_delete_refuses_symlink_and_non_private_directory(self):
         actual = self.root / "actual"
         actual.mkdir(mode=0o700)
         self.device_dir.symlink_to(actual, target_is_directory=True)
         with self.assertRaises((OSError, ProfileLocalError)):
-            with device_lock(self.device_dir, "delete"):
+            with device_lock(self.device_dir):
                 self.fail("Symlink acquired the lease")
         self.assertEqual(list(actual.iterdir()), [])
         self.device_dir.unlink()
         self.device_dir.mkdir()
         self.device_dir.chmod(0o755)
         with self.assertRaises(ProfileLocalError):
-            with device_lock(self.device_dir, "delete"):
+            with device_lock(self.device_dir):
                 self.fail("Non-private device directory acquired the lease")
         self.assertEqual(self.device_dir.stat().st_mode & 0o777, 0o755)
 
@@ -84,11 +85,12 @@ class DeleteFileTests(unittest.TestCase):
 
     def test_delete_lock_refuses_before_printer_access(self):
         with patch("kobra_lan.delete_file.MQTT") as mqtt:
-            for operation in ("upload", "start", "control", "delete"):
-                with self.subTest(operation=operation), device_lock(self.device_dir, operation):
-                    with self.assertRaisesRegex(ProtocolError, "active"):
-                        delete_file(self.config, self.filename, self.state_dir)
+            with device_lock(self.device_dir):
+                with self.assertRaisesRegex(ProtocolError, "Another device operation is active"):
+                    delete_file(self.config, self.filename, self.state_dir)
         mqtt.assert_not_called()
+        self.assertFalse((self.device_dir / ".upload.lock").exists())
+        self.assertFalse((self.device_dir / ".start.lock").exists())
 
     def test_confirmed_removal_uses_one_session_and_leaves_optional_directories_absent(self):
         result = self.run_delete(self.before, self.listing({**self.entry, "url": "secret"}),
@@ -289,7 +291,7 @@ class DeleteFileTests(unittest.TestCase):
         path.write_bytes(GCODE)
         _, manifest = describe(path, self.filename)
         sha = manifest["sha256"]
-        with device_lock(self.device_dir, "delete") as device_fd:
+        with device_lock(self.device_dir) as device_fd:
             reserve_at(device_fd, manifest)
             atomic_json(self.device_dir / (sha + ".json"), {
                 **manifest, "status": "uploaded_verified_by_listing_and_metadata",
@@ -298,6 +300,14 @@ class DeleteFileTests(unittest.TestCase):
         starts.mkdir(parents=True, mode=0o700)
         plan = make_plan(self.device, sha, filename=self.filename)
         identity = attempt_id(self.device, sha, None)
+        atomic_json(starts / (identity + ".attempt"), {
+            "attempt_id": identity, "device_digest": self.device,
+            "plan_sha256": plan["plan_sha256"], "sha256": sha, "previous_attempt_id": None,
+        })
+        atomic_json(starts / (identity + ".json"), {
+            **plan, "attempt_id": identity, "dry_run": False, "status": "start_acknowledged_not_confirmed",
+        })
+        # Pre-v1 file-keyed start files remain preserved byte-for-byte and are not counted as canonical starts.
         atomic_json(starts / (sha + ".attempt"), {"sha256": sha, "plan_sha256": plan["plan_sha256"]})
         atomic_json(starts / (sha + ".json"), {**plan, "dry_run": False, "status": "start_acknowledged_not_confirmed"})
         successor = attempt_id(self.device, sha, identity)

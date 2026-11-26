@@ -15,22 +15,22 @@ Let owners inspect immutable sliced files, review each submission and start a qu
 
 #### Scenario: Minimal G-code without paint_info remains compatible
 - **WHEN** a qualified Next-generated Kobra X G-code omits `; paint_info =`
-- **THEN** `gcode inspect` succeeds with `paint_info_present: false`, `filaments: []`, `filament_count: 0`, `multicolor: false` (unless multiple distinct `T<n>` tools are present), and `single_filament_start_compatible: false`, and `files upload` continues to accept the reviewed file
+- **THEN** `gcode inspect` succeeds with `paint_info_present: false`, `filaments: []`, `filament_count: 0`, and `multicolor: false` (unless multiple distinct `T<n>` tools are present), omits `single_filament_start_compatible`, and `files upload` continues to accept the reviewed file
 
 ### Requirement: Multicolor G-code filament and tool inspection
-Local `gcode inspect` SHALL parse all `; paint_info = [...]` lines, `T<n>` tool commands, and optional filament weight summaries, reporting `paint_info_present`, ordered `filaments` (`paint_index`, `material_type`, `color_rgb`, `color_hex`, nullable `filament_used_g`), `filament_count`, `multicolor`, sorted `tool_indices`, nullable `total_filament_used_g`, and `single_filament_start_compatible`. Repeated `; paint_info =` lines SHALL agree; malformed or conflicting declarations SHALL exit 2.
+Local `gcode inspect` SHALL parse all `; paint_info = [...]` lines, `T<n>` tool commands, and optional filament weights, reporting `paint_info_present`, ordered `filaments`, `filament_count`, `multicolor`, sorted `tool_indices`, and nullable `total_filament_used_g` without emitting `single_filament_start_compatible`. Repeated `; paint_info =` lines SHALL agree; malformed or conflicting declarations SHALL exit 2.
 
 #### Scenario: Inspect single-filament G-code declaring paint_index 0
 - **WHEN** a Next-generated Kobra X G-code declares one filament at `paint_index: 0` with no tool index other than `0`
-- **THEN** `gcode inspect` reports `paint_info_present: true`, `filament_count: 1`, `multicolor: false`, `single_filament_start_compatible: true`, and one normalized filament entry with `color_rgb` and `color_hex`
+- **THEN** `gcode inspect` reports `paint_info_present: true`, `filament_count: 1`, `multicolor: false`, omits `single_filament_start_compatible`, and returns one normalized filament entry with `color_rgb` and `color_hex`
 
 #### Scenario: Inspect multicolor G-code with non-contiguous paint indices and repeated headers
 - **WHEN** a Next-generated Kobra X G-code contains identical `; paint_info = [...]` lines in both the header and config blocks declaring multiple filaments (for example `paint_index` `1` and `3`, or mixed materials such as `PLA` and `PETG`), corresponding `T<n>` commands, and filament weight summaries
-- **THEN** `gcode inspect` exits 0 without network access, reports all declared filaments ordered by `paint_index` with normalized `color_rgb`, `color_hex`, `material_type`, and per-index `filament_used_g`, reports `multicolor: true`, `tool_indices`, `total_filament_used_g`, and `single_filament_start_compatible: false`, and remains uploadable via `files upload`
+- **THEN** `gcode inspect` exits 0 without network access, reports all declared filaments ordered by `paint_index` with normalized `color_rgb`, `color_hex`, `material_type`, and per-index `filament_used_g`, reports `multicolor: true`, `tool_indices`, and `total_filament_used_g`, omits `single_filament_start_compatible`, and remains uploadable via `files upload`
 
 #### Scenario: Inspect single-filament G-code with non-zero paint index
 - **WHEN** a Next-generated Kobra X G-code declares one filament at a non-zero index (for example `paint_index: 2` with `T2`)
-- **THEN** `gcode inspect` reports `filament_count: 1`, `multicolor: false`, `tool_indices: [2]`, and `single_filament_start_compatible: false`
+- **THEN** `gcode inspect` reports `filament_count: 1`, `multicolor: false`, and `tool_indices: [2]`, and omits `single_filament_start_compatible`
 
 #### Scenario: Conflicting or malformed paint_info fails validation
 - **WHEN** a G-code file contains malformed `; paint_info =` JSON, invalid color/material/index fields, duplicate `paint_index` values within one declaration, or two `; paint_info =` lines with different normalized declarations
@@ -52,15 +52,15 @@ Local `gcode inspect` SHALL parse all `; paint_info = [...]` lines, `T<n>` tool 
 - **THEN** the durable attempt remains, the result explains uncertainty and no retry is performed
 
 ### Requirement: Serialized upload preflight
-Uploads sharing the same device state directory SHALL hold an exclusive device lease across destination listing, durable reservation, POST and verification, regardless of file hash or profile name. Contention SHALL fail before printer access without waiting, retrying or creating an attempt. Releasing a lease SHALL NOT delete its lock file or any attempt marker. This coordination SHALL NOT claim atomic firmware-side exclusion against other tools or state directories.
+Mutating device operations sharing a device state directory SHALL hold one exclusive `.device.lock` lease (never creating `.upload.lock` or `.start.lock`) across preflight, durable reservation, execution, and verification, regardless of file hash or profile name. Contention SHALL fail before printer access without waiting, retrying, or creating an attempt. Releasing the lease SHALL NOT delete `.device.lock` or attempt markers.
 
 #### Scenario: Concurrent payloads for one destination
 - **WHEN** different reviewed payloads target the same remote filename through the same device state directory
-- **THEN** only the lease holder can access the printer, and any later lease holder checks the fresh listing before considering an upload
+- **THEN** only the `.device.lock` lease holder can access the printer, no `.upload.lock` or `.start.lock` file is created, and any later lease holder checks the fresh listing before considering an upload
 
 #### Scenario: State path replaced during upload
-- **WHEN** the configured state path is replaced while an upload holds its device lease
-- **THEN** marker checks, reservations and receipt writes remain in the leased directory; detected replacement blocks a POST or records uncertainty after a POST without replay or writes into the replacement directory
+- **WHEN** the configured state path is replaced while an upload holds its `.device.lock` device lease
+- **THEN** marker checks, reservations, and receipt writes remain in the leased directory; detected replacement blocks a POST or records uncertainty after a POST without replay or writes into the replacement directory
 
 ### Requirement: Read-only print plan
 `print plan` with `--name`, repeatable required `--slot-map <paint_index=slot>`, and explicit preparation flags SHALL validate the printer, local file, remote metadata, G-code filament/tool declarations, and mapped onboard slots. It SHALL report the plan hash, device, file metadata, structured `slot_mapping`, `multicolor`, preparation settings, and qualification limits without upload, start, or state writes.
@@ -96,21 +96,20 @@ Uploads sharing the same device state directory SHALL hold an exclusive device l
 - **WHEN** the start request or subsequent bounded observation is uncertain
 - **THEN** its reservation remains and output distinguishes acknowledged, observed-active, and uncertain outcomes without claiming completion or replaying the command
 
-### Requirement: Existing device state remains authoritative
-The CLI SHALL preserve configuration, credentials, existing device-based receipts, reservation paths, permissions and custom `--state-dir` behavior. A first start SHALL retain the existing device/file guard. Existing start records SHALL be interpreted in place and SHALL continue blocking ordinary start. Only the explicit reviewed reprint workflow can authorize a successor to an eligible attempt.
+### Requirement: Canonical device state remains authoritative
+The CLI SHALL preserve configuration, credentials, device-based receipts, permissions, and custom `--state-dir` behavior without automatic migration or deletion of preexisting files. Canonical start records under `starts/<device>/` SHALL be keyed by `attempt_id` for both root starts and reprints and SHALL block duplicate ordinary starts; only the reviewed reprint workflow can authorize a successor to an eligible canonical attempt.
 
-#### Scenario: Old marker with new command
-- **WHEN** an existing-format attempt is accessed through the current command tree or another profile for the same device
-- **THEN** ordinary start retains the same duplicate protection and preserves the original files and permissions
+#### Scenario: Canonical root attempt blocks duplicate ordinary start across profiles
+- **WHEN** a canonical attempt-keyed root start record exists under `starts/<device>/` and ordinary `print start` runs through another profile for the same device
+- **THEN** ordinary start refuses without sending a start command and preserves the existing files and permissions
 
-#### Scenario: Legacy attempt is eligible
-- **WHEN** a legacy marker and matching receipt establish an observed-active start for the selected device and file
-- **THEN** planning exposes a stable local reference and applies the same reprint checks as for newly created attempts
-- **AND** a reprint preserves both legacy files and the verified upload receipt
+#### Scenario: Incomplete or inconsistent start evidence blocks all starts
+- **WHEN** a canonical root or successor attempt marker has a missing, malformed, or inconsistent receipt, or a receipt exists without its matching marker
+- **THEN** both ordinary start and explicit reprint refuse to send a print command for that device and file and leave all existing files unchanged
 
-#### Scenario: Legacy evidence is incomplete
-- **WHEN** a prior marker has a missing, malformed or inconsistent receipt, or a receipt exists without its matching marker
-- **THEN** both ordinary start and explicit reprint refuse to send a print command for that device and file
+#### Scenario: Unrecognized legacy file-keyed start files are neither migrated nor eligible
+- **WHEN** `starts/<device>/` contains a pre-v1 file-keyed (`<file_sha256>.*`) marker/receipt without canonical `attempt_id` keying
+- **THEN** `print plan` and `print start` do not migrate, modify, or delete those files and do not treat them as an eligible reprint predecessor
 
 ### Requirement: Evidence stays qualified
 Both formats SHALL distinguish upload listing/metadata verification from remote byte-hash verification, start acknowledgement from observed activity, and activity from completion or physical quality. Qualification SHALL remain Kobra X model 20030 / firmware 2.0.2.2 and the recorded material/preparation evidence (single-filament `0 -> 1|2|4` and 4-color contiguous 1:1 `0..3 -> 1..4` in `PLA High Speed` with `auto-leveling on`, vibration/flow off); unobserved multicolor mappings and non-zero single `paint_index` starts SHALL report `hardware_start_validated: false`.
@@ -124,16 +123,15 @@ Both formats SHALL distinguish upload listing/metadata verification from remote 
 - **THEN** output reports `experimental: true` and `hardware_start_validated: false`
 
 ### Requirement: Local identity for each start attempt
-Each durably reserved start SHALL have a stable local attempt ID independent of firmware task IDs and distinct from other executions of the same file. The state SHALL associate the attempt with its device, file and plan, and record its predecessor for a reprint. Text and JSON SHALL expose safe attempt references and available start evidence.
+Each durably reserved start SHALL have a deterministic local `attempt_id` independent of firmware task IDs. Both root starts and reprints SHALL be stored under `starts/<device>/<attempt_id>.attempt` and `<attempt_id>.json`, SHALL record `attempt_id` in marker and receipt, SHALL bind device, file, plan, and any reprint predecessor, and SHALL expose safe attempt references in text and JSON.
 
 #### Scenario: Two deliberate runs share the same stored file
-- **WHEN** an initial start and its eligible reviewed reprint are reserved
-- **THEN** each has its own durable attempt ID and evidence record, and the second record links to the first
-- **AND** the upload receipt remains usable as provenance for both
+- **WHEN** an initial root start and its eligible reviewed reprint are reserved
+- **THEN** both are stored under `<attempt_id>.attempt` and `<attempt_id>.json` with distinct durable `attempt_id` values, the second record links to the first via `previous_attempt_id`, and the upload receipt remains usable as provenance for both
 
 #### Scenario: Result becomes uncertain after reservation
 - **WHEN** the CLI can report a safe partial result for an uncertain start
-- **THEN** it includes the reserved attempt ID and known evidence without claiming completion
+- **THEN** it includes the reserved `attempt_id` and known evidence without claiming completion
 
 ### Requirement: Review an intentional reprint
 `print plan --reprint-from PREVIOUS_ATTEMPT_ID` SHALL bind the review hash to the immediate predecessor for the selected device and file. Planning SHALL remain read-only and retain existing file, metadata, material and qualification checks. Ordinary planning SHALL preserve its hash semantics and expose a safe reference to the latest local attempt when available.

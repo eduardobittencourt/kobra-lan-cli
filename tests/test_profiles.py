@@ -338,12 +338,13 @@ class CLITests(StorageTests):
         import hashlib
         from test_client import GCODE
         from test_start import Client, GCODE as START_GCODE
-        from kobra_lan.start import build_plan
+        from kobra_lan.start import attempt_id, build_plan
         from kobra_lan.upload import describe, atomic_json
         cfg = self.add_profile(); self.add_profile('oficina')
         gcode = self.root/'input.gcode'; gcode.write_bytes(GCODE)
         sha = hashlib.sha256(GCODE).hexdigest()
-        state = self.root/'custom-state'; device = hashlib.sha256(cfg.printer_id.encode()).hexdigest()[:16]
+        device_digest = hashlib.sha256(cfg.printer_id.encode()).hexdigest()
+        state = self.root/'custom-state'; device = device_digest[:16]
         directory = state/device; directory.mkdir(parents=True, mode=0o700)
         (directory/(sha+'.attempt')).write_text('uncertain upload')
         args = ['--state-dir',str(state),'files','upload',str(gcode),'--execute','--sha256',sha]
@@ -357,14 +358,15 @@ class CLITests(StorageTests):
         _, manifest = describe(gcode,'test.gcode')
         atomic_json(directory/(manifest['sha256']+'.json'),{**manifest,'status':'uploaded_verified_by_listing_and_metadata'})
         starts = state/'starts'/device; starts.mkdir(parents=True, mode=0o700)
-        (starts/(manifest['sha256']+'.attempt')).write_text('uncertain start')
+        root_id = attempt_id(device_digest, manifest['sha256'], None)
+        (starts/(root_id+'.attempt')).write_text('uncertain start')
         plan = build_plan(cfg,Client(cfg),gcode,'test.gcode',{0: 1},True,False,False)
         args = ['--state-dir',str(state),'print','start',str(gcode),'--name','test.gcode','--slot-map','0=1',
                 '--auto-leveling','on','--vibration-compensation','off','--flow-calibration','off',
                 '--execute','--plan-sha256',plan['plan_sha256']]
         tracked = [self.registry.path('bancada'), self.registry.path('oficina'),
                    directory/(manifest['sha256']+'.json'), directory/(sha+'.attempt'),
-                   starts/(manifest['sha256']+'.attempt')]
+                   starts/(root_id+'.attempt')]
         baseline = [(p.read_bytes(), p.stat().st_mode) for p in tracked]
         with patch('kobra_lan.start.MQTT',Client):
             for name in ('bancada','oficina'):
@@ -377,7 +379,7 @@ class CLITests(StorageTests):
             self.assertEqual(code, 2)
             self.assertEqual(result['error']['code'], 'invalid_arguments')
             access.assert_not_called()
-        self.assertEqual((starts/(manifest['sha256']+'.attempt')).read_text(),'uncertain start')
+        self.assertEqual((starts/(root_id+'.attempt')).read_text(),'uncertain start')
         self.assertEqual([(p.read_bytes(), p.stat().st_mode) for p in tracked], baseline)
         self.assertEqual(Client.starts, 0)
 

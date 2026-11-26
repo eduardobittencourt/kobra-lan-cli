@@ -165,14 +165,10 @@ def execute(config, path, expected_sha256, state_dir, remote_name=None):
         raise ProtocolError("File SHA-256 differs from reviewed manifest")
     device = hashlib.sha256(config.printer_id.encode()).hexdigest()[:16]
     directory = Path(state_dir) / device
-    with upload_lock(directory) as directory_fd:
+    with device_lock(directory) as directory_fd:
         if attempted(directory_fd, manifest["sha256"]):
             raise ProtocolError("Upload already attempted; no network write was repeated")
         return execute_locked(config, data, manifest, directory, directory_fd)
-
-
-def upload_lock(directory):
-    return device_lock(directory, "upload")
 
 
 def _open_lock_file(parent, filename, label):
@@ -193,18 +189,16 @@ def _open_lock_file(parent, filename, label):
 
 
 @contextmanager
-def device_lock(directory, operation):
+def device_lock(directory):
     """Serialize cooperating callers by device, retaining the lock inode after close."""
     parent = open_directory(directory, create=True)
-    fds = []
+    lock_fd = None
     try:
-        if operation not in ("control", "delete"):
-            fds.append(_open_lock_file(parent, f'.{operation}.lock', operation.capitalize()))
-        fds.append(_open_lock_file(parent, '.device.lock', "Device operation"))
+        lock_fd = _open_lock_file(parent, '.device.lock', "Device operation")
         yield parent
     finally:
-        for fd in reversed(fds):
-            os.close(fd)
+        if lock_fd is not None:
+            os.close(lock_fd)
         os.close(parent)
 
 
