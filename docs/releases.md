@@ -10,9 +10,9 @@ package release; source versions, merged PRs and CI artifacts are not publicatio
 
 The source of truth is the literal `__version__` in `kobra_lan/__init__.py`.
 Python metadata and `kobra-lan --version` derive from it. A release accepts only
-final `X.Y.Z` versions (for example `0.6.0`), matching `vX.Y.Z` tags and Debian
-version `X.Y.Z-1`. Leading zeroes, prereleases (`0.6.0-rc.1`, `0.6.0rc1`) and
-build metadata (`0.6.0+build`) fail validation. They need explicit Python/Debian
+final `X.Y.Z` versions (for example `0.7.0`), matching `vX.Y.Z` tags and Debian
+version `X.Y.Z-1`. Leading zeroes, prereleases (`0.7.0-rc.1`, `0.7.0rc1`) and
+build metadata (`0.7.0+build`) fail validation. They need explicit Python/Debian
 ordering rules before they can be supported. Do not use packaging-only revisions:
 changed published bytes require a new application version.
 
@@ -31,7 +31,7 @@ migration and hardware limitations in `CHANGELOG.md` under `## X.Y.Z`. Update th
 literal version, move the relevant Unreleased notes into that section, then run:
 
 ```sh
-python3 scripts/release_version.py --tag v0.6.0  # after setting version 0.6.0
+python3 scripts/release_version.py --tag v0.7.0  # after setting version 0.7.0
 python3 -m unittest discover -s tests -v
 ```
 
@@ -59,10 +59,10 @@ apt-get update
 apt-get install --no-install-recommends build-essential debhelper dh-sequence-python3 \
   pybuild-plugin-pyproject python3-all python3-setuptools python3-wheel \
   python3-build python3-venv python3-cryptography lintian
-python3 scripts/release_version.py --tag v0.6.0
-python3 scripts/build_deb.py --output build/debian --tag v0.6.0
-python3 scripts/check_deb.py build/debian/kobra-lan-cli_0.6.0-1_all.deb
-lintian build/debian/kobra-lan-cli_0.6.0-1_all.deb
+python3 scripts/release_version.py --tag v0.7.0
+python3 scripts/build_deb.py --output build/debian --tag v0.7.0
+python3 scripts/check_deb.py build/debian/kobra-lan-cli_0.7.0-1_all.deb
+lintian build/debian/kobra-lan-cli_0.7.0-1_all.deb
 (cd build/debian && sha256sum --check SHA256SUMS)
 python3 scripts/check_python.py build/python-acceptance
 ```
@@ -137,11 +137,11 @@ performed by `kobra-lan` itself.
 
 Download the package and `SHA256SUMS` from the same GitHub version release into
 an empty directory, verify, and install the local package. The example uses
-0.6.0; use the actual `.deb` filename from your selected release:
+0.7.0; use the actual `.deb` filename from your selected release:
 
 ```sh
 sha256sum --check SHA256SUMS
-sudo apt install ./kobra-lan-cli_0.6.0-1_all.deb
+sudo apt install ./kobra-lan-cli_0.7.0-1_all.deb
 /usr/bin/kobra-lan --version
 /usr/bin/kobra-lan --help
 command -v kobra-lan
@@ -321,3 +321,33 @@ optional `Suggests: ffmpeg` for `camera snapshot`; `camera status` and
 of stock Kobra X firmware 2.0.2.2 found no LAN download endpoint. Creating the `v0.6.0` tag and publishing the
 release remain explicit maintainer actions through the gated workflow above
 after code review and package checks pass.
+
+## Discovery, print-start matrix, and macOS arm64 preview 0.7.0
+
+Version 0.7.0 is an additive experimental 0.x preview with no breaking CLI,
+JSON, configuration, or local-state changes relative to 0.6.0. Existing private
+profiles, credentials, upload receipts/markers, canonical attempt-keyed start
+receipts/markers, watch observations, and shared `--state-dir` `.device.lock`
+leases remain compatible in place without migration.
+
+This release completes Milestone 1 and Milestone 3 exit evidence on Kobra X
+model `20030` / firmware `2.0.2.2` and begins Milestone 4 platform expansion:
+strictly read-only same-subnet SSDP discovery (`printer discover`), firmware
+client-limit diagnostics (`code 19002`) during `printer pair` with documented
+fresh-install onboarding and non-destructive profile replacement, promoted
+`hardware_delete_validated: true` after live local-state preservation
+verification, live post-reboot cold-start camera verification, expanded
+`hardware_start_validated: true` coverage across all four onboard slots,
+remapped/sparse/shared-slot mappings, observed single-filament alternative
+preparation flags on `0=1`, and single-filament `PETG` on slot `4` (keeping
+unobserved combinations, untested materials, and external ACE units
+unqualified), and macOS (`arm64`, Python `>=3.11`) offline CI and live
+read-only LAN qualification (keeping mutating macOS runs, Intel `x86_64` macOS,
+Windows, Linux `arm64`, PyPI, `mise`, Homebrew, and a hosted apt repository
+explicitly unqualified/unpublished).
+
+Runtime dependencies remain unchanged (`python3 >= 3.11` and
+`python3-cryptography >= 41` / `cryptography>=41`, with Debian optional
+`Suggests: ffmpeg` for `camera snapshot`). Creating the `v0.7.0` tag and
+publishing the release remain explicit maintainer actions through the gated
+workflow above after code review and package checks pass.
