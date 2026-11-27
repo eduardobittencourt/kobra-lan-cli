@@ -15,6 +15,7 @@ from pathlib import Path
 from .config import Config, ProtocolError
 from .mqtt import MQTT
 from .printer import payload_data
+from .profiles import open_directory
 from .qualification import KOBRA_X, QUALIFIED_FIRMWARE, info_compatibility_issue
 
 CANDIDATE_FILE = "candidate.json"
@@ -109,23 +110,8 @@ class PrivateStage:
         self.stage_name = None
         self.committed = False
         self.files = set()
-        flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
-        fd = os.open('/', flags)
         try:
-            for part in self.path.parent.parts[1:]:
-                try:
-                    next_fd = os.open(part, flags, dir_fd=fd)
-                except FileNotFoundError:
-                    try:
-                        os.mkdir(part, 0o700, dir_fd=fd)
-                        os.fsync(fd)
-                    except FileExistsError:
-                        pass
-                    next_fd = os.open(part, flags, dir_fd=fd)
-                os.close(fd)
-                fd = next_fd
-            self.parent_fd = fd
-            fd = None
+            self.parent_fd = open_directory(self.path.parent, create=True, require_private=False)
             # lexists semantics, including dangling symlinks.
             try:
                 os.stat(self.path.name, dir_fd=self.parent_fd, follow_symlinks=False)
@@ -137,8 +123,6 @@ class PrivateStage:
             if current.st_uid != os.geteuid() or stat.S_IMODE(current.st_mode) != 0o700:
                 raise OSError("Persistence: config parent must be user-owned with permissions 0700")
         except BaseException:
-            if fd is not None:
-                os.close(fd)
             self.close()
             raise
 

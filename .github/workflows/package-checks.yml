@@ -169,3 +169,49 @@ jobs:
           path: reports/*.json
           if-no-files-found: error
           retention-days: 7
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
+        with:
+          version: '0.13.5'
+      - name: Prepare locked runtime dependencies (Python 3.12 arm64)
+        run: |
+          uname -m
+          uv python install 3.12
+          uv sync --locked --python 3.12 --no-build --no-install-project
+      - name: Lint
+        run: .venv/bin/ruff check kobra_lan scripts tests
+      - name: Shell syntax and source launcher
+        run: |
+          sh -n kobra-lan
+          expected=$(.venv/bin/python scripts/release_version.py)
+          actual=$(PATH="$PWD/.venv/bin:$PATH" ./kobra-lan --version)
+          test "$actual" = "$expected"
+      - name: Offline tests (no printer access)
+        run: .venv/bin/python -m unittest discover -s tests -v
+      - name: Native zsh completion check (non-skipping)
+        run: |
+          command -v zsh
+          .venv/bin/python -c '
+          import sys, unittest
+          sys.path.insert(0, "tests")
+          from test_completions import CompletionTests
+          suite = unittest.TestSuite([CompletionTests("test_zsh_sources_and_calls_completion_without_device_commands")])
+          result = unittest.TextTestRunner(verbosity=2).run(suite)
+          assert result.wasSuccessful() and result.testsRun == 1 and not result.skipped, (result.testsRun, result.skipped)
+          '
+      - name: Outside-checkout Python archive and wheel acceptance
+        run: |
+          base_python=$(uv python find 3.12)
+          "$base_python" -m venv build/python-builder
+          build/python-builder/bin/python -m pip install --only-binary=:all: build
+          build/python-builder/bin/python -m pip download --require-hashes --only-binary=:all: \
+            --requirement requirements-runtime.txt --dest build/runtime-wheels
+          build/python-builder/bin/python scripts/check_python.py build/python-acceptance \
+            --wheelhouse build/runtime-wheels

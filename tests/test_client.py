@@ -413,5 +413,54 @@ class MQTTTests(unittest.TestCase):
         with self.assertRaises(ProtocolError): file_details(client, "expected.gcode")
 
 
+class LauncherTests(unittest.TestCase):
+    def test_source_launcher_direct_symlinked_and_path_python(self):
+        import os
+        import subprocess
+        import sys
+        from kobra_lan import __version__
+
+        repo_root = Path(__file__).resolve().parents[1]
+        launcher = repo_root / "kobra-lan"
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            bin_dir = tmp_path / "bin"
+            bin_dir.mkdir()
+            (bin_dir / "python3").symlink_to(sys.executable)
+            env = dict(os.environ, PATH=f"{bin_dir}:{os.environ.get('PATH', '')}")
+            env.pop("PYTHONPATH", None)
+
+            # Direct invocation from outside checkout.
+            direct = subprocess.run(
+                [str(launcher), "--version"], cwd=tmp_path, env=env, text=True, capture_output=True, check=True
+            )
+            self.assertEqual(direct.stdout.strip(), __version__)
+
+            # Chained relative and spaced-directory symlink invocation without GNU readlink -f.
+            spaced_dir = tmp_path / "dir with spaces"
+            spaced_dir.mkdir()
+            first_link = spaced_dir / "kobra-lan-first"
+            first_link.symlink_to(os.path.relpath(launcher, spaced_dir.resolve()))
+            second_link = tmp_path / "kobra-lan"
+            second_link.symlink_to(Path("dir with spaces") / "kobra-lan-first")
+            symlinked = subprocess.run(
+                [str(second_link), "--version"], cwd=tmp_path, env=env, text=True, capture_output=True, check=True
+            )
+            self.assertEqual(symlinked.stdout.strip(), __version__)
+
+            # Verify PATH python3 precedence over /usr/bin/python3.
+            stub_dir = tmp_path / "stub-bin"
+            stub_dir.mkdir()
+            stub = stub_dir / "python3"
+            stub.write_text('#!/bin/sh\nprintf "PATH_PYTHON:%s:%s\\n" "$PYTHONPATH" "$*"\n')
+            stub.chmod(0o755)
+            stub_env = dict(os.environ, PATH=f"{stub_dir}:{os.environ.get('PATH', '')}")
+            stub_env.pop("PYTHONPATH", None)
+            probe = subprocess.run(
+                [str(second_link), "--version"], cwd=tmp_path, env=stub_env, text=True, capture_output=True, check=True
+            )
+            self.assertEqual(probe.stdout.strip(), f"PATH_PYTHON:{repo_root.resolve()}:-m kobra_lan.cli --version")
+
+
 if __name__ == "__main__":
     unittest.main()

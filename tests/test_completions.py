@@ -89,8 +89,10 @@ class CompletionTests(unittest.TestCase):
             self.assertNotIn('(kobra-lan ', script)
 
     def test_bash_sources_and_completes_root_nested_choices_and_files(self):
-        script = generate(build_parser(), 'bash')
-        script += '''
+        base_script = generate(build_parser(), 'bash')
+        self.assertNotIn('mapfile', base_script)
+        self.assertIn('type compopt >/dev/null 2>&1 && compopt -o filenames', base_script)
+        script = base_script + '''
 compopt() { printf 'filename-mode:%s\\n' "$*"; }
 COMP_WORDS=(kobra-lan --json --printer bench files ''); COMP_CWORD=5
 _kobra_lan; printf '%s\\n' "${COMPREPLY[@]}"
@@ -164,7 +166,38 @@ _kobra_lan; printf '%s\\n' "${COMPREPLY[@]}"
             self.assertIn(expected, process.stdout.splitlines())
         self.assertIn('filename-mode:-o filenames', process.stdout.splitlines())
 
+        # Simulate Bash 3.2 (missing compopt builtin/function) and verify clean completion with empty stderr.
+        no_compopt = (
+            'enable -n compopt 2>/dev/null || true\n'
+            'unset -f compopt 2>/dev/null || true\n'
+            + base_script
+            + '''
+COMP_WORDS=(kobra-lan gcode inspect pypro); COMP_CWORD=3
+_kobra_lan; printf 'pos-file:%s\\n' "${COMPREPLY[@]}"
+COMP_WORDS=(kobra-lan camera snapshot --output pypro); COMP_CWORD=4
+_kobra_lan; printf 'opt-file:%s\\n' "${COMPREPLY[@]}"
+COMP_WORDS=(kobra-lan print plan test.gcode --auto-leveling o); COMP_CWORD=5
+_kobra_lan; printf 'choice:%s\\n' "${COMPREPLY[@]}"
+COMP_WORDS=(kobra-lan files delete a.gcode --ex); COMP_CWORD=4
+_kobra_lan; printf 'flag:%s\\n' "${COMPREPLY[@]}"
+'''
+        )
+        process_no_compopt = subprocess.run(
+            ['bash', '--noprofile', '--norc'], input=no_compopt, text=True, capture_output=True
+        )
+        self.assertEqual(process_no_compopt.returncode, 0, process_no_compopt.stderr)
+        self.assertEqual(process_no_compopt.stderr, '')
+        for expected in ('pos-file:pyproject.toml', 'opt-file:pyproject.toml',
+                         'choice:on', 'choice:off', 'flag:--execute'):
+            self.assertIn(expected, process_no_compopt.stdout.splitlines())
+
     def test_bash_readline_inserts_spaced_paths_as_single_arguments(self):
+        major_proc = subprocess.run(
+            ['bash', '--noprofile', '--norc', '-c', 'printf "%s" "${BASH_VERSINFO[0]}"'],
+            text=True, capture_output=True, check=True,
+        )
+        if int(major_proc.stdout.strip() or '0') < 4:
+            self.skipTest('bash < 4 lacks compopt -o filenames readline escaping')
         with tempfile.TemporaryDirectory() as directory:
             from pathlib import Path
             root = Path(directory)

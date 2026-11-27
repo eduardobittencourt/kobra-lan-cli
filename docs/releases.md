@@ -37,7 +37,7 @@ python3 -m unittest discover -s tests -v
 
 The build baseline is Debian 13 with setuptools >=77 for SPDX license metadata.
 Ubuntu 24.04 consumes the same Debian-built package; installation requires only
-the declared system Python runtime and `python3-cryptography (>=41)`, without setuptools or other build tools. Python distributions declare `cryptography>=41`; installers resolve it before the command runs. Debian 13 provides version 43 and Ubuntu 24.04 provides version 41. The package remains pure Python; its crypto dependency uses distro-supported native libraries.
+the declared system Python runtime and `python3-cryptography (>=41)`, without setuptools or other build tools. Python distributions declare `cryptography>=41`; installers resolve it before the command runs. Debian 13 provides version 43 and Ubuntu 24.04 provides version 41. The package remains pure Python; its crypto dependency uses distro-supported native libraries. macOS (`arm64`, Python `>=3.11`) is validated in CI for Python source and wheel/venv installation against the same hash-locked `requirements-runtime.txt` wheel closure; Debian `.deb` builds and acceptance remain Linux-only.
 
 Debian packages keep Markdown guides uncompressed so relative links resolve.
 The upstream changelog is installed as `changelog.gz`; Debian's `copyright`
@@ -169,6 +169,42 @@ Restore the saved checkout launcher, or install a previously verified package
 with `sudo apt install --allow-downgrades ./kobra-lan-cli_OLD-1_all.deb` after that
 review. Never delete durable markers to make an older version run. An authorized migration must also update the installation documentation and check
 command consumers. Package validation does not authorize a live migration.
+
+## macOS (arm64) source and wheel installation
+
+macOS on Apple Silicon (`arm64`) is validated offline in CI (`macos-latest`) for
+Python `>=3.11` source and wheel/venv installs, including native `zsh`
+completion runtime verification and `scripts/check_python.py` outside-checkout
+wheel acceptance. PyPI and Homebrew channels are not yet published, and GitHub
+Releases currently publishes only the Debian `.deb` and `SHA256SUMS` assets.
+
+Apple's system `/usr/bin/python3` on macOS is Python 3.9, which is below
+`Requires-Python: >=3.11`. Install Python `>=3.11` first (for example via
+`uv`, Homebrew `python@3.12`, or python.org) and ensure that `python3` is on
+`PATH` or use a dedicated virtual environment.
+
+From a source checkout with an isolated virtual environment and hash-locked
+runtime wheels:
+
+```sh
+git clone https://github.com/eduardobittencourt/kobra-lan-cli.git
+cd kobra-lan-cli
+python3 -m venv .venv
+.venv/bin/python -m pip install --require-hashes --only-binary=:all: -r requirements-runtime.txt
+.venv/bin/python -m pip install --no-deps .
+.venv/bin/kobra-lan --version
+```
+
+Alternatively, install into a virtual environment from a locally built wheel
+(`python3 -m build --wheel`), or run the portable source checkout launcher
+`./kobra-lan` directly with a Python `>=3.11` environment containing
+`cryptography>=41` on `PATH` (for example after `uv sync --locked` with
+`.venv/bin` on `PATH`). `./kobra-lan` resolves symlinks portably in POSIX
+`/bin/sh` and selects `python3` from `PATH` (falling back to `/usr/bin/python3`).
+
+Optional `ffmpeg` on `PATH` (for example `brew install ffmpeg`) is required
+only for `camera snapshot`; `camera status` and `camera pipe` require no
+external video binaries.
 
 ## Tag-driven release and recovery
 

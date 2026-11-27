@@ -1,6 +1,6 @@
 # Product roadmap
 
-Current direction as of 2026-11-26. Kobra LAN CLI is experimental and under active development. This roadmap distinguishes implemented behavior from future work; it is not a release schedule or a promise that the firmware supports every proposed operation. Use [README.md](README.md), [release notes](https://github.com/eduardobittencourt/kobra-lan-cli/releases) and `kobra-lan --help` for the interface of a particular version.
+Current direction as of 2026-11-27. Kobra LAN CLI is experimental and under active development. This roadmap distinguishes implemented behavior from future work; it is not a release schedule or a promise that the firmware supports every proposed operation. Use [README.md](README.md), [release notes](https://github.com/eduardobittencourt/kobra-lan-cli/releases) and `kobra-lan --help` for the interface of a particular version.
 
 ## Product boundary
 
@@ -25,7 +25,7 @@ Modeling, mesh editing, orientation, supports, toolpaths and slicing profiles be
 | Camera access | Read-only `camera status`, atomic JPEG/PNG `camera snapshot` (optional `ffmpeg`), and raw HTTP-FLV `camera pipe` with strict host validation and token redaction |
 | Compatibility | Centralized hardware qualification rules (`kobra_lan/qualification.py`) and the maintained [compatibility matrix](docs/compatibility.md) |
 | Automation | English text by default, root `--json` version-1 envelope, documented error/exit contracts and offline bash/zsh/fish completion |
-| Distribution | Python archive/build/install validation and a gated GitHub release workflow for a downloadable `.deb` plus checksums; Debian 13 and Ubuntu 24.04 acceptance |
+| Distribution | Python archive/build/install validation across Linux (`amd64`) and macOS (`arm64`, with native `zsh`, stock Bash 3.2 compatibility, and portable POSIX `./kobra-lan`), plus a gated GitHub release workflow for a downloadable `.deb` plus checksums with Debian 13 and Ubuntu 24.04 (`amd64`) acceptance |
 
 Initial HTTP provisioning is unauthenticated and exposes credentials on the network. Use a trusted LAN and explicitly establish server trust; pinned MQTT authentication applies only after that trust is established. Follow the [pairing prerequisites and trust procedure](docs/pairing.md).
 
@@ -176,12 +176,12 @@ Exit evidence (satisfied 2026-11-26): the everyday LAN print cycle on Kobra X mo
 
 ## Milestone 4 — Broader compatibility and stable releases
 
-Implemented: centralized hardware qualification rules in `kobra_lan/qualification.py` and the published [compatibility matrix](docs/compatibility.md) separating implemented, offline-validated, and hardware-observed evidence across models, firmwares, slicers, filament-box topology, slots, materials, preparation flags, operations, and host platforms.
+Implemented: centralized hardware qualification rules in `kobra_lan/qualification.py`, the published [compatibility matrix](docs/compatibility.md) separating implemented, offline-validated, and hardware-observed evidence across models, firmwares, slicers, filament-box topology, slots, materials, preparation flags, operations, and host platforms, and macOS (`arm64`, Python `>=3.11`) platform qualification covering narrow root-verified Darwin `/var`/`/tmp` alias traversal, Bash 3.2-compatible completions, portable POSIX `./kobra-lan`, a `macos-latest` (`arm64`) offline CI job (including non-skipping native `zsh` and `scripts/check_python.py` outside-checkout wheel acceptance), and live read-only LAN verification on Apple Silicon (`doctor`, `status`, `slots list`, `camera status` against Kobra X `20030` / firmware `2.0.2.2`; `printer discover` multicast sockets executed cleanly without error).
 
 Remaining work:
 
 - Expand material coverage (untested materials such as standard `PLA`, `TPU`, `ABS`, mixed-material prints, and broader `PETG` slot/multicolor/prep combinations), multi-flag preparation combinations, and investigate external ACE support. Do not infer other Anycubic model support from similar fields.
-- Qualify additional platforms separately. Current package acceptance targets Linux on amd64; macOS, Windows and other architectures need their own evidence.
+- Qualify additional platforms and mutating macOS workflows separately: mutating macOS runs (`printer pair`, `files upload`/`delete`, `print start`/`pause`/`resume`/`cancel`, `camera snapshot`/`pipe`), Intel (`x86_64`) macOS, Windows, and Linux `arm64` / other architectures remain untested and need their own evidence.
 - Maintain release notes, compatibility policy and explicit migration decisions for commands, JSON and persisted state.
 - Consider other slicers and optional orchestration while keeping the LAN client independently usable.
 
@@ -192,9 +192,9 @@ A stable release requires reproducible onboarding, a supported installation path
 | Channel | Current position | Remaining work |
 | --- | --- | --- |
 | GitHub `.deb` downloads | Gated build and acceptance on Debian 13 / Ubuntu 24.04; versioned assets include `SHA256SUMS` | Verify each public release and maintain install/upgrade/removal guidance |
-| Python archives / PyPI | Canonical Python package, wheel/sdist content checks and independent installation are implemented | Verify registry ownership and configure publishing before documenting registry installation as available |
+| Python archives / PyPI | Canonical Python package, wheel/sdist content checks and independent installation are implemented on Linux (`amd64`) and macOS (`arm64`) | Verify registry ownership and configure publishing before documenting registry installation as available |
 | mise | Possible consumer of a future published Python package | Validate the supported backend, prerequisites and commands before recommending installation |
-| Homebrew | Future channel after macOS qualification | Maintain a formula, isolated runtime, installation checks and release updates |
+| Homebrew | Future channel (not yet published; macOS `arm64` offline CI and live read-only LAN verification complete) | Maintain a formula, isolated runtime, installation checks and release updates |
 | Hosted apt repository | Future channel, separate from downloadable `.deb` assets | Repository signing, index hosting and update/recovery procedures |
 | Standalone executable | Optional future convenience | Per-platform builds, dependency bundling and another maintained acceptance path |
 

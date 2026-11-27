@@ -6,12 +6,20 @@ import json
 import multiprocessing
 import os
 from pathlib import Path
+import stat
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
 from kobra_lan.config import Config, ProtocolError
-from kobra_lan.profiles import Registry, ProfileLocalError, validate_name
+from kobra_lan.profiles import (
+    Registry,
+    ProfileLocalError,
+    normalize_darwin_system_alias,
+    open_directory,
+    validate_name,
+)
 
 
 def fixture(path, device='Synthetic01'):
@@ -144,6 +152,69 @@ class StorageTests(unittest.TestCase):
         self.assertEqual([p['available'] for p in inventory['profiles']], [False, True])
         self.assertNotIn('secret-', json.dumps(inventory))
         self.assertNotIn('client.key', json.dumps(inventory))
+
+    def test_darwin_system_root_alias_normalization_and_symlink_refusal(self):
+        root_symlink = SimpleNamespace(st_mode=stat.S_IFLNK | 0o777, st_uid=0)
+        user_symlink = SimpleNamespace(st_mode=stat.S_IFLNK | 0o777, st_uid=501)
+        root_dir = SimpleNamespace(st_mode=stat.S_IFDIR | 0o755, st_uid=0)
+
+        with patch('kobra_lan.profiles.sys.platform', 'linux'), \
+                patch('kobra_lan.profiles.os.lstat', return_value=root_symlink), \
+                patch('kobra_lan.profiles.os.readlink', return_value='private/var'):
+            self.assertEqual(normalize_darwin_system_alias('/var/folders/test'), Path('/var/folders/test'))
+            self.assertEqual(normalize_darwin_system_alias('/tmp/work'), Path('/tmp/work'))
+
+        with patch('kobra_lan.profiles.sys.platform', 'darwin'):
+            for alias, target in (('var', 'private/var'), ('var', '/private/var'),
+                                  ('tmp', 'private/tmp'), ('tmp', '/private/tmp')):
+                with patch('kobra_lan.profiles.os.lstat', return_value=root_symlink), \
+                        patch('kobra_lan.profiles.os.readlink', return_value=target):
+                    self.assertEqual(normalize_darwin_system_alias(f'/{alias}'), Path(f'/private/{alias}'))
+                    self.assertEqual(
+                        normalize_darwin_system_alias(f'/{alias}/folders/sub'),
+                        Path(f'/private/{alias}/folders/sub'),
+                    )
+                    self.assertEqual(normalize_darwin_system_alias(f'/{alias}2/sub'), Path(f'/{alias}2/sub'))
+                    self.assertEqual(normalize_darwin_system_alias(f'/Users/a/{alias}/sub'), Path(f'/Users/a/{alias}/sub'))
+                    self.assertEqual(normalize_darwin_system_alias(f'/private/{alias}/sub'), Path(f'/private/{alias}/sub'))
+
+            with patch('kobra_lan.profiles.os.lstat', return_value=user_symlink), \
+                    patch('kobra_lan.profiles.os.readlink', return_value='private/var'):
+                self.assertEqual(normalize_darwin_system_alias('/var/folders/test'), Path('/var/folders/test'))
+
+            for bad_target in ('private/other', '/Users/evil', '../private/var', 'private/tmp'):
+                with patch('kobra_lan.profiles.os.lstat', return_value=root_symlink), \
+                        patch('kobra_lan.profiles.os.readlink', return_value=bad_target):
+                    self.assertEqual(normalize_darwin_system_alias('/var/folders/test'), Path('/var/folders/test'))
+
+            with patch('kobra_lan.profiles.os.lstat', return_value=root_dir):
+                self.assertEqual(normalize_darwin_system_alias('/var/folders/test'), Path('/var/folders/test'))
+
+            with patch('kobra_lan.profiles.os.lstat', side_effect=OSError('missing')):
+                self.assertEqual(normalize_darwin_system_alias('/var/folders/test'), Path('/var/folders/test'))
+
+            # Verify open_directory traverses /private/var/... for verified aliases and rejects descendant symlinks.
+            opened = []
+            def fake_open(component, flags, dir_fd=None):
+                opened.append((component, flags, dir_fd))
+                return 100 + len(opened)
+
+            with patch('kobra_lan.profiles.os.lstat', return_value=root_symlink), \
+                    patch('kobra_lan.profiles.os.readlink', return_value='private/var'), \
+                    patch('kobra_lan.profiles.os.open', side_effect=fake_open), \
+                    patch('kobra_lan.profiles.os.close'):
+                fd = open_directory('/var/folders/work', require_private=False)
+                self.assertEqual(fd, 100 + len(opened))
+            self.assertEqual([c for c, _, _ in opened], ['/', 'private', 'var', 'folders', 'work'])
+
+            # User-controlled symlink below root stays rejected under darwin too.
+            self.root.mkdir(mode=0o700)
+            target = self.root / 'real'
+            target.mkdir(mode=0o700)
+            link = self.root / 'alias'
+            link.symlink_to(target)
+            with self.assertRaises(OSError):
+                open_directory(link)
 
 
 class CLITests(StorageTests):

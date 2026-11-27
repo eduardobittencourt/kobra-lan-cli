@@ -1,6 +1,18 @@
 #!/bin/sh
 set -eu
-script_path=$(readlink -f -- "$0")
-project_dir=$(CDPATH= cd -- "$(dirname -- "$script_path")" && pwd)
+script_path=$0
+while [ -L "$script_path" ]; do
+  case "$script_path" in
+    -*) script_path="./$script_path" ;;
+  esac
+  script_dir=$(CDPATH= cd -- "$(dirname -- "$script_path")" && pwd -P)
+  target=$(readlink "$script_path")
+  case "$target" in
+    /*) script_path=$target ;;
+    *) script_path="$script_dir/$target" ;;
+  esac
+done
+project_dir=$(CDPATH= cd -- "$(dirname -- "$script_path")" && pwd -P)
 export PYTHONPATH="$project_dir${PYTHONPATH:+:$PYTHONPATH}"
-exec /usr/bin/python3 -m kobra_lan.cli "$@"
+python_bin=$(command -v python3 2>/dev/null || printf '%s\n' /usr/bin/python3)
+exec "$python_bin" -m kobra_lan.cli "$@"
