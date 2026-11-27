@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+## 0.7.0
+
+- Experimental release for testing and feedback; the CLI and JSON automation
+  interface remain under active development. Breaking changes are expected
+  during 0.x and are documented per version.
+- Distribute a downloadable `.deb` and `SHA256SUMS` through GitHub Releases,
+  with package acceptance on Debian 13 and Ubuntu 24.04, amd64. Runtime
+  dependencies remain Python >=3.11 and `cryptography>=41`; Debian keeps
+  optional `Suggests: ffmpeg` for `camera snapshot`. macOS (`arm64`, Python
+  `>=3.11`) is validated in CI for source checkout and local wheel/venv
+  installs against hash-locked `requirements-runtime.txt` wheels. PyPI, `mise`,
+  Homebrew, and a hosted apt repository remain unpublished.
+- No breaking CLI, JSON, configuration, or local-state changes relative to
+  0.6.0. Existing private profiles, credentials, upload receipts/markers,
+  canonical attempt-keyed start receipts/markers, watch observations, and
+  shared `--state-dir` `.device.lock` leases remain compatible in place without
+  migration.
 - Qualify macOS (`arm64`, Apple Silicon, Python `>=3.11`) for offline CI
   source/wheel/venv installation and live read-only LAN inspection without
   weakening Linux/Debian guarantees:
@@ -86,6 +103,13 @@
   across `camera status`, `camera pipe --no-start-capture`, `camera snapshot`
   (1280×720 JPEG in `direct` mode), and `camera pipe` with zero URL/token
   exposure and healthy post-capture status.
+- Preserve private profiles, credentials, receipts, attempt markers, watch
+  observations, and permissions during normal operations and package upgrades.
+  Never clear markers or automatically repeat uncertain actions. Hardware
+  qualification remains limited to Kobra X model 20030 / firmware 2.0.2.2 and
+  the recorded material, slot, preparation, discovery, delete, and camera
+  observations; package installation does not pair, upload, start a print, or
+  migrate a live checkout installation.
 
 ## 0.6.0
 
