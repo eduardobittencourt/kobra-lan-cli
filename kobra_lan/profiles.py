@@ -18,10 +18,7 @@ REGISTRY_FILE = 'profiles.json'
 UNKNOWN_PROFILE = 'Unknown profile; run printer list'
 
 DIRECTORY_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
-DARWIN_SYSTEM_ROOT_ALIASES = {
-    'var': ('private/var', '/private/var'),
-    'tmp': ('private/tmp', '/private/tmp'),
-}
+DARWIN_SYSTEM_ROOT_ALIASES = frozenset(('var', 'tmp'))
 
 
 class ProfileSelectionError(ProtocolError):
@@ -58,7 +55,7 @@ def normalize_darwin_system_alias(path):
     if len(parts) < 2 or parts[1] not in DARWIN_SYSTEM_ROOT_ALIASES:
         return normalized
     alias = parts[1]
-    alias_path = '/' + alias
+    alias_path = os.path.join('/', alias)
     try:
         info = os.lstat(alias_path)
     except OSError:
@@ -69,9 +66,10 @@ def normalize_darwin_system_alias(path):
         target = os.readlink(alias_path)
     except OSError:
         return normalized
-    if target not in DARWIN_SYSTEM_ROOT_ALIASES[alias]:
+    expected = (os.path.join('private', alias), os.path.join('/', 'private', alias))
+    if target not in expected:
         return normalized
-    return Path('/private', alias, *parts[2:])
+    return Path('/', 'private', alias, *parts[2:])
 
 
 def open_directory(path, create=False, require_private=True):
