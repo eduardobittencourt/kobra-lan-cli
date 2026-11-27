@@ -1,9 +1,9 @@
 """Experimental local-file print/start using the onboard four-slot box.
 
-Hardware start observed on FW 2.0.2.2 for PLA High Speed with leveling on and
-vibration/flow calibration off: single-filament paint_index 0 on slots 1, 2,
-and 4, and 4-color contiguous 1:1 mapping 0=1, 1=2, 2=3, 3=4. Other
-combinations remain unqualified.
+Hardware start validation is derived from kobra_lan.qualification (Kobra X
+model 20030 / FW 2.0.2.2): observed onboard slot mappings in PLA High Speed
+across observed preparation-flag combinations, plus single-filament slot 4
+PETG with baseline preparation. Unobserved combinations remain unqualified.
 """
 import hashlib
 import json

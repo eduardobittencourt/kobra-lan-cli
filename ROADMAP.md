@@ -33,7 +33,7 @@ The source launcher and Python archives work outside a desktop, bridge, HA or cl
 
 The CLI and JSON automation interface remain subject to documented changes during 0.x. Version 0.5.0 replaced flat commands and JSON-default output, required named pairing, and removed automatic root-config fallback without migration; version 0.6.0 replaces `--slot` with repeatable `--slot-map PAINT_INDEX=SLOT`, exposes `slot_mapping` in place of `selected_slot`, unifies `print start` local state on canonical attempt-keyed records (`starts/<device>/<attempt_id>.*`), and unifies per-device mutation locking within a shared `--state-dir` on `.device.lock` while keeping upload markers/receipts and canonical start chains readable in place (preexisting legacy file-keyed start files remain untouched on disk and surface read-only as `incomplete`). Existing private credentials and device-based receipt/attempt identities remain protected in normal operations; never clear markers to make a retry work.
 
-Hardware evidence covers Kobra X model 20030 / firmware 2.0.2.2, Next-generated G-code (Linux `2.0.0.3`, `2.0.0.5`, `2.0.0.6`), `PLA High Speed` prints with automatic leveling on, vibration compensation off, and flow calibration off — both single-filament starts on onboard slots 1, 2, and 4 (`0=1|2|4`) and an operator-confirmed 4-color contiguous 1:1 print (`0=1, 1=2, 2=3, 3=4`, exercising slot 3 at `ams_index: 2`) — plus reviewed intentional reprints (`--reprint-from`), read-only `print watch` observation persistence, offline `jobs list|info`, live `print pause|resume|cancel` wire transitions (`pause`, `resume`, `stop`), and live `files delete` wire confirmation plus byte-for-byte local state/permission preservation (`deleteBatch` `success`/200, follow-up `files list` removal, and unchanged local receipts, markers, and watch observations), with operator-confirmed completion of both runs in a two-slot reprint cycle and the 4-color run. Single-filament slot 3, cross-remapped/sparse/shared/subset multicolor, non-zero single paint indices, other materials and preparation combinations, and external ACE units remain unqualified. Package acceptance and offline tests do not expand hardware evidence.
+Hardware evidence covers Kobra X model 20030 / firmware 2.0.2.2, Next-generated G-code (Linux `2.0.0.3`, `2.0.0.5`, `2.0.0.6`), `PLA High Speed` starts with baseline preparation (`auto=on/vib=off/flow=off`) across all four onboard slots (`1..4`) and all onboard slot-mapping classes (single-filament `0=1..4`, non-zero `2=3`, 4-color contiguous 1:1 `0..3 -> 1..4`, 2-color cross-remapped `0=2, 1=1`, 2-color sparse `0=1, 2=3`, and shared physical slot `0=1, 1=1` cleanly skipping filament changes), single-filament `PLA High Speed` (`0=1`) across the three alternative single-flag preparation combinations (`off/off/off`, `off/on/off`, `off/off/on`), single-filament `PETG` on onboard slot `4` (`0=4`, baseline preparation), reviewed intentional reprints (`--reprint-from`), read-only `print watch` observation persistence, offline `jobs list|info`, live `print pause|resume|cancel` wire transitions (`pause`, `resume`, `stop`), live `files delete` wire confirmation plus byte-for-byte local state/permission preservation, live LAN camera access (`camera status|snapshot|pipe` including post-reboot cold-start), and live read-only SSDP `printer discover`. Unobserved preparation-flag cross-products or multi-flag combinations, mixed-material prints, `PETG` on untested slots/multicolor/prep flags, other untested materials (`PLA`, `TPU`, `ABS`, etc.), and external ACE units remain unqualified. Package acceptance and offline tests do not expand hardware evidence.
 
 ## Milestone 1 — Independent onboarding (complete)
 
@@ -61,7 +61,7 @@ Ongoing work:
 
 Exit evidence: a published artifact installs outside the checkout, exposes help/version/completion and supports the documented setup/diagnosis workflow. Published package assets remain the evidence of download availability.
 
-## Milestone 3 — A complete everyday print cycle
+## Milestone 3 — A complete everyday print cycle (complete)
 
 The source CLI includes a read-only `print watch` for an already active job.
 It preserves verified progress, saves a sanitized local observation under
@@ -117,12 +117,19 @@ and reprint chains are readable in place (preexisting pre-v1 file-keyed files
 remain untouched and surface read-only as `incomplete`). A live end-to-end 4-color CLI print on 2026-11-24
 (`--slot-map 0=1 --slot-map 1=2 --slot-map 2=3 --slot-map 3=4`, `PLA High Speed`,
 `auto-leveling on`, vibration/flow off, `AnycubicSlicerNext 2.0.0.6`) completed
-with operator-confirmed physical quality across all four slots (including slot 3
-as `2=3`), so that exact 4-color contiguous 1:1 combination now reports
-`hardware_start_validated: true`; cross-remapped (`paint_index != ams_index`),
-subset, sparse, and shared-slot multicolor mappings and non-zero single-filament
-paint indices continue to report `hardware_start_validated: false`. See the
-[multicolor workflow](docs/usage.md#plan-and-start-a-multicolor-print).
+with operator-confirmed physical quality across all four slots, and a follow-up
+9-run live print-start matrix session on 2026-11-26 (`AnycubicSlicerNext 2.0.0.6`,
+isolated `--state-dir`, operator-confirmed physical completion across all nine
+runs, followed by `files delete --execute` cleanup) qualified single-filament
+slot 3 (`0=3`), alternative preparation-flag tuples (`auto=off/vib=off/flow=off`
+skipping `auto_leveling`, `off/on/off` observing `vibrating` ~96 s, and
+`off/off/on` observing `flow_calibrating` ~138 s), 2-color cross-remapped
+(`0=2, 1=1`), 2-color sparse (`0=1, 2=3`), single-filament non-zero index
+(`2=3`), shared physical slot (`0=1, 1=1`, where firmware `2.0.2.2` natively
+skipped all 3 superfluous filament changes), and single-filament `PETG` on slot
+4 (`0=4`, baseline prep, 75 °C / 230 °C). See the
+[multicolor workflow](docs/usage.md#plan-and-start-a-multicolor-print) and
+[validation evidence](docs/usage.md#validation-evidence).
 
 The source CLI also includes experimental LAN camera access (`camera status`,
 `camera snapshot`, and `camera pipe`) over pinned MQTT discovery (`info` and
@@ -159,13 +166,13 @@ therefore deferred unless a supported LAN download endpoint is identified or
 added by future firmware. See [validation evidence](docs/usage.md#validation-evidence)
 and [compatibility matrix](docs/compatibility.md).
 
-Remaining work:
+Recorded firmware `2.0.2.2` limits and deferred boundaries:
 
-- Qualify attempt identity and terminal signals if future firmware exposes them (firmware 2.0.2.2 reports `task_id: "-1"` and empty `last_project` after both normal completion and cancellation), and revisit stored-file download only if future firmware adds a LAN download endpoint.
-- Expand hardware coverage beyond `PLA High Speed` with `auto-leveling on` and vibration/flow off (single-filament slot 3 `0=3`, other materials, and other preparation settings).
-- Qualify non-identity multicolor and non-zero paint-index starts: cross-remapped mappings (`paint_index != ams_index`), 2/3-color subsets, sparse paint indices, and shared physical slots.
+- Attempt identity and terminal signals remain limited by stock firmware `2.0.2.2` (`task_id: "-1"` and empty `last_project` after both normal completion and cancellation); revisit only if future firmware exposes attributable attempt IDs or terminal outcomes.
+- Stored-file download (`files download`) remains deferred because stock firmware `2.0.2.2` exposes no LAN download endpoint.
+- Untested materials (`PLA`, `TPU`, `ABS`, mixed-material jobs, and `PETG` outside single-filament slot 4 baseline), unobserved multi-flag preparation combinations (`auto+vib`, `auto+flow`, `vib+flow`, `all-on`), external ACE units, and other printer models/firmwares continue to report `hardware_start_validated: false` (or fail qualification) and continue under Milestone 4.
 
-External ACE units and other device controls require separate work.
+Exit evidence (satisfied 2026-11-26): the everyday LAN print cycle on Kobra X model `20030` / firmware `2.0.2.2` — `slots list`, `gcode inspect`, `files upload`, `print plan`, `print start` (all onboard slot-mapping classes across `PLA High Speed`, observed preparation flags, and single-filament `PETG` slot 4), `--reprint-from`, `print watch` local observation persistence, `jobs list|info`, `print pause|resume|cancel`, `camera status|snapshot|pipe` (including cold-start), and `files delete --execute` (preserving local state byte-for-byte) — is implemented, offline-tested, and live hardware-verified with explicit firmware `2.0.2.2` boundaries documented.
 
 ## Milestone 4 — Broader compatibility and stable releases
 
@@ -173,7 +180,7 @@ Implemented: centralized hardware qualification rules in `kobra_lan/qualificatio
 
 Remaining work:
 
-- Expand material and preparation evidence, qualify non-identity multicolor mappings (`paint_index != ams_index`, sparse, and shared slots), and investigate external ACE support. Do not infer other Anycubic model support from similar fields.
+- Expand material coverage (untested materials such as standard `PLA`, `TPU`, `ABS`, mixed-material prints, and broader `PETG` slot/multicolor/prep combinations), multi-flag preparation combinations, and investigate external ACE support. Do not infer other Anycubic model support from similar fields.
 - Qualify additional platforms separately. Current package acceptance targets Linux on amd64; macOS, Windows and other architectures need their own evidence.
 - Maintain release notes, compatibility policy and explicit migration decisions for commands, JSON and persisted state.
 - Consider other slicers and optional orchestration while keeping the LAN client independently usable.

@@ -18,15 +18,15 @@ The CLI SHALL derive qualified printer identity, firmware versions, slicer profi
 - **THEN** provisioning, config loading, profile validation, diagnostics, and operational commands (including `camera status|snapshot|pipe`) reject the target with exit 2 (`validation_failed` or compatibility failure) without mutating printer or local state, and `printer discover` labels the candidate `qualified_model: false`
 
 ### Requirement: Centralized per-operation hardware validation flags
-The CLI SHALL compute `hardware_discovery_validated`, `hardware_start_validated`, `hardware_control_validated`, `hardware_delete_validated`, and `hardware_camera_validated` from centralized hardware-evidence rules tied to qualified model and firmware records rather than scattered literals. Observed evidence boundaries SHALL remain conservative and never infer validation for unobserved slots, materials, preparations, multicolor starts, or unverified camera/discovery CLI workflows.
+The CLI SHALL compute `hardware_discovery_validated`, `hardware_start_validated`, `hardware_control_validated`, `hardware_delete_validated`, and `hardware_camera_validated` from one centralized qualification registry tied to qualified model and firmware records. Observed boundaries SHALL remain conservative and never infer validation for unobserved materials, preparation combinations, topologies, models, or firmwares.
 
 #### Scenario: Discovery hardware validation reflects recorded evidence
 - **WHEN** `printer discover` builds its result using centralized qualification rules for Kobra X model `20030` / firmware `2.0.2.2`
 - **THEN** `is_discovery_hardware_validated(20030, "2.0.2.2")` returns `True` (and `False` for unqualified models or firmwares) and `printer discover` reports `hardware_discovery_validated: true` backed by live Kobra X SSDP evidence
 
 #### Scenario: Start hardware validation matches observed evidence only
-- **WHEN** `print plan` or `print start` evaluates a `PLA High Speed` job with `auto_leveling: on`, `vibration_compensation: off`, and `flow_calibration: off` using either single-filament `paint_index: 0` on onboard slot `1`, `2`, or `4` or the observed 4-color contiguous 1:1 mapping `0=1, 1=2, 2=3, 3=4` versus single-filament slot `3`, another material, another preparation setting, a non-zero single `paint_index`, or any other multicolor mapping (2/3-color subset, cross-remapped `paint_index != ams_index`, sparse indices, or shared physical slot)
-- **THEN** only the observed single-filament and 4-color contiguous 1:1 cases report `hardware_start_validated: true`, and every unobserved combination reports `hardware_start_validated: false`
+- **WHEN** `print plan` or `print start` evaluates a Kobra X `20030` / firmware `2.0.2.2` job covered by exact recorded runs or the class-level `PLA High Speed` baseline-preparation onboard slot-mapping rule backed by representative live runs (distinguishing individual untested slot permutations within those observed mapping classes from unobserved materials, unobserved preparation combinations or cross-products, unobserved mapping classes, or unqualified models/firmwares)
+- **THEN** only combinations covered by recorded exact runs or those class-level representative-run rules report `hardware_start_validated: true`, and every combination with an unobserved material, unobserved preparation combination/cross-product, unobserved mapping class, or unqualified model/firmware reports `hardware_start_validated: false`
 
 #### Scenario: Control and delete hardware validation reflect recorded evidence
 - **WHEN** guarded `print pause|resume|cancel` and `files delete` build results on the qualified Kobra X model `20030` / firmware `2.0.2.2` target (versus an unqualified model or firmware)
@@ -37,11 +37,11 @@ The CLI SHALL compute `hardware_discovery_validated`, `hardware_start_validated`
 - **THEN** camera operations report `hardware_camera_validated: true` from the centralized qualification profile (and `false` for unqualified models or firmwares)
 
 ### Requirement: Published and packaged compatibility matrix
-The project SHALL maintain `docs/compatibility.md` documenting supported and unqualified models, firmwares, slicers, filament-box topologies, slots, materials, preparation settings, operations (including `printer discover`, `camera status`, `camera snapshot`, and `camera pipe`), and host platforms. The matrix SHALL explicitly distinguish implemented, offline-validated, and hardware-observed status, SHALL be indexed from project documentation, and SHALL be shipped and link-checked in Python and Debian packages.
+The project SHALL maintain `docs/compatibility.md` separating implemented, offline-validated, and hardware-observed status across models, firmwares, slicers, topologies, slots, materials, preparation flags, CLI operations, and host platforms, indexed from project docs and checked in Python/Debian packaging.
 
 #### Scenario: Compatibility matrix distinguishes evidence tiers
-- **WHEN** an operator reads `docs/compatibility.md`
-- **THEN** every row (including `printer discover` and camera commands) separates implementation status, offline test coverage, and live hardware evidence without inferring support for unobserved printers, firmwares, materials, or external ACE units
+- **WHEN** an operator reads `docs/compatibility.md` after the Milestone 3 print-start qualification session
+- **THEN** every row (including materials, slot-mapping classes, preparation flags, `printer discover`, and camera commands) separates implementation status, offline test coverage, and live hardware evidence without inferring support for untested materials, untested preparation combinations, non-Next slicers, or external ACE units
 
 #### Scenario: New module and documentation stay synchronized with packaging allowlists
 - **WHEN** Python sdist/wheel and Debian package allowlist checks inspect the repository and built archives

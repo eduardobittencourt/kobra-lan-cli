@@ -255,14 +255,33 @@ reports `paint_index`, `slot`, `ams_index`, `gcode_material_type`,
 order of the `--slot-map` arguments preserves the hash.
 
 Plans and starts report `experimental: true`. `hardware_start_validated: true`
-applies only to observed Kobra X firmware `2.0.2.2` configurations with
-`PLA High Speed`, `--auto-leveling on`, `--vibration-compensation off`, and
-`--flow-calibration off`: single-filament `paint_index: 0` on slot 1, 2, or 4,
-and 4-color contiguous 1:1 mapping `0=1, 1=2, 2=3, 3=4`. Single-filament slot 3,
-cross-remapped (`paint_index != ams_index`), subset, sparse, or shared-slot
-multicolor mappings, non-zero single-filament paint indices, and other material
-or preparation combinations report `hardware_start_validated: false`. External
-ACE and multi-box configurations are rejected.
+applies only to Kobra X model `20030` / firmware `2.0.2.2` configurations
+covered by the centralized qualification registry — either exact live-observed
+runs or the class-level onboard slot-mapping rule backed by representative live
+runs below (distinguishing individual untested slot permutations within an
+observed mapping class from unobserved materials, unobserved preparation
+combinations, and unobserved mapping classes, which remain `false`):
+- `PLA High Speed` with baseline preparation `(--auto-leveling on,
+  --vibration-compensation off, --flow-calibration off)` across valid onboard
+  slot-mapping classes (`1..4`, distinct or shared physical slots, zero or
+  non-zero `paint_index`), generalized at the mapping-class level from
+  representative live runs (`0=1..4`, `2=3`, `0..3 -> 1..4`, `0=2, 1=1`,
+  `0=1, 2=3`, and shared-slot `0=1, 1=1` where firmware natively skipped
+  superfluous filament changes; individual untested permutations within these
+  classes are covered by the class rule rather than separate physical prints).
+- `PLA High Speed` single-filament `0=1` with any of the three live-observed
+  alternative preparation-flag combinations: `(off, off, off)`, `(off, on, off)`,
+  or `(off, off, on)`.
+- `PETG` single-filament `0=4` with baseline preparation `(--auto-leveling on,
+  --vibration-compensation off, --flow-calibration off)`.
+
+Unobserved cross-products (such as multicolor, shared-slot, or other-slot
+mappings under alternative preparation flags), unobserved multi-flag preparation
+combinations (`auto+vib`, `auto+flow`, `vib+flow`, `all-on`), mixed materials
+(`PLA High Speed` + `PETG`), `PETG` on untested slots, multicolor, or
+alternative preparation flags, and other loaded materials (`PLA`, `TPU`, `ABS`,
+and so on) report `hardware_start_validated: false`. External ACE and multi-box
+configurations are rejected.
 
 To request execution later, use `print start` with the same explicit arguments plus `--execute --plan-sha256 REVIEWED_PLAN_HASH`. This is a physical action: run it only when printing is authorized and the printer is prepared. It requires a verified upload receipt from this CLI, rechecks the file/state/material, and writes a durable reservation before publishing **one** MQTT `print/start` command. It does not upload again. An ACK is not treated as proof of physical printing; the client subsequently queries the active project and distinguishes observed activity from an uncertain result. It never automatically repeats the command.
 
@@ -572,10 +591,64 @@ four onboard `PLA High Speed` slots (`1..4`, including slot 3 at `ams_index: 2`)
 `uploaded_verified_by_listing_and_metadata`, start returned
 `start_observed_active` (ACK code 0), status confirmed `busy` /
 `nozzle_heating` with 35°C/220°C targets, and the operator confirmed physical
-completion with all four colors and slots matching. Because this run used an
-identity 1:1 mapping (`paint_index == ams_index`), cross-remapped, sparse,
-subset, shared-slot, non-zero single-filament, and single-filament slot 3
-starts remain `hardware_start_validated: false`.
+completion with all four colors and slots matching.
+
+End-to-end print-start matrix qualification on 2026-11-26 executed nine tiny
+`AnycubicSlicerNext 2.0.0.6` Kobra X test chips (`0.32 g`–`0.97 g`, 3–6 layers)
+on Kobra X model `20030` / firmware `2.0.2.2` using an isolated `0700`
+`--state-dir` (preserving production profiles and markers), verified upload
+receipts, reviewed `print plan` / `print start --execute` (plus `--reprint-from`
+for repeated chips), continuous read-only `status` phase observation, `camera
+snapshot` inspection, and operator confirmation of physical completion and slot
+color fidelity on every run:
+- **Run A (single-filament slot 3):** `--slot-map 0=3` (`PLA High Speed`,
+  `auto=on, vib=off, flow=off`) returned `start_observed_active` (ACK code 0),
+  executed `auto_leveling` (~62 s), printed layers `1/6`–`6/6` at 60°C/220°C,
+  and completed in ~5m 40s with the expected slot-3 color.
+- **Run B (`auto-leveling off`):** `--reprint-from` with `--slot-map 0=1`
+  (`PLA High Speed`, `auto=off, vib=off, flow=off`) returned
+  `start_observed_active`, skipped `auto_leveling`, `vibrating`, and
+  `flow_calibrating`, printed `1/6`–`6/6` at 60°C/220°C, and completed in
+  ~5m 23s.
+- **Run C (`vibration-compensation on`):** `--reprint-from` with
+  `--slot-map 0=1` (`PLA High Speed`, `auto=off, vib=on, flow=off`) returned
+  `start_observed_active`, executed `vibrating` (~96 s) while skipping
+  `auto_leveling` and `flow_calibrating`, printed `1/6`–`6/6`, and completed in
+  ~7m 10s.
+- **Run D (`flow-calibration on`):** `--reprint-from` with `--slot-map 0=1`
+  (`PLA High Speed`, `auto=off, vib=off, flow=on`) returned
+  `start_observed_active`, executed `flow_calibrating` (~138 s) while skipping
+  `auto_leveling` and `vibrating`, printed `1/6`–`6/6`, and completed in
+  ~7m 26s.
+- **Run E (2-color cross-remapped subset):** `paint_index` `[0, 1]` mapped via
+  `--slot-map 0=2 --slot-map 1=1` (`PLA High Speed`, `auto=on, vib=off,
+  flow=off`) executed 3 full filament change cycles (`filament_cutting` ->
+  `extfilbox_filament_unfeeding` -> `extfilbox_filament_feeding` ->
+  `nozzle_purging`) across 3 layers in ~8m 23s, producing two adjacent chips in
+  the exact cross-remapped slot colors.
+- **Run F (2-color sparse indices):** `paint_index` `[0, 2]` (`T0`, `T2`)
+  mapped via `--slot-map 0=1 --slot-map 2=3` (`PLA High Speed`, `auto=on,
+  vib=off, flow=off`) executed 3 filament change cycles across 3 layers in
+  ~8m 23s with matching slot-1 and slot-3 colors.
+- **Run G (single-filament non-zero `paint_index`):** `paint_index` `[2]`
+  (`T2`) mapped via `--slot-map 2=3` (`PLA High Speed`, `auto=on, vib=off,
+  flow=off`) completed `1/6`–`6/6` in ~5m 50s with the expected slot-3 color.
+- **Run H (shared physical slot):** `--reprint-from` on the 2-color `[0, 1]`
+  G-code mapped via `--slot-map 0=1 --slot-map 1=1` (`PLA High Speed`,
+  `auto=on, vib=off, flow=off`) completed cleanly in ~5m 50s with **zero**
+  `filament_cutting` or `extfilbox_filament_unfeeding` transitions (firmware
+  `2.0.2.2` natively skipped all 3 superfluous filament changes when both paint
+  indices targeted `ams_index: 0`), producing both adjacent chips in slot 1's
+  color.
+- **Run I (`PETG` single-filament):** `Anycubic PETG` Kobra X G-code mapped via
+  `--slot-map 0=4` (`PETG`, `auto=on, vib=off, flow=off`) returned
+  `start_observed_active` (ACK code 0), printed `1/6`–`6/6` at 75°C/230°C on
+  Textured PEI, and completed in ~6m 38s with operator-confirmed physical
+  completion. All five disposable test `.gcode` files were subsequently removed
+  from the idle printer via `files delete --execute` (`delete_observed_removed`,
+  verified absent via `files list`). Unobserved preparation-flag combinations,
+  mixed-material jobs, `PETG` on other slots/multicolor/prep flags, and other
+  untested materials remain `hardware_start_validated: false`.
 
 End-to-end live camera validation on 2026-11-25 on Kobra X model 20030 /
 firmware 2.0.2.2 verified `camera status` (text and `--json`, confirming

@@ -71,7 +71,7 @@ Mutating device operations sharing a device state directory SHALL hold one exclu
 
 #### Scenario: Review a stored multicolor file with --slot-map
 - **WHEN** the qualified target is idle and `print plan` runs with repeatable `--slot-map PAINT_INDEX=SLOT` covering every `paint_index` declared in the G-code (contiguous or non-contiguous, such as `1` and `3`, or mixed compatible materials such as `PLA` and `PETG`)
-- **THEN** a plan is returned with `multicolor: true`, `hardware_start_validated: false`, ordered `slot_mapping` and `ams_box_mapping` entries sorted by `paint_index`, and a deterministic `plan_sha256` independent of `--slot-map` argument order
+- **THEN** a plan is returned with `multicolor: true`, `hardware_start_validated` reflecting centralized recorded evidence (`true` for qualified combinations such as `PLA High Speed` baseline preparation, `false` for unqualified combinations such as mixed `PLA` and `PETG`), ordered `slot_mapping` and `ams_box_mapping` entries sorted by `paint_index`, and a deterministic `plan_sha256` independent of `--slot-map` argument order
 
 #### Scenario: Incompatible plan
 - **WHEN** the target is busy, firmware is unsupported, file/remote metadata do not match, a mapped slot is not loaded, or any mapped slot material family differs from its corresponding G-code `paint_index` material
@@ -90,7 +90,7 @@ Mutating device operations sharing a device state directory SHALL hold one exclu
 
 #### Scenario: Execute a reviewed multicolor start and intentional reprint
 - **WHEN** `print start` runs with `--slot-map` matching a reviewed multicolor `plan_sha256`, `--execute`, a verified upload receipt, and fresh idle telemetry (and optionally `--reprint-from` for an eligible observed-active predecessor)
-- **THEN** it durably reserves the attempt, publishes one start command carrying the full ordered `ams_box_mapping`, and records `slot_mapping`, `multicolor`, and `hardware_start_validated: false` in the start receipt
+- **THEN** it durably reserves the attempt, publishes one start command carrying the full ordered `ams_box_mapping`, and records `slot_mapping`, `multicolor`, and centralized `hardware_start_validated` in the start receipt
 
 #### Scenario: Ambiguous start
 - **WHEN** the start request or subsequent bounded observation is uncertain
@@ -112,15 +112,15 @@ The CLI SHALL preserve configuration, credentials, device-based receipts, permis
 - **THEN** `print plan` and `print start` do not migrate, modify, or delete those files, do not treat them as an eligible reprint predecessor, and `print start --execute` refuses without sending a start command while those files exist
 
 ### Requirement: Evidence stays qualified
-Both formats SHALL distinguish upload listing/metadata verification from remote byte-hash verification, start acknowledgement from observed activity, and activity from completion or physical quality. Qualification SHALL remain Kobra X model 20030 / firmware 2.0.2.2 and the recorded material/preparation evidence (single-filament `0 -> 1|2|4` and 4-color contiguous 1:1 `0..3 -> 1..4` in `PLA High Speed` with `auto-leveling on`, vibration/flow off); unobserved multicolor mappings and non-zero single `paint_index` starts SHALL report `hardware_start_validated: false`.
+Both formats SHALL distinguish upload listing/metadata verification from remote byte-hash verification, start acknowledgement from observed activity, and activity from completion or physical quality. `hardware_start_validated` SHALL reflect only the Kobra X `20030` / firmware `2.0.2.2` exact runs and class-level onboard slot-mapping rules (backed by representative live runs) recorded in the centralized qualification registry; unobserved materials, unobserved preparation-flag combinations, and unobserved mapping classes SHALL report `hardware_start_validated: false`.
 
 #### Scenario: Successful submission
 - **WHEN** an upload is metadata-verified or a start is observed active
 - **THEN** output labels that evidence accurately without claiming remote byte equality, completed printing, or assessed part quality
 
 #### Scenario: Multicolor or non-zero paint_index qualification boundary
-- **WHEN** `print plan` or `print start` succeeds for an unobserved multicolor mapping (such as a 2/3-color subset, cross-remapped `paint_index != ams_index`, sparse indices, or shared physical slot) or a single-filament G-code whose `paint_index` is not `0` (even when using PLA High Speed with auto-leveling on and vibration/flow calibration off)
-- **THEN** output reports `experimental: true` and `hardware_start_validated: false`
+- **WHEN** `print plan` or `print start` runs on Kobra X `20030` / firmware `2.0.2.2` with a material, preparation-flag tuple, and onboard slot-mapping class covered by recorded exact runs or class-level representative-run rules (single-filament slots `1..4`, non-zero single `paint_index`, contiguous/subset/cross-remapped/sparse multicolor, and shared physical slots on `PLA High Speed` baseline preparation, where individual untested slot permutations within those classes are covered by the class rule) versus an unobserved material, unobserved preparation-flag tuple or cross-product, or unobserved mapping class
+- **THEN** registry-covered combinations report `experimental: true` and `hardware_start_validated: true`, while every combination with an unobserved material, unobserved preparation-flag tuple/cross-product, or unobserved mapping class reports `experimental: true` and `hardware_start_validated: false`
 
 ### Requirement: Local identity for each start attempt
 Each durably reserved start SHALL have a deterministic local `attempt_id` independent of firmware task IDs. Both root starts and reprints SHALL be stored under `starts/<device>/<attempt_id>.attempt` and `<attempt_id>.json`, SHALL record `attempt_id` in marker and receipt, SHALL bind device, file, plan, and any reprint predecessor, and SHALL expose safe attempt references in text and JSON.
@@ -170,11 +170,11 @@ Each durably reserved start SHALL have a deterministic local `attempt_id` indepe
 
 #### Scenario: Map multiple paint indices to the same physical slot
 - **WHEN** a multicolor G-code declares `paint_index` `0` (`PLA`) and `1` (`PLA`) and `print plan` runs with `--slot-map 0=1 --slot-map 1=1` against a loaded `PLA High Speed` slot `1`
-- **THEN** planning succeeds with two `ams_box_mapping` entries (`paint_index: 0` and `paint_index: 1`, both with `ams_index: 0`), `multicolor: true`, ordered `slot_mapping`, and `hardware_start_validated: false`
+- **THEN** planning succeeds with two `ams_box_mapping` entries (`paint_index: 0` and `paint_index: 1`, both with `ams_index: 0`), `multicolor: true`, ordered `slot_mapping`, and `hardware_start_validated` matching centralized evidence (`true` for baseline preparation on `20030` / `2.0.2.2`, `false` for unobserved preparation combinations or materials)
 
 #### Scenario: Map a single-filament G-code on a non-zero paint index
 - **WHEN** a single-filament G-code declares only `paint_index: 2` (`PLA`, with `T2`) and `print plan` runs with `--slot-map 2=4`
-- **THEN** planning succeeds with one `ams_box_mapping` entry (`paint_index: 2`, `ams_index: 3`), `multicolor: false`, a one-entry `slot_mapping`, and `hardware_start_validated: false`
+- **THEN** planning succeeds with one `ams_box_mapping` entry (`paint_index: 2`, `ams_index: 3`), `multicolor: false`, a one-entry `slot_mapping`, and `hardware_start_validated` matching centralized evidence (`true` for `PLA High Speed` with baseline preparation on `20030` / `2.0.2.2`, `false` for unobserved preparation combinations or materials)
 
 #### Scenario: Missing, extra, or undeclared tool mapping fails validation
 - **WHEN** `--slot-map` omits a declared `paint_index`, specifies a `paint_index` not present in `; paint_info =`, or the G-code contains a `T<n>` command absent from `; paint_info =`
