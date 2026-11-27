@@ -90,7 +90,16 @@ def bourne(nodes, shell):
     lines += ['  if [[ "$cur" != -* ]]; then', '    case "$context" in',
               '      ' + '|'.join(paths) + ')' + (' _files ;;' if zsh else ' type compopt >/dev/null 2>&1 && compopt -o filenames; while IFS= read -r _kobra_item; do COMPREPLY+=("$_kobra_item"); done < <(compgen -f -- "$cur") ;;'),
               '    esac', '  fi', '}']
-    lines += ['compdef _kobra_lan kobra-lan' if zsh else 'complete -F _kobra_lan kobra-lan']
+    if zsh:
+        lines += ['compdef _kobra_lan kobra-lan']
+    else:
+        lines += [
+            'if type compopt >/dev/null 2>&1; then',
+            '  complete -F _kobra_lan kobra-lan',
+            'else',
+            '  complete -o filenames -F _kobra_lan kobra-lan',
+            'fi',
+        ]
     return '\n'.join(lines) + '\n'
 
 

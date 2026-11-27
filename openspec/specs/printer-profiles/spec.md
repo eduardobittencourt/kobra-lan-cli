@@ -97,7 +97,7 @@ Profile storage SHALL use user-owned private directories and files, reject unsaf
 
 #### Scenario: macOS root system alias under temporary or system paths
 - **WHEN** profile or state operations on macOS target a path prefixed by the OS-owned `/var` or `/tmp` root alias (such as `$TMPDIR` under `/var/folders/...`) with no user-controlled symlinks below it
-- **THEN** directory traversal resolves only that verified root-owned system alias to `/private/var` or `/private/tmp` and enforces strict non-symlink, ownership, and `0700`/`0600` checks on every remaining component
+- **THEN** directory traversal resolves only that verified root-owned system alias to `/private/var` or `/private/tmp`, enforces strict non-symlink (`O_NOFOLLOW`) traversal on every remaining component, and enforces user ownership and `0700`/`0600` permissions on the managed target directories and files
 
 #### Scenario: User-controlled symlink below macOS system alias
 - **WHEN** a managed profile root, device state directory, or target file under `/var` or `/tmp` on macOS contains a user-controlled symlink

@@ -20,8 +20,8 @@
 
 ## 5. Real macOS Verification and Compatibility Matrix Evidence
 
-- [x] 5.1 Run offline unit tests, `sh -n kobra-lan`, `./kobra-lan --version`, native `zsh` and stock Bash 3.2 completion tests, and `scripts/check_python.py` on the linked `MacBook Air de Eduardo` (`arm64`), fixing any real macOS/BSD issues discovered (such as `discovery.py` socket option behavior) with matching unit tests.
-- [x] 5.2 With explicit operator coordination and an isolated temporary config/state directory on the linked `MacBook Air de Eduardo`, execute strictly read-only LAN verification against Kobra X (`20030` / firmware `2.0.2.2`) covering `printer discover` and read-only status/inspection (`doctor`, `status`, `slots list`, `camera status`) without mutating printer state or existing Linux profiles, and confirm zero secret/token leakage.
+- [x] 5.1 Run offline unit tests, `sh -n kobra-lan`, `./kobra-lan --version`, native `zsh` and stock Bash 3.2 completion tests, and `scripts/check_python.py` on the authorized macOS `arm64` test host, fixing any real macOS/BSD issues discovered (such as `discovery.py` socket option behavior) with matching unit tests.
+- [x] 5.2 With explicit operator coordination and an isolated temporary config/state directory on the authorized macOS `arm64` test host, execute strictly read-only LAN verification against Kobra X (`20030` / firmware `2.0.2.2`) covering `printer discover` and read-only status/inspection (`doctor`, `status`, `slots list`, `camera status`) without mutating printer state or existing Linux profiles, and confirm zero secret/token leakage.
 - [x] 5.3 Record sanitized macOS (`arm64`) offline CI and live read-only LAN hardware evidence (explicitly separating untested mutating macOS runs, `x86_64` macOS, Windows, Linux `arm64`, PyPI, and Homebrew) in `docs/compatibility.md`, `ROADMAP.md`, and `CHANGELOG.md` (`Unreleased`); verify with `uv run --locked ruff check kobra_lan scripts tests`, `sh -n kobra-lan`, and `uv run --locked python -m unittest discover -s tests -v`.
 
 ## Workflow follow-up

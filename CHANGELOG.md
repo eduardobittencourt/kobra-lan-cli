@@ -8,12 +8,15 @@
   - Add narrow `darwin`-only root system alias normalization (`/var` →
     `/private/var`, `/tmp` → `/private/tmp`, verified via `os.lstat` /
     `os.readlink` as `uid == 0` symlinks) shared by `kobra_lan/profiles.py` and
-    `kobra_lan/pairing.py` while keeping strict `O_NOFOLLOW` and `0700`/`0600`
-    refusal on every descendant component.
+    `kobra_lan/pairing.py` while keeping strict `O_NOFOLLOW` traversal on every
+    descendant component and user-owned `0700`/`0600` checks on managed target
+    directories and files.
   - Make generated `bash` completions compatible with stock macOS Bash 3.2 as
-    well as Bash 4+ (replacing `mapfile` with `while IFS= read -r` and guarding
-    `compopt -o filenames`), keeping `zsh` and `fish` scripts intact and
-    skipping Bash 4+ readline escaping only when `BASH_VERSINFO[0] < 4`.
+    well as Bash 4+ (replacing `mapfile` with `while IFS= read -r`, guarding
+    `compopt -o filenames`, and falling back to `complete -o filenames -F` when
+    `compopt` is absent so spaced filenames stay quoted on Bash 3.2 too),
+    keeping `zsh` and `fish` scripts intact and adding non-stubbed native `zsh`
+    file-completion verification.
   - Make root `./kobra-lan` resolve symlinks portably in POSIX `/bin/sh`
     (without GNU-only `readlink -f`) and select `python3` from `PATH` with
     fallback to `/usr/bin/python3`, leaving Debian's packaged

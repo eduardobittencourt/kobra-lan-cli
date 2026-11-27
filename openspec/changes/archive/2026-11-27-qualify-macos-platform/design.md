@@ -47,12 +47,12 @@ Today, all runtime modules in `kobra_lan/` are pure Python with one external dep
     done < <(compgen ...)
     ```
     (using the same pattern for file completions instead of `local -a files; mapfile -t files < <(...)`).
-  - Guard `compopt -o filenames` with `type compopt >/dev/null 2>&1 && compopt -o filenames` so Bash 3.2 completes cleanly with empty stderr while Bash 4+ and unit-test stubs (`compopt() { ... }`) still execute it.
+  - Guard `compopt -o filenames` with `type compopt >/dev/null 2>&1 && compopt -o filenames`, and when `compopt` is unavailable (Bash 3.2) register `complete -o filenames -F _kobra_lan kobra-lan` (keeping `complete -F _kobra_lan kobra-lan` on Bash 4+) so Readline preserves filename quoting for spaced paths on both Bash 3.2 and Bash 4+.
   - Keep `zsh` and `fish` generated scripts unchanged (unless macOS native `zsh` reveals a concrete defect during testing).
   - In `tests/test_completions.py`:
     - Keep `test_bash_sources_and_completes_root_nested_choices_and_files` running unconditionally on both Bash 3.2 and Bash 4+.
-    - In `test_bash_readline_inserts_spaced_paths_as_single_arguments` (which depends on readline's `compopt -o filenames` escaping), skip with an explicit diagnostic when `bash` reports `BASH_VERSINFO[0] < 4` (stock macOS `/bin/bash`), while running unconditionally on Bash 4+ (Linux CI and Homebrew Bash).
-    - Keep `test_zsh_sources_and_calls_completion_without_device_commands` running on any host with `zsh`, and in macOS CI run an explicit assertion step confirming `zsh` is installed and the `zsh` completion test passes without skipping.
+    - Keep `test_bash_readline_inserts_spaced_paths_as_single_arguments` running unconditionally on both Bash 3.2 and Bash 4+ (exercising both normal and disabled-`compopt` registration) so spaced-path quoting is continuously verified across both Bash versions.
+    - Keep `test_zsh_sources_and_calls_completion_without_device_commands` and a real PTY native `zsh` file-completion test (without `compadd`/`_files` stubs) running on any host with `zsh`, and in macOS CI run an explicit assertion step confirming `zsh` is installed and both `zsh` completion tests pass without skipping.
 - **Rationale**: Fixes real macOS `/bin/bash` users without losing Bash 4+ filename escaping or breaking existing assertions in `scripts/probe_completions.py` and `tests/test_completions.py`.
 - **Alternatives considered**:
   - Declaring Bash 4+ required and skipping bash tests on macOS: **Rejected** — easy to support Bash 3.2 cleanly with 3 lines of standard bash.
@@ -79,9 +79,9 @@ Today, all runtime modules in `kobra_lan/` are pure Python with one external dep
 - **Alternatives considered**:
   - Putting macOS in a separate optional workflow: **Rejected** — would let regressions slip into `main` and tagged releases.
 
-### 5. Live read-only LAN verification on macOS (`MacBook Air de Eduardo`)
+### 5. Live read-only LAN verification on macOS (`arm64` test host)
 
-- **Decision**: During implementation, run a strictly read-only verification session from the linked `MacBook Air de Eduardo` (`arm64`) against the local Kobra X (`20030` / firmware `2.0.2.2`) using an isolated temporary directory (`HOME` / `--config`) so no persistent Mac or Linux profiles or printer state are modified:
+- **Decision**: During implementation, run a strictly read-only verification session from the authorized macOS `arm64` test host against the local Kobra X (`20030` / firmware `2.0.2.2`) using an isolated temporary directory (`HOME` / `--config`) so no persistent Mac or Linux profiles or printer state are modified:
   1. `printer discover` (validates macOS BSD UDP multicast `IP_MULTICAST_TTL`, `IP_MULTICAST_IF`, and unicast SSDP reply parsing against live Kobra X).
   2. Read-only connection checks (`doctor`, `status`, `slots list`, `camera status`) — coordinated with the user regarding credentials/client-slot budget (using either a temporary isolated pairing or an operator-provided temporary config without exposing or persisting secrets, and never touching `code 19002` blindly or modifying existing Linux access).
   3. Record exact sanitized evidence (macOS version, Apple Silicon `arm64`, Python version, `zsh` version, commands verified, and explicit non-claims for mutating operations) in `docs/compatibility.md`, `docs/usage.md` (if appropriate), `docs/releases.md`, `README.md`, `ROADMAP.md`, and `CHANGELOG.md`.
@@ -90,7 +90,7 @@ Today, all runtime modules in `kobra_lan/` are pure Python with one external dep
 ## Risks / Trade-offs
 
 - **[Risk] Over-broad path normalization weakens symlink refusal** → **Mitigation**: Restrict alias normalization strictly to `sys.platform == "darwin"`, exact leading `/var` or `/tmp` prefixes, and verified `uid == 0` symlinks targeting `private/var` or `private/tmp`; keep `O_NOFOLLOW` on every component below and cover malicious/non-root symlink targets in unit tests.
-- **[Risk] `uv`-managed Python on `macos-latest` differs in `ensurepip` or `build` behavior for `scripts/check_python.py`** → **Mitigation**: Test `scripts/check_python.py` on both the linked `MacBook Air de Eduardo` and `macos-latest` CI before merging; keep `requirements-runtime.txt` hash enforcement (`--require-hashes --only-binary=:all:`) unchanged.
+- **[Risk] `uv`-managed Python on `macos-latest` differs in `ensurepip` or `build` behavior for `scripts/check_python.py`** → **Mitigation**: Test `scripts/check_python.py` on both the authorized macOS `arm64` test host and `macos-latest` CI before merging; keep `requirements-runtime.txt` hash enforcement (`--require-hashes --only-binary=:all:`) unchanged.
 - **[Risk] `macos-latest` CI runner time or `cryptography` wheel mismatch on newer Python versions** → **Mitigation**: Pin the macOS CI Python version to a version present in `uv.lock` / `requirements-runtime.txt` (e.g., Python 3.12 or 3.13, both of which have `macosx_11_0_arm64` wheels in `uv.lock`) so `--only-binary=:all:` always resolves deterministically.
 - **[Risk] Live pairing on macOS could consume a printer LAN client slot (`code 19002`)** → **Mitigation**: Start with strictly zero-auth `printer discover`, and confirm with the user before any temporary `printer pair` or reuse of an isolated read-only test config on the Mac.
 - **[Risk] Readers assume macOS qualification implies Homebrew or validated live printing from macOS** → **Mitigation**: Explicitly distinguish offline CI validation, live read-only LAN observation, untested mutating commands, and future Homebrew/PyPI channels across `docs/compatibility.md`, `docs/releases.md`, `README.md`, and `ROADMAP.md`.

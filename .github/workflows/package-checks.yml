@@ -202,9 +202,12 @@ jobs:
           import sys, unittest
           sys.path.insert(0, "tests")
           from test_completions import CompletionTests
-          suite = unittest.TestSuite([CompletionTests("test_zsh_sources_and_calls_completion_without_device_commands")])
+          suite = unittest.TestSuite([
+              CompletionTests("test_zsh_sources_and_calls_completion_without_device_commands"),
+              CompletionTests("test_zsh_completes_local_files_natively_without_stubs"),
+          ])
           result = unittest.TextTestRunner(verbosity=2).run(suite)
-          assert result.wasSuccessful() and result.testsRun == 1 and not result.skipped, (result.testsRun, result.skipped)
+          assert result.wasSuccessful() and result.testsRun == 2 and not result.skipped, (result.testsRun, result.skipped)
           '
       - name: Outside-checkout Python archive and wheel acceptance
         run: |

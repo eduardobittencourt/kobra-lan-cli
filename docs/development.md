@@ -40,7 +40,8 @@ root option placement, text and version-1 JSON, reviewed execution routes and
 device markers preserved by normal operations. Named-only pairing and null
 defaults are tested without legacy conversion or root-config discovery. Completion metadata is derived from argparse; bash,
 zsh, and fish smoke tests run when available (missing shells are explicitly
-skipped, Bash 4+ readline escaping skips only on Bash `< 4` such as stock macOS
-Bash 3.2, and macOS CI requires native `zsh` without skipping). Installed archive/Debian probes use `--json` before operational
+skipped, Bash filename quoting is verified on both Bash 3.2 and Bash 4+, and
+macOS CI requires native `zsh` including real file-option completion without
+skipping). Installed archive/Debian probes use `--json` before operational
 commands and exercise `gcode inspect`, all completion generators and safe parse
 failures outside the checkout. See [usage](usage.md) for the supported workflow.
