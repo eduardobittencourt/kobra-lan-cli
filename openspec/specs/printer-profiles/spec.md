@@ -85,7 +85,7 @@ Removing the default SHALL persist null. Commands without a target SHALL then re
 - **THEN** no target is implicitly selected and other managed profiles remain available for deliberate selection
 
 ### Requirement: Private crash-safe profile management
-Profile storage SHALL use user-owned private directories and files, reject unsafe names and symlink destinations, prevent replacement of existing profiles and serialize conflicting local mutations. Interrupted writes SHALL leave a complete registry or a recoverable failure. Removal SHALL retain shared, external or uncertain-ownership files and SHALL NOT invalidate an operation already using the selected profile.
+Profile storage SHALL use user-owned private directories and files, reject unsafe names and symlink destinations, prevent replacement, serialize local mutations, and preserve shared or active files on removal. On macOS (`darwin`), strict non-symlink traversal SHALL permit only verified root-owned OS aliases (`/var` → `/private/var`, `/tmp` → `/private/tmp`) while rejecting all user or managed symlinks.
 
 #### Scenario: Unsafe destination or concurrent writers
 - **WHEN** a profile name escapes its storage root, a destination is a symlink or two writers contend for the same name
@@ -94,6 +94,14 @@ Profile storage SHALL use user-owned private directories and files, reject unsaf
 #### Scenario: Interrupted removal or shared files
 - **WHEN** deletion encounters shared PEMs, uncertain ownership, an active profile user or a filesystem failure
 - **THEN** shared/uncertain material and active access are preserved, the command reports the outcome, and no partial state silently selects another target
+
+#### Scenario: macOS root system alias under temporary or system paths
+- **WHEN** profile or state operations on macOS target a path prefixed by the OS-owned `/var` or `/tmp` root alias (such as `$TMPDIR` under `/var/folders/...`) with no user-controlled symlinks below it
+- **THEN** directory traversal resolves only that verified root-owned system alias to `/private/var` or `/private/tmp`, enforces strict non-symlink (`O_NOFOLLOW`) traversal on every remaining component, and enforces user ownership and `0700`/`0600` permissions on the managed target directories and files
+
+#### Scenario: User-controlled symlink below macOS system alias
+- **WHEN** a managed profile root, device state directory, or target file under `/var` or `/tmp` on macOS contains a user-controlled symlink
+- **THEN** traversal rejects the path without following the symlink and without mutating files
 
 ### Requirement: Preserve device-based duplicate protection
 Profile names and default changes SHALL NOT change receipt or attempt identities. Existing `--state-dir` behavior and device-based state paths SHALL remain compatible. Removal and re-pairing SHALL preserve operational markers, including uncertain outcomes.

@@ -62,7 +62,8 @@ def bourne(nodes, shell):
     lines = ["# Offline kobra-lan completion; no configuration or printer queries."]
     if zsh:
         lines += ["#compdef kobra-lan"]
-    lines += ["_kobra_lan() {", "  local context='' word prev cur candidates='' skip=0 i"]
+    local_vars = "  local context='' word prev cur candidates='' skip=0 i" + ("" if zsh else " _kobra_item")
+    lines += ["_kobra_lan() {", local_vars]
     if zsh:
         lines += ['  cur="${words[CURRENT]}"; prev="${words[CURRENT-1]}"',
                   '  for ((i=2; i<CURRENT; i++)); do', '    word="${words[i]}"']
@@ -84,19 +85,36 @@ def bourne(nodes, shell):
     if zsh:
         lines += ['  compadd -- ${=candidates}']
     else:
-        lines += ['  mapfile -t COMPREPLY < <(compgen -W "$candidates" -- "$cur")']
+        lines += ['  while IFS= read -r _kobra_item; do COMPREPLY+=("$_kobra_item"); done < <(compgen -W "$candidates" -- "$cur")']
     paths = [shlex.quote(path) for path, node in nodes.items() if node["files"]]
     lines += ['  if [[ "$cur" != -* ]]; then', '    case "$context" in',
-              '      ' + '|'.join(paths) + ')' + (' _files ;;' if zsh else ' compopt -o filenames; local -a files; mapfile -t files < <(compgen -f -- "$cur"); COMPREPLY+=("${files[@]}") ;;'),
+              '      ' + '|'.join(paths) + ')' + (' _files ;;' if zsh else ' type compopt >/dev/null 2>&1 && compopt -o filenames; while IFS= read -r _kobra_item; do COMPREPLY+=("$_kobra_item"); done < <(compgen -f -- "$cur") ;;'),
               '    esac', '  fi', '}']
-    lines += ['compdef _kobra_lan kobra-lan' if zsh else 'complete -F _kobra_lan kobra-lan']
+    if zsh:
+        lines += ['compdef _kobra_lan kobra-lan']
+    else:
+        lines += [
+            'if type compopt >/dev/null 2>&1; then',
+            '  complete -F _kobra_lan kobra-lan',
+            'else',
+            '  complete -o filenames -F _kobra_lan kobra-lan',
+            'fi',
+        ]
     return '\n'.join(lines) + '\n'
 
 
 def bourne_values(nodes, zsh):
     lines = []
-    file_return = ' _files; return ;;' if zsh else ' compopt -o filenames; mapfile -t COMPREPLY < <(compgen -f -- "$cur"); return ;;'
-    choices_return = ' compadd -- ${=candidates}; return ;;' if zsh else ' mapfile -t COMPREPLY < <(compgen -W "$candidates" -- "$cur"); return ;;'
+    file_return = (
+        ' _files; return ;;'
+        if zsh
+        else ' type compopt >/dev/null 2>&1 && compopt -o filenames; while IFS= read -r _kobra_item; do COMPREPLY+=("$_kobra_item"); done < <(compgen -f -- "$cur"); return ;;'
+    )
+    choices_return = (
+        ' compadd -- ${=candidates}; return ;;'
+        if zsh
+        else ' while IFS= read -r _kobra_item; do COMPREPLY+=("$_kobra_item"); done < <(compgen -W "$candidates" -- "$cur"); return ;;'
+    )
     for path, flag, option in value_options(nodes):
         key = shlex.quote(path + ':' + flag)
         if option["choices"]:

@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import re
 import stat
+import sys
 import time
 import uuid
 
@@ -17,6 +18,7 @@ REGISTRY_FILE = 'profiles.json'
 UNKNOWN_PROFILE = 'Unknown profile; run printer list'
 
 DIRECTORY_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+DARWIN_SYSTEM_ROOT_ALIASES = frozenset(('var', 'tmp'))
 
 
 class ProfileSelectionError(ProtocolError):
@@ -44,9 +46,35 @@ def private(fd, directory=False):
         raise ProfileLocalError('Managed storage must be user-owned with directories 0700 and files 0600')
 
 
+def normalize_darwin_system_alias(path):
+    """Canonicalize only verified root-owned macOS /var and /tmp system aliases."""
+    normalized = Path(os.path.abspath(path))
+    if sys.platform != 'darwin':
+        return normalized
+    parts = normalized.parts
+    if len(parts) < 2 or parts[1] not in DARWIN_SYSTEM_ROOT_ALIASES:
+        return normalized
+    alias = parts[1]
+    alias_path = os.path.join('/', alias)
+    try:
+        info = os.lstat(alias_path)
+    except OSError:
+        return normalized
+    if not stat.S_ISLNK(info.st_mode) or info.st_uid != 0:
+        return normalized
+    try:
+        target = os.readlink(alias_path)
+    except OSError:
+        return normalized
+    expected = (os.path.join('private', alias), os.path.join('/', 'private', alias))
+    if target not in expected:
+        return normalized
+    return Path('/', 'private', alias, *parts[2:])
+
+
 def open_directory(path, create=False, require_private=True):
     """Walk every component via directory descriptors, never following symlinks."""
-    path = Path(os.path.abspath(path))
+    path = normalize_darwin_system_alias(path)
     fd = os.open('/', DIRECTORY_FLAGS)
     try:
         for component in path.parts[1:]:
@@ -278,10 +306,12 @@ class Registry:
 
     def _explicit(self, config):
         path = Path(os.path.abspath(config))
+        normalized = normalize_darwin_system_alias(path)
         for candidate in (self.root / 'profiles', (self.root / 'profiles').resolve()):
-            if not path.is_relative_to(candidate):
+            matched = next((p for p in (path, normalized) if p.is_relative_to(candidate)), None)
+            if matched is None:
                 continue
-            relative = path.relative_to(candidate).parts
+            relative = matched.relative_to(candidate).parts
             if len(relative) != 2 or relative[1] != CONFIG_FILE:
                 raise ProtocolError('Explicit managed configuration must name a complete profile config')
             name = validate_name(relative[0])
@@ -444,7 +474,6 @@ class Registry:
         return entry
 
     def remove(self, name, yes=False, stdin=None, stderr=None):
-        import sys
         stdin = sys.stdin if stdin is None else stdin
         stderr = sys.stderr if stderr is None else stderr
         with self.lock(exclusive=False, create=False):

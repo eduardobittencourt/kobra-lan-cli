@@ -89,8 +89,10 @@ class CompletionTests(unittest.TestCase):
             self.assertNotIn('(kobra-lan ', script)
 
     def test_bash_sources_and_completes_root_nested_choices_and_files(self):
-        script = generate(build_parser(), 'bash')
-        script += '''
+        base_script = generate(build_parser(), 'bash')
+        self.assertNotIn('mapfile', base_script)
+        self.assertIn('type compopt >/dev/null 2>&1 && compopt -o filenames', base_script)
+        script = base_script + '''
 compopt() { printf 'filename-mode:%s\\n' "$*"; }
 COMP_WORDS=(kobra-lan --json --printer bench files ''); COMP_CWORD=5
 _kobra_lan; printf '%s\\n' "${COMPREPLY[@]}"
@@ -164,34 +166,68 @@ _kobra_lan; printf '%s\\n' "${COMPREPLY[@]}"
             self.assertIn(expected, process.stdout.splitlines())
         self.assertIn('filename-mode:-o filenames', process.stdout.splitlines())
 
+        # Simulate Bash 3.2 (missing compopt builtin/function) and verify clean completion with empty stderr.
+        no_compopt = (
+            'enable -n compopt 2>/dev/null || true\n'
+            'unset -f compopt 2>/dev/null || true\n'
+            + base_script
+            + '''
+COMP_WORDS=(kobra-lan gcode inspect pypro); COMP_CWORD=3
+_kobra_lan; printf 'pos-file:%s\\n' "${COMPREPLY[@]}"
+COMP_WORDS=(kobra-lan camera snapshot --output pypro); COMP_CWORD=4
+_kobra_lan; printf 'opt-file:%s\\n' "${COMPREPLY[@]}"
+COMP_WORDS=(kobra-lan print plan test.gcode --auto-leveling o); COMP_CWORD=5
+_kobra_lan; printf 'choice:%s\\n' "${COMPREPLY[@]}"
+COMP_WORDS=(kobra-lan files delete a.gcode --ex); COMP_CWORD=4
+_kobra_lan; printf 'flag:%s\\n' "${COMPREPLY[@]}"
+'''
+        )
+        process_no_compopt = subprocess.run(
+            ['bash', '--noprofile', '--norc'], input=no_compopt, text=True, capture_output=True
+        )
+        self.assertEqual(process_no_compopt.returncode, 0, process_no_compopt.stderr)
+        self.assertEqual(process_no_compopt.stderr, '')
+        for expected in ('pos-file:pyproject.toml', 'opt-file:pyproject.toml',
+                         'choice:on', 'choice:off', 'flag:--execute'):
+            self.assertIn(expected, process_no_compopt.stdout.splitlines())
+
     def test_bash_readline_inserts_spaced_paths_as_single_arguments(self):
-        with tempfile.TemporaryDirectory() as directory:
-            from pathlib import Path
-            root = Path(directory)
-            script = root / 'completion.bash'
-            script.write_text(generate(build_parser(), 'bash'))
-            (root / 'model with spaces.gcode').write_text('synthetic')
-            (root / 'config with spaces.json').write_text('{}')
-            master, slave = pty.openpty()
-            process = subprocess.Popen(['bash', '--noprofile', '--norc', '-i'], cwd=root,
-                                       stdin=slave, stdout=slave, stderr=slave,
-                                       env={**os.environ, 'TERM': 'dumb', 'PS1': ''})
-            os.close(slave)
-            try:
-                commands = ("source completion.bash\n"
-                            "kobra-lan() { printf 'OPERAND:<%s>\\n' \"$@\"; }\n"
-                            "kobra-lan gcode inspect model\t\n"
-                            "kobra-lan --config config\t\nexit\n")
-                os.write(master, commands.encode())
-                output = read_terminal(master)
-                self.assertEqual(process.wait(timeout=1), 0, output)
-                self.assertIn(b'OPERAND:<model with spaces.gcode>\r\n', output)
-                self.assertIn(b'OPERAND:<config with spaces.json>\r\n', output)
-            finally:
-                os.close(master)
-                if process.poll() is None:
-                    process.kill()
-                    process.wait()
+        for disable_compopt in (False, True):
+            with self.subTest(disable_compopt=disable_compopt), tempfile.TemporaryDirectory() as directory:
+                from pathlib import Path
+                root = Path(directory)
+                script = root / 'completion.bash'
+                script.write_text(generate(build_parser(), 'bash'))
+                (root / 'model with spaces.gcode').write_text('synthetic')
+                (root / 'config with spaces.json').write_text('{}')
+                master, slave = pty.openpty()
+                process = subprocess.Popen(['bash', '--noprofile', '--norc', '-i'], cwd=root,
+                                           stdin=slave, stdout=slave, stderr=slave,
+                                           env={**os.environ, 'TERM': 'dumb', 'PS1': ''})
+                os.close(slave)
+                try:
+                    preamble = (
+                        "enable -n compopt 2>/dev/null || true\n"
+                        "unset -f compopt 2>/dev/null || true\n"
+                        if disable_compopt else ""
+                    )
+                    commands = (
+                        preamble
+                        + "source completion.bash\n"
+                        + "kobra-lan() { printf 'OPERAND:<%s>\\n' \"$@\"; }\n"
+                        + "kobra-lan gcode inspect model\t\n"
+                        + "kobra-lan --config config\t\nexit\n"
+                    )
+                    os.write(master, commands.encode())
+                    output = read_terminal(master)
+                    self.assertEqual(process.wait(timeout=2), 0, output)
+                    self.assertIn(b'OPERAND:<model with spaces.gcode>\r\n', output)
+                    self.assertIn(b'OPERAND:<config with spaces.json>\r\n', output)
+                finally:
+                    os.close(master)
+                    if process.poll() is None:
+                        process.kill()
+                        process.wait()
 
     def test_fish_sources_and_completes_offline(self):
         if not shutil.which('fish'):
@@ -341,3 +377,47 @@ _kobra_lan
                          'cancel:--execute', 'cancel:--filename',
                          'jobs:list', 'jobs:info', 'kind:all', 'kind:start', 'kind:observation', '--limit'):
             self.assertIn(expected, process.stdout.splitlines())
+
+    def test_zsh_completes_local_files_natively_without_stubs(self):
+        if not shutil.which('zsh'):
+            self.skipTest('zsh unavailable: native smoke test not performed')
+        with tempfile.TemporaryDirectory() as directory:
+            from pathlib import Path
+            root = Path(directory)
+            (root / 'completion.zsh').write_text(generate(build_parser(), 'zsh'))
+            (root / 'frame with spaces.jpg').write_text('synthetic')
+            (root / 'model with spaces.gcode').write_text('synthetic')
+            master, slave = pty.openpty()
+            env = {
+                **os.environ,
+                'TERM': 'dumb',
+                'PS1': '',
+                'PROMPT': '',
+                'RPROMPT': '',
+                'ZDOTDIR': str(root),
+                'HOME': str(root),
+            }
+            process = subprocess.Popen(
+                ['zsh', '-f', '-i'], cwd=root, stdin=slave, stdout=slave, stderr=slave, env=env
+            )
+            os.close(slave)
+            try:
+                commands = (
+                    "setopt NO_BEEP\n"
+                    "autoload -Uz compinit; compinit -u -D\n"
+                    "source completion.zsh\n"
+                    "kobra-lan() { printf 'OPERAND:<%s>\\n' \"$@\"; }\n"
+                    "kobra-lan camera snapshot --output frame\t\n"
+                    "kobra-lan gcode inspect model\t\n"
+                    "exit\n"
+                )
+                os.write(master, commands.encode())
+                output = read_terminal(master)
+                self.assertEqual(process.wait(timeout=2), 0, output)
+                self.assertIn(b'OPERAND:<frame with spaces.jpg>\r\n', output)
+                self.assertIn(b'OPERAND:<model with spaces.gcode>\r\n', output)
+            finally:
+                os.close(master)
+                if process.poll() is None:
+                    process.kill()
+                    process.wait()

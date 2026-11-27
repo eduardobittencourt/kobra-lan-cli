@@ -21,14 +21,14 @@ sudo apt install ./kobra-lan-cli_0.6.0-1_all.deb
 /usr/bin/kobra-lan --help
 ```
 
-The package installs `/usr/bin/kobra-lan`. If a checkout launcher already exists in your PATH, inspect `type -a kobra-lan` and follow the [deliberate switching instructions](docs/releases.md#download-install-and-deliberately-switch-commands). Installation preserves private configuration and operational state and does not contact a printer. PyPI, mise and Homebrew distribution remain future work.
+The package installs `/usr/bin/kobra-lan`. If a checkout launcher already exists in your PATH, inspect `type -a kobra-lan` and follow the [deliberate switching instructions](docs/releases.md#download-install-and-deliberately-switch-commands). Installation preserves private configuration and operational state and does not contact a printer. macOS (`arm64`, Python `>=3.11`) is supported via source checkout or local wheel/venv installation — see [macOS installation](docs/releases.md#macos-arm64-source-and-wheel-installation). PyPI, `mise`, and Homebrew distribution are not yet published and remain future work.
 
 ## Running the client
 
-For independent package builds, supported Debian/Ubuntu targets, compatibility
+For independent package builds, supported Debian/Ubuntu and macOS (`arm64`) targets, compatibility
 policy and installation/release procedures, see the [release guide](docs/releases.md).
 
-Python >=3.11 with `cryptography>=41`; no daemon. Python package installers resolve the declared dependency. For the source launcher on Debian 13 / Ubuntu 24.04, install `python3-cryptography` with apt first; the launcher uses `/usr/bin/python3`.
+Python >=3.11 with `cryptography>=41`; no daemon. Python package installers resolve the declared dependency. The source launcher `./kobra-lan` resolves `python3` from `PATH` (falling back to `/usr/bin/python3`): on Debian 13 / Ubuntu 24.04 install `python3-cryptography` with apt or use a virtual environment; on macOS (`arm64`) use a Python `>=3.11` virtual environment (`uv` or `python3 -m venv`, since Apple's `/usr/bin/python3` is 3.9), plus optional `ffmpeg` on `PATH` if using `camera snapshot`.
 
 ```sh
 git clone https://github.com/eduardobittencourt/kobra-lan-cli.git

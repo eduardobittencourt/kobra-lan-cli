@@ -37,12 +37,12 @@ The CLI SHALL compute `hardware_discovery_validated`, `hardware_start_validated`
 - **THEN** camera operations report `hardware_camera_validated: true` from the centralized qualification profile (and `false` for unqualified models or firmwares)
 
 ### Requirement: Published and packaged compatibility matrix
-The project SHALL maintain `docs/compatibility.md` separating implemented, offline-validated, and hardware-observed status across models, firmwares, slicers, topologies, slots, materials, preparation flags, CLI operations, and host platforms, indexed from project docs and checked in Python/Debian packaging.
+The project SHALL maintain `docs/compatibility.md` separating implemented, offline-validated, and hardware-observed evidence across models, firmwares, slicers, topologies, slots, materials, preparation flags, CLI operations, and host platforms, indexed from docs and checked in packaging. Host-platform rows SHALL distinguish Linux `amd64` and macOS `arm64` offline CI and read-only LAN evidence from untested mutating runs, unqualified platforms, and unpublished channels.
 
 #### Scenario: Compatibility matrix distinguishes evidence tiers
-- **WHEN** an operator reads `docs/compatibility.md` after the Milestone 3 print-start qualification session
-- **THEN** every row (including materials, slot-mapping classes, preparation flags, `printer discover`, and camera commands) separates implementation status, offline test coverage, and live hardware evidence without inferring support for untested materials, untested preparation combinations, non-Next slicers, or external ACE units
+- **WHEN** an operator reads `docs/compatibility.md`
+- **THEN** every row (including materials, slot-mapping classes, preparation flags, `printer discover`, camera commands, and macOS `arm64` host platform) separates implementation status, offline test coverage, and live hardware evidence without inferring support for untested materials, untested preparation combinations, mutating macOS runs, non-Next slicers, external ACE units, or unpublished distribution channels
 
 #### Scenario: New module and documentation stay synchronized with packaging allowlists
 - **WHEN** Python sdist/wheel and Debian package allowlist checks inspect the repository and built archives
-- **THEN** the qualification, discovery, and camera modules and `docs/compatibility.md` are included in the allowlists and all relative Markdown links resolve within shipped documentation
+- **THEN** all shipped modules and `docs/compatibility.md` remain synchronized with the allowlists and all relative Markdown links resolve within shipped documentation

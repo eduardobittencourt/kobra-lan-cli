@@ -188,6 +188,56 @@ class StorageTests(unittest.TestCase):
         with patch.object(p.os,'geteuid',return_value=os.geteuid()+1):
             self.assertRaises(OSError, p.PrivateStage, self.dest)
 
+    def test_darwin_root_alias_allowed_while_unverified_and_descendant_symlinks_refused(self):
+        """Allow verified root-owned macOS /tmp and /var aliases without relaxing symlink refusal."""
+        from types import SimpleNamespace
+        import kobra_lan.profiles as profiles_mod
+
+        root_symlink = SimpleNamespace(st_mode=stat.S_IFLNK | 0o777, st_uid=0)
+        user_symlink = SimpleNamespace(st_mode=stat.S_IFLNK | 0o777, st_uid=501)
+        real_parent = self.root / 'private'
+        real_parent.mkdir(mode=0o700)
+
+        opened = []
+        def trace_open(component, flags, dir_fd=None):
+            opened.append((component, flags))
+            return 200 + len(opened)
+
+        with patch.object(profiles_mod.sys, 'platform', 'darwin'), \
+                patch.object(profiles_mod.os, 'lstat', return_value=root_symlink), \
+                patch.object(profiles_mod.os, 'readlink', return_value='private/tmp'), \
+                patch.object(profiles_mod.os, 'open', side_effect=trace_open), \
+                patch.object(profiles_mod.os, 'close'), \
+                patch.object(p.os, 'stat', side_effect=FileNotFoundError), \
+                patch.object(p.os, 'fstat', return_value=SimpleNamespace(st_uid=os.geteuid(), st_mode=stat.S_IFDIR | 0o700)), \
+                patch.object(p.os, 'close'):
+            stage = p.PrivateStage('/tmp/work/config.json')
+            self.assertEqual(stage.path, Path('/tmp/work/config.json'))
+            stage.close()
+        self.assertEqual([c for c, _ in opened], ['/', 'private', 'tmp', 'work'])
+
+        # Non-root or unexpected-target /tmp aliases are not rewritten and fail O_NOFOLLOW.
+        for lstat_val, readlink_val in ((user_symlink, 'private/tmp'), (root_symlink, 'evil/tmp')):
+            attempted = []
+            def reject_alias(component, flags, dir_fd=None):
+                attempted.append(component)
+                if component == 'tmp':
+                    raise OSError('ELOOP')
+                return 300
+            with patch.object(profiles_mod.sys, 'platform', 'darwin'), \
+                    patch.object(profiles_mod.os, 'lstat', return_value=lstat_val), \
+                    patch.object(profiles_mod.os, 'readlink', return_value=readlink_val), \
+                    patch.object(profiles_mod.os, 'open', side_effect=reject_alias), \
+                    patch.object(profiles_mod.os, 'close'):
+                self.assertRaises(OSError, p.PrivateStage, '/tmp/work/config.json')
+            self.assertEqual(attempted, ['/', 'tmp'])
+
+        # User-controlled descendant symlink remains refused under darwin.
+        link = self.root / 'descendant-link'
+        link.symlink_to(real_parent)
+        with patch.object(profiles_mod.sys, 'platform', 'darwin'):
+            self.assertRaises(OSError, p.PrivateStage, link / 'config.json')
+
     def test_exclusive_secret_creation(self):
         """Refuse replacement of staged files and preserve symlink targets."""
         with p.PrivateStage(self.dest) as stage:

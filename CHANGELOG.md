@@ -2,6 +2,40 @@
 
 ## Unreleased
 
+- Qualify macOS (`arm64`, Apple Silicon, Python `>=3.11`) for offline CI
+  source/wheel/venv installation and live read-only LAN inspection without
+  weakening Linux/Debian guarantees:
+  - Add narrow `darwin`-only root system alias normalization (`/var` →
+    `/private/var`, `/tmp` → `/private/tmp`, verified via `os.lstat` /
+    `os.readlink` as `uid == 0` symlinks) shared by `kobra_lan/profiles.py` and
+    `kobra_lan/pairing.py` while keeping strict `O_NOFOLLOW` traversal on every
+    descendant component and user-owned `0700`/`0600` checks on managed target
+    directories and files.
+  - Make generated `bash` completions compatible with stock macOS Bash 3.2 as
+    well as Bash 4+ (replacing `mapfile` with `while IFS= read -r`, guarding
+    `compopt -o filenames`, and falling back to `complete -o filenames -F` when
+    `compopt` is absent so spaced filenames stay quoted on Bash 3.2 too),
+    keeping `zsh` and `fish` scripts intact and adding non-stubbed native `zsh`
+    file-completion verification.
+  - Make root `./kobra-lan` resolve symlinks portably in POSIX `/bin/sh`
+    (without GNU-only `readlink -f`) and select `python3` from `PATH` with
+    fallback to `/usr/bin/python3`, leaving Debian's packaged
+    `/usr/bin/kobra-lan` unchanged.
+  - Add an unprivileged `macos` (`macos-latest`, `arm64`) job to
+    `.github/workflows/package-checks.yml` running locked `ruff`, `sh -n
+    kobra-lan`, `./kobra-lan --version`, the offline `unittest` suite, a
+    non-skipping native `zsh` completion check, and `scripts/check_python.py`
+    outside-checkout wheel/sdist acceptance against hash-locked
+    `requirements-runtime.txt` wheels.
+  - Record sanitized macOS (`arm64`, macOS `27.0.1`, Python `3.12.16`, `zsh 5.9`,
+    stock Bash `3.2.57`) offline verification and live 2026-11-27 read-only LAN
+    verification against Kobra X model `20030` / firmware `2.0.2.2` (`doctor`,
+    `status`, `slots list`, `camera status` in text and `--json`, plus clean
+    `printer discover` multicast socket execution, with zero local state writes
+    and zero secret/token leakage) across `docs/compatibility.md`,
+    `docs/releases.md`, `docs/development.md`, `README.md`, and `ROADMAP.md`,
+    while keeping mutating macOS runs, Intel `x86_64` macOS, Windows, Linux
+    `arm64`, PyPI, and Homebrew explicitly unqualified/unpublished.
 - Expand live Kobra X model `20030` / firmware `2.0.2.2` `print start` hardware
   qualification in `kobra_lan/qualification.py` (`StartHardwareEvidence` and
   `is_start_hardware_validated`) after a 9-run live hardware session on

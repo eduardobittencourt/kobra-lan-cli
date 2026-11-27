@@ -72,7 +72,7 @@ Missing required `model`, `version`, or `state` fields in fresh MQTT `info` repo
 | `print watch` | Read-only on printer; writes local observation on active job | Yes | Yes | Yes (2026-11-21, 2026-11-23) | Firmware `2.0.2.2` reports `task_id: "-1"` and empty `last_project`; terminal outcomes remain `unknown` |
 | `print pause` / `print resume` / `print cancel` | Single-shot lifecycle control; preserves local receipts/markers | Yes | Yes | Yes (2026-11-23) | `experimental: true`, `hardware_control_validated: true` on `20030` / `2.0.2.2`; `resuming`/`stopping` may exceed the 5 s poll window |
 | `jobs list` / `jobs info` | Local read-only | Yes | Yes | Yes (integrated session 2026-11-23) | `scope: "local_state_only"`, `direct_printer_history_available: false`, `terminal_outcomes_verified: false` |
-| `completion bash\|zsh\|fish` | Local stdout only | Yes | Yes (native `bash` smoke test; `zsh`/`fish` when installed) | N/A (offline) | Offline generator; never discovers printer names or reads credentials |
+| `completion bash\|zsh\|fish` | Local stdout only | Yes | Yes (native `bash` 3.2 & 4+ smoke tests; native `zsh` required on macOS CI; `fish` when installed) | N/A (offline) | Offline generator; never discovers printer names or reads credentials |
 
 ## Host platforms and distribution channels
 
@@ -80,9 +80,10 @@ Missing required `model`, `version`, or `state` fields in fresh MQTT `info` repo
 | --- | --- | --- | --- | --- | --- |
 | Debian 13 (`amd64`) `.deb` via GitHub Releases | `python3 >= 3.11`, `python3-cryptography >= 41` (optional `Suggests: ffmpeg` for `camera snapshot`) | Yes | Yes (disposable install/upgrade/remove/purge) | N/A | Supported experimental `.deb` acceptance target |
 | Ubuntu 24.04 (`amd64`) `.deb` via GitHub Releases | `python3 >= 3.11`, `python3-cryptography >= 41` (optional `Suggests: ffmpeg` for `camera snapshot`) | Yes | Yes (disposable install/upgrade/remove/purge) | N/A | Supported experimental `.deb` acceptance target |
-| Source checkout launcher (`./kobra-lan`, Linux) | Python `>= 3.11`, `cryptography >= 41` | Yes | Yes | Yes | Used during live Kobra X LAN hardware sessions |
-| Python sdist / wheel (`kobra-lan-cli`) | `Requires-Python: >=3.11`, `cryptography>=41` | Yes | Yes (archive and outside-checkout venv checks) | N/A | Package checks implemented; PyPI publication is future work |
-| macOS, Windows, ARM64 / other CPU architectures | N/A | Pure Python source | No | No | Unqualified; requires separate platform acceptance |
+| Source checkout launcher (`./kobra-lan`, Linux `amd64`) | Python `>= 3.11`, `cryptography >= 41` | Yes | Yes | Yes | Used during live Kobra X LAN hardware sessions |
+| macOS (`arm64`, Apple Silicon) source checkout / local wheel + venv | Python `>= 3.11`, `cryptography >= 41` (optional `ffmpeg` on `PATH` for `camera snapshot`; Apple `/usr/bin/python3` 3.9 is below minimum) | Yes | Yes (`macos-latest` `arm64` CI + local macOS `27.0.1` `arm64` / Python `3.12.16`: locked `unittest`, native `zsh 5.9`, stock Bash `3.2.57`, `./kobra-lan`, `scripts/check_python.py` against hash-locked `macosx_11_0_arm64` wheels) | Read-only LAN only (`2026-11-27`: `doctor`, `status`, `slots list`, `camera status` verified in text & `--json` against Kobra X `20030` / firmware `2.0.2.2` with zero state writes and zero secret leakage; `printer discover` multicast sockets exited `0` cleanly while the printer did not answer SSDP on either macOS or Linux during that session; mutating macOS runs untested) | Qualified for offline CI and read-only LAN; mutating macOS runs (`printer pair`, `files upload`/`delete`, `print start`/`pause`/`resume`/`cancel`, `camera snapshot`/`pipe`) remain untested on macOS |
+| Python sdist / wheel (`kobra-lan-cli`) | `Requires-Python: >=3.11`, `cryptography>=41` | Yes | Yes (Linux `amd64` and macOS `arm64` archive and outside-checkout venv checks) | N/A | Package checks implemented; PyPI publication is future work |
+| macOS (`x86_64` / Intel), Windows, Linux `arm64` / other CPU architectures | N/A | Pure Python source | No | No | Unqualified; requires separate platform acceptance |
 | PyPI, `mise`, Homebrew, hosted `apt` repository | N/A | No | No | No | Future distribution channels; see [Roadmap](../ROADMAP.md#distribution-channels) |
 
 ## Related documentation
