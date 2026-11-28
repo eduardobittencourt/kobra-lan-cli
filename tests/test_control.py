@@ -274,8 +274,8 @@ class ControlExecutionAndSafetyTests(unittest.TestCase):
             "filament_cutting",
             "extfilbox_filament_unfeeding",
         })
-        self.assertTrue(new_fw_states <= PREPARATION_STATES)
-        self.assertTrue(START_ONLY_PREPARATION_STATES <= PREPARATION_STATES)
+        self.assertLessEqual(new_fw_states, PREPARATION_STATES)
+        self.assertLessEqual(START_ONLY_PREPARATION_STATES, PREPARATION_STATES)
         self.assertTrue(PREPARATION_STATES.isdisjoint({"paused", "pausing", "resuming", "stopping"}))
         self.assertEqual(PAUSE_ALLOWED, frozenset({"printing"}))
         self.assertEqual(RESUME_ALLOWED, frozenset({"paused"}))

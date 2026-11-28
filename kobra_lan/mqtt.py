@@ -199,9 +199,8 @@ class MQTT:
             multiplier *= 128
         raise ProtocolError("Malformed MQTT length")
 
-    def query(self, kind, action="query", data=None, *, require_fresh=False,
-              max_backward_skew_ms=0, min_timestamp=None):
-        # Keep this public method strictly read-only.
+    @staticmethod
+    def _validate_query_args(kind, action, max_backward_skew_ms, min_timestamp):
         allowed = {("info", "query"), ("print", "query"), ("status", "query"),
                    ("peripherie", "query"), ("multiColorBox", "getInfo"),
                    ("file", "fileDetails"), ("file", "listLocal")}
@@ -211,6 +210,39 @@ class MQTT:
             raise ProtocolError("Invalid MQTT freshness skew bound")
         if min_timestamp is not None and type(min_timestamp) not in (int, float):
             raise ProtocolError("Invalid MQTT minimum timestamp")
+
+    def _receive_query_message(self, deadline, require_fresh):
+        header, body = self.receive(deadline)
+        if header >> 4 != 3:
+            return None
+        topic, data = self._publish_fields(header, body)
+        if require_fresh and header & 1:
+            return None
+        try:
+            result = json.loads(data)
+        except (ValueError, UnicodeDecodeError):
+            return None
+        return (topic, result) if isinstance(result, dict) else None
+
+    @staticmethod
+    def _is_fresh_report(result, msgid, sent_timestamp, require_fresh,
+                         max_backward_skew_ms, min_timestamp, acknowledged):
+        correlated = result.get("msgid") == msgid
+        if correlated and not require_fresh:
+            return True
+        if not (correlated or acknowledged):
+            return False
+        stamp = result.get("timestamp")
+        if type(stamp) not in (int, float):
+            return False
+        lower = sent_timestamp - max_backward_skew_ms
+        upper = int(time.time() * 1000) + 5000
+        return lower <= stamp <= upper and (min_timestamp is None or stamp > min_timestamp)
+
+    def query(self, kind, action="query", data=None, *, require_fresh=False,
+              max_backward_skew_ms=0, min_timestamp=None):
+        # Keep this public method strictly read-only.
+        self._validate_query_args(kind, action, max_backward_skew_ms, min_timestamp)
         self.begin_stage('status')
         msgid = str(uuid.uuid4())
         sent_timestamp = int(time.time() * 1000)
@@ -222,51 +254,25 @@ class MQTT:
         deadline = self.stage_deadline
         acknowledged = False
         while True:
-            header, body = self.receive(deadline)
-            if header >> 4 != 3:
+            message = self._receive_query_message(deadline, require_fresh)
+            if message is None:
                 continue
-            if len(body) < 2:
-                raise ProtocolError("Malformed MQTT publish")
-            length = struct.unpack("!H", body[:2])[0]
-            if length + 2 > len(body):
-                raise ProtocolError("Malformed MQTT topic")
-            topic = body[2:2 + length].decode()
-            offset = 2 + length
-            qos = (header >> 1) & 3
-            if qos not in (0, 1):
-                raise ProtocolError("Unsupported MQTT QoS")
-            if qos == 1:
-                pid = body[offset:offset + 2]
-                if len(pid) != 2:
-                    raise ProtocolError("Malformed MQTT packet identifier")
-                offset += 2
-                self.sock.settimeout(self.remaining())
-                self.sock.sendall(packet(0x40, pid))
-            if require_fresh and header & 1:
-                continue
-            try:
-                result = json.loads(body[offset:])
-            except (ValueError, UnicodeDecodeError):
-                continue
-            if not isinstance(result, dict):
-                continue
+            resp_topic, result = message
             # FW 2.0.2.2 sends a correlated /response ACK, then a report with
             # its own msgid. Gate that report by the ACK and fresh timestamp.
-            if result.get("msgid") == msgid and topic.endswith("/response"):
+            if result.get("msgid") == msgid and resp_topic.endswith("/response"):
                 if result.get("code") != 0:
                     raise ProtocolError("MQTT query rejected")
                 acknowledged = True
                 continue
-            is_report = topic.endswith(f"/{kind}/report") and result.get("type") == kind
-            if is_report and isinstance(result.get("data"), dict):
-                correlated = result.get("msgid") == msgid
-                if correlated and not require_fresh:
-                    return result
-                stamp = result.get("timestamp")
-                if ((correlated or acknowledged) and type(stamp) in (int, float)
-                        and sent_timestamp - max_backward_skew_ms <= stamp <= int(time.time() * 1000) + 5000
-                        and (min_timestamp is None or stamp > min_timestamp)):
-                    return result
+            if (resp_topic.endswith(f"/{kind}/report")
+                    and result.get("type") == kind
+                    and isinstance(result.get("data"), dict)
+                    and self._is_fresh_report(
+                        result, msgid, sent_timestamp, require_fresh,
+                        max_backward_skew_ms, min_timestamp, acknowledged,
+                    )):
+                return result
 
     def start_once(self, payload):
         """One MQTT start publish, one correlated ACK wait; never reconnect/replay.
