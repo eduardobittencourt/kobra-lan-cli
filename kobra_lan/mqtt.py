@@ -17,6 +17,7 @@ from .config import ProtocolError, validate_filename
 
 MAX_PACKET = 4 * 1024 * 1024
 BASE = "anycubic/anycubicCloud/v1"
+RESPONSE_SUFFIX = "/response"
 CONTROL_ACTIONS = frozenset({"pause", "resume", "stop"})
 TASKID_RE = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 VIDEO_CAPTURE_REJECTED = "Video capture command was rejected; do not retry automatically"
@@ -260,7 +261,7 @@ class MQTT:
             resp_topic, result = message
             # FW 2.0.2.2 sends a correlated /response ACK, then a report with
             # its own msgid. Gate that report by the ACK and fresh timestamp.
-            if result.get("msgid") == msgid and resp_topic.endswith("/response"):
+            if result.get("msgid") == msgid and resp_topic.endswith(RESPONSE_SUFFIX):
                 if result.get("code") != 0:
                     raise ProtocolError("MQTT query rejected")
                 acknowledged = True
@@ -296,7 +297,7 @@ class MQTT:
                 response = json.loads(body[2 + size:])
             except (ValueError, UnicodeDecodeError):
                 continue
-            if isinstance(response, dict) and topic.endswith("/response") and response.get("msgid") == msgid:
+            if isinstance(response, dict) and topic.endswith(RESPONSE_SUFFIX) and response.get("msgid") == msgid:
                 if response.get("code") != 0:
                     raise ProtocolError("Start was rejected; do not retry automatically")
                 return {"code": 0, "msgid": msgid}
@@ -332,14 +333,14 @@ class MQTT:
             try:
                 response = json.loads(data)
             except (ValueError, UnicodeDecodeError):
-                if response_topic.endswith("/response"):
+                if response_topic.endswith(RESPONSE_SUFFIX):
                     raise ProtocolError("Malformed MQTT control response") from None
                 continue
             if not isinstance(response, dict):
-                if response_topic.endswith("/response"):
+                if response_topic.endswith(RESPONSE_SUFFIX):
                     raise ProtocolError("Malformed MQTT control response")
                 continue
-            if response_topic.endswith("/response") and response.get("msgid") == msgid:
+            if response_topic.endswith(RESPONSE_SUFFIX) and response.get("msgid") == msgid:
                 code = response.get("code")
                 if type(code) is not int or code != 0:
                     raise ProtocolError("Print control was rejected; do not retry automatically")
@@ -392,7 +393,7 @@ class MQTT:
             response_topic, data = self._publish_fields(header, body)
             if header & 1:
                 continue
-            is_ack = response_topic.endswith("/response")
+            is_ack = response_topic.endswith(RESPONSE_SUFFIX)
             if not is_ack and not response_topic.endswith("/file/report"):
                 continue
             try:
@@ -437,7 +438,7 @@ class MQTT:
         response_topic, data = self._publish_fields(header, body)
         if header & 1:
             return None
-        is_ack = response_topic.endswith("/response")
+        is_ack = response_topic.endswith(RESPONSE_SUFFIX)
         if not is_ack and not response_topic.endswith("/video/report"):
             return None
         try:

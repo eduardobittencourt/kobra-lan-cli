@@ -385,6 +385,77 @@ class WatchProgressTests(unittest.TestCase):
         self.assertNotIn("PRIVATE", "\n".join(emitted))
         self.assertNotIn("SECRET", "\n".join(emitted))
 
+    def test_sparse_total_layers_rejects_inconsistent_merge_and_accepts_compatible_total(self):
+        # Incompatible sparse total (total_layers=4 after curr_layer=8) leaves prior snapshot intact.
+        emitted_bad = []
+        progress_bad = WatchProgress(on_progress=emitted_bad.append)
+        self.assertIsNone(progress_bad.update({
+            **INFO, "state": "busy",
+            "project": {"state": "printing", "task_id": "-1", "filename": "sample.gcode",
+                        "progress": 12, "curr_layer": 8},
+        }))
+        stopped = progress_bad.update({
+            **INFO, "state": "busy",
+            "project": {"state": "printing", "task_id": "-1", "filename": "sample.gcode",
+                        "progress": 12, "total_layers": 4},
+        })
+        self.assertEqual(stopped, {
+            "outcome": "unknown", "reason": "identity_unverified",
+            "phase": "printing", "progress": 12, "current_layer": 8,
+        })
+        self.assertEqual(emitted_bad, ["printing 12% layer 8"])
+
+        # Compatible sparse total (total_layers=100 after curr_layer=8) is accepted.
+        emitted_ok = []
+        progress_ok = WatchProgress(on_progress=emitted_ok.append)
+        self.assertIsNone(progress_ok.update({
+            **INFO, "state": "busy",
+            "project": {"state": "printing", "task_id": "-1", "filename": "sample.gcode",
+                        "progress": 12, "curr_layer": 8},
+        }))
+        self.assertIsNone(progress_ok.update({
+            **INFO, "state": "busy",
+            "project": {"state": "printing", "task_id": "-1", "filename": "sample.gcode",
+                        "progress": 12, "total_layers": 100},
+        }))
+        self.assertEqual(progress_ok.partial("deadline_expired"), {
+            "outcome": "unknown", "reason": "deadline_expired",
+            "phase": "printing", "progress": 12, "current_layer": 8, "total_layers": 100,
+        })
+        self.assertEqual(emitted_ok, ["printing 12% layer 8", "printing 12% layer 8/100"])
+
+    def test_paused_and_stopping_adopt_coherent_advancing_counters_and_preserve_high_water_on_zero(self):
+        emitted = []
+        progress = WatchProgress(on_progress=emitted.append)
+        self.assertIsNone(progress.update(PRINTING))
+        self.assertIsNone(progress.update({
+            **PRINTING,
+            "project": {**PRINTING["project"], "state": "paused", "progress": 20, "curr_layer": 16, "total_layers": 100},
+        }))
+        self.assertEqual(progress.partial("deadline_expired"), {
+            "outcome": "unknown", "reason": "deadline_expired",
+            "phase": "paused", "progress": 20, "current_layer": 16, "total_layers": 100,
+        })
+        self.assertIsNone(progress.update({
+            **PRINTING,
+            "project": {**PRINTING["project"], "state": "stopping", "progress": 25, "curr_layer": 20, "total_layers": 100},
+        }))
+        # Zeroed stopping counters preserve the latest verified 25%, layer 20/100.
+        self.assertIsNone(progress.update({
+            **PRINTING,
+            "project": {**PRINTING["project"], "state": "stopping", "progress": 0, "curr_layer": 0, "total_layers": 0},
+        }))
+        result = progress.update({**INFO, "state": "free", "project": None})
+        self.assertEqual(result, {
+            "outcome": "unknown", "reason": "job_disappeared",
+            "phase": "stopping", "progress": 25, "current_layer": 20, "total_layers": 100,
+        })
+        self.assertEqual(emitted, [
+            "printing 12% layer 8/100",
+            "paused 20% layer 16/100",
+            "stopping 25% layer 20/100",
+        ])
+
 
 class WatchTransportTests(unittest.TestCase):
     def test_fresh_query_ignores_both_correlated_stale_and_retained_reports(self):

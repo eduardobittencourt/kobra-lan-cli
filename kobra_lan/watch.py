@@ -219,6 +219,52 @@ class WatchProgress:
         self._last_progress_key = key
         self._on_progress(_format_progress_line(self.last, state, remain_time, info.get("temp")))
 
+    def _merge_printing(self, project):
+        fields = progress_fields(project)
+        progress = fields.get("progress")
+        current = fields.get("current_layer")
+        total = fields.get("total_layers")
+        if self.saw_printing_progress:
+            if progress is not None and self.max_progress is not None and progress < self.max_progress:
+                return self.result("unknown", "identity_unverified")
+            if current is not None and current > 0 and self.max_layer is not None and current < self.max_layer:
+                return self.result("unknown", "identity_unverified")
+        if total is not None and self.observed_total_layers is not None and total != self.observed_total_layers:
+            return self.result("unknown", "identity_unverified")
+        merged = self._preserved_scalars()
+        if progress is not None:
+            merged["progress"] = progress
+        if total is not None:
+            merged["total_layers"] = total
+        if current is not None and (current > 0 or "current_layer" not in merged):
+            merged["current_layer"] = current
+        if ("current_layer" in merged and "total_layers" in merged
+                and merged["current_layer"] > merged["total_layers"]):
+            return self.result("unknown", "identity_unverified")
+        self._record_high_water(merged)
+        self.last = {"phase": "printing", **merged}
+        return None
+
+    def _merge_transitional_counters(self, project, phase):
+        fields = progress_fields(project)
+        progress = fields.get("progress")
+        current = fields.get("current_layer")
+        total = fields.get("total_layers")
+        preserved = self._preserved_scalars()
+        candidate = dict(preserved)
+        if progress is not None and progress > 0 and (self.max_progress is None or progress >= self.max_progress):
+            candidate["progress"] = progress
+        if total is not None and (self.observed_total_layers is None or total == self.observed_total_layers):
+            candidate["total_layers"] = total
+        if current is not None and current > 0 and (self.max_layer is None or current >= self.max_layer):
+            candidate["current_layer"] = current
+        if ("current_layer" in candidate and "total_layers" in candidate
+                and candidate["current_layer"] > candidate["total_layers"]):
+            candidate = preserved
+        else:
+            self._record_high_water(candidate)
+        self.last = {"phase": phase, **candidate}
+
     def update(self, info):
         project = info.get("project")
         if self.last is None:
@@ -279,26 +325,9 @@ class WatchProgress:
         if not isinstance(state, str):
             return self.result("unknown", "active_job_unverified")
         if state == "printing":
-            fields = progress_fields(project)
-            progress = fields.get("progress")
-            current = fields.get("current_layer")
-            total = fields.get("total_layers")
-            if self.saw_printing_progress:
-                if progress is not None and self.max_progress is not None and progress < self.max_progress:
-                    return self.result("unknown", "identity_unverified")
-                if current is not None and current > 0 and self.max_layer is not None and current < self.max_layer:
-                    return self.result("unknown", "identity_unverified")
-            if total is not None and self.observed_total_layers is not None and total != self.observed_total_layers:
-                return self.result("unknown", "identity_unverified")
-            merged = self._preserved_scalars()
-            if progress is not None:
-                merged["progress"] = progress
-            if total is not None:
-                merged["total_layers"] = total
-            if current is not None and (current > 0 or "current_layer" not in merged):
-                merged["current_layer"] = current
-            self._record_high_water(fields)
-            self.last = {"phase": "printing", **merged}
+            stop = self._merge_printing(project)
+            if stop is not None:
+                return stop
         elif state in START_ONLY_PREPARATION_STATES:
             if self.saw_printing_progress:
                 return self.result("unknown", "identity_unverified")
@@ -306,9 +335,9 @@ class WatchProgress:
         elif state in PREPARATION_STATES or state == "resuming":
             self.last = {"phase": "preparing", **self._preserved_scalars()}
         elif state in PAUSED_STATES:
-            self.last = {"phase": "paused", **self._preserved_scalars()}
+            self._merge_transitional_counters(project, "paused")
         elif state in STOPPING_STATES:
-            self.last = {"phase": "stopping", **self._preserved_scalars()}
+            self._merge_transitional_counters(project, "stopping")
         else:
             return self.result("unknown", "active_job_unverified")
         self._emit_progress(info, project, state)

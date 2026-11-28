@@ -48,6 +48,7 @@ UPLOAD_STATUSES = frozenset({
 })
 OBSERVATION_OUTCOMES = frozenset({"unknown"})
 OBSERVATION_REASONS = frozenset({
+    "active_job_unverified",
     "deadline_expired",
     "job_disappeared",
     "job_replaced",
