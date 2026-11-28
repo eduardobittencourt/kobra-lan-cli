@@ -97,15 +97,16 @@ Target-dependent commands SHALL share explicit selectors and a saved named defau
 - **THEN** generated `zsh` completion loads under `compinit` and completes canonical commands, flags, fixed choices, and file options offline without skipping
 
 ### Requirement: Discoverable installed workflow
-Help and English documentation SHALL show LAN discovery, setup, target selection, diagnosis, filament slot inventory, camera inspection/snapshot/piping, inspection, upload, stored-file deletion, plan, start, watch, pause/resume/cancel lifecycle controls, and local job history examples, including global option placement and execution guards. Python and Debian packages SHALL expose the same help, formats and completion generator outside the checkout using declared dependencies.
+
+Help and English documentation SHALL show LAN discovery, pairing, profile management, diagnosis, slot inventory, camera access, file management, G-code inspection, print planning/start/watch (`--timeout`, `--quiet`), lifecycle controls, and local job history, including global option placement and execution guards. Python and Debian packages SHALL expose the same help, formats, and completion generator outside the checkout using declared dependencies.
 
 #### Scenario: Installed acceptance
 - **WHEN** clean supported installations exercise help, version, completion, local inspection, invalid commands and synthetic diagnosis
 - **THEN** their output contracts and exit codes match source execution without contacting real hardware
 
 #### Scenario: Discover watch offline
-- **WHEN** installed help or shell completion is generated without a printer configuration
-- **THEN** it exposes `print watch` and its timeout option without contacting a printer
+- **WHEN** installed help or shell completion (`bash`, `zsh`, `fish`) is generated without a printer configuration
+- **THEN** it exposes `print watch`, `--timeout`, and `--quiet` without contacting a printer
 
 ### Requirement: Discover intentional reprint workflow
 Installed help and documentation SHALL show `--reprint-from` on `print plan` and `print start`, explain where to find the prior local attempt reference and show how to review and explicitly execute a reprint. Offline bash, zsh and fish completion SHALL offer the flag on both commands.

@@ -75,12 +75,13 @@ class ObserveTests(unittest.TestCase):
         finally:
             self.close_connection()
 
-    def fresh_info(self, kind, *, require_fresh):
+    def fresh_info(self, kind, *, require_fresh, max_backward_skew_ms=0, min_timestamp=None):
         self.assertFalse(self.leased)
         self.assertEqual(kind, "info")
         self.assertTrue(require_fresh)
+        self.assertEqual(max_backward_skew_ms, 5000)
         self.advance(2)
-        return {"code": 200, "data": INFO}
+        return {"code": 200, "timestamp": 1700000000000 + self.now * 1000, "data": INFO}
 
     def test_one_session_and_no_catch_up_after_a_slow_query(self):
         received = Mock(side_effect=[None, None, "stop"])
@@ -93,13 +94,19 @@ class ObserveTests(unittest.TestCase):
         self.assertEqual([call.args for call in self.sleep.call_args_list], [(5,), (5,)])
         self.assertEqual([call.args for call in received.call_args_list], [(INFO,)] * 3)
         self.assertEqual([call.args for call in self.client.method_calls], [("info",)] * 3)
+        self.assertEqual(
+            [call.kwargs["min_timestamp"] for call in self.client.query.call_args_list],
+            [None, 1700000102000, 1700000109000],
+        )
 
     def test_deadline_caps_sleep_and_prevents_another_query(self):
         received = Mock(return_value=None)
         self.client.query.side_effect = self.fresh_info
         self.assertIsNone(observe(self.registry, None, "bench", 3, received))
         self.sleep.assert_called_once_with(1)
-        self.client.query.assert_called_once_with("info", require_fresh=True)
+        self.client.query.assert_called_once_with(
+            "info", require_fresh=True, max_backward_skew_ms=5000, min_timestamp=None
+        )
         received.assert_called_once_with(INFO)
 
     def test_setup_and_query_timeout_at_deadline_but_not_before_it(self):
@@ -217,6 +224,167 @@ class WatchProgressTests(unittest.TestCase):
                 self.assertEqual(progress.partial("interrupted"),
                                  {"outcome": "unknown", "reason": "interrupted", "phase": expected})
 
+    def test_continuous_coherent_tracking_across_prep_printing_filament_pause_zeroing_and_idle(self):
+        emitted = []
+        progress = WatchProgress(on_progress=emitted.append)
+        empty_last = {"state": "", "task_id": "", "filename": "", "progress": 0,
+                      "curr_layer": 0, "total_layers": 0}
+        temp_warm = {"curr_nozzle_temp": 220, "target_nozzle_temp": 220,
+                     "curr_hotbed_temp": 60, "target_hotbed_temp": 60}
+        temp_jitter = {"curr_nozzle_temp": 221, "target_nozzle_temp": 220,
+                       "curr_hotbed_temp": 60, "target_hotbed_temp": 60}
+
+        def report(state, *, pct=0, curr=0, total=0, remain=0, temp=None):
+            return {
+                **INFO, "state": "busy", "last_project": empty_last,
+                "temp": temp or temp_warm,
+                "project": {
+                    "state": state, "task_id": "-1", "filename": "sample.gcode",
+                    "progress": pct, "curr_layer": curr, "total_layers": total,
+                    "remain_time": remain,
+                },
+            }
+
+        sequence = [
+            report("auto_leveling"),
+            report("vibrating"),
+            report("flow_calibrating"),
+            report("nozzle_heating"),
+            report("printing", pct=10, curr=10, total=100, remain=25),
+            # Identical progress with temperature jitter only -> deduplicated on stderr.
+            report("printing", pct=10, curr=10, total=100, remain=25, temp=temp_jitter),
+            report("filament_cutting", pct=10, curr=10, total=100, remain=25),
+            report("extfilbox_filament_unfeeding", pct=10, curr=10, total=100, remain=25),
+            report("extfilbox_filament_feeding", pct=10, curr=10, total=100, remain=25),
+            report("nozzle_purging", pct=10, curr=10, total=100, remain=25),
+            report("printing", pct=50, curr=50, total=100, remain=12),
+            report("pausing", pct=50, curr=50, total=100, remain=12),
+            report("paused", pct=50, curr=50, total=100, remain=12),
+            report("resuming", pct=50, curr=50, total=100, remain=12),
+            report("printing", pct=99, curr=100, total=100, remain=1),
+            # End-of-print layer-counter zeroing at 99% preserves high-water 100/100.
+            report("printing", pct=99, curr=0, total=0, remain=1),
+        ]
+        for step in sequence:
+            self.assertIsNone(progress.update(step))
+
+        result = progress.update({**INFO, "state": "free", "project": None, "last_project": empty_last})
+        self.assertEqual(result, {
+            "outcome": "unknown", "reason": "job_disappeared",
+            "phase": "printing", "progress": 99, "current_layer": 100, "total_layers": 100,
+        })
+        # Verify deduplication: 14 distinct progress states (temp jitter and zeroing kept same key).
+        self.assertEqual(len(emitted), 14)
+        self.assertIn("preparing (auto_leveling)", emitted[0])
+        self.assertIn("printing 10% layer 10/100 remaining 25m nozzle 220/220C bed 60/60C", emitted[4])
+        self.assertIn("paused 50% layer 50/100 remaining 12m", emitted[11])
+        for line in emitted:
+            self.assertNotIn("sample.gcode", line)
+
+    def test_initial_active_calibration_filament_pause_resuming_and_stopping_states(self):
+        cases = (
+            ("auto_leveling", "preparing"),
+            ("vibrating", "preparing"),
+            ("flow_calibrating", "preparing"),
+            ("filament_cutting", "preparing"),
+            ("extfilbox_filament_unfeeding", "preparing"),
+            ("resuming", "preparing"),
+            ("paused", "paused"),
+            ("pausing", "paused"),
+            ("stopping", "stopping"),
+        )
+        for state, expected_phase in cases:
+            with self.subTest(state=state):
+                progress = WatchProgress()
+                proj = {"state": state, "task_id": "-1", "filename": "sample.gcode",
+                        "progress": 40, "curr_layer": 20, "total_layers": 100}
+                self.assertIsNone(progress.update({**INFO, "state": "busy", "project": proj}))
+                partial = progress.partial("deadline_expired")
+                self.assertEqual(partial["phase"], expected_phase)
+                if expected_phase in ("paused", "stopping"):
+                    self.assertEqual(partial["progress"], 40)
+                    self.assertEqual(partial["current_layer"], 20)
+                    self.assertEqual(partial["total_layers"], 100)
+
+    def test_regression_and_post_printing_start_only_calibration_stop_with_identity_unverified(self):
+        cases = (
+            ("progress_drop", {**PRINTING["project"], "progress": 11, "curr_layer": 8, "total_layers": 100}),
+            ("layer_drop", {**PRINTING["project"], "progress": 12, "curr_layer": 7, "total_layers": 100}),
+            ("total_layers_change", {**PRINTING["project"], "progress": 12, "curr_layer": 8, "total_layers": 200}),
+            ("post_print_auto_leveling", {**PRINTING["project"], "state": "auto_leveling"}),
+            ("post_print_vibrating", {**PRINTING["project"], "state": "vibrating"}),
+            ("post_print_flow_calibrating", {**PRINTING["project"], "state": "flow_calibrating"}),
+            ("post_print_z_offset", {**PRINTING["project"], "state": "z_offset_calibrating"}),
+            ("post_print_freq_sweep", {**PRINTING["project"], "state": "frequency_sweeping"}),
+        )
+        for name, second_project in cases:
+            with self.subTest(case=name):
+                progress = WatchProgress()
+                self.assertIsNone(progress.update(PRINTING))
+                result = progress.update({**PRINTING, "project": second_project})
+                self.assertEqual(result, {
+                    "outcome": "unknown", "reason": "identity_unverified",
+                    "phase": "printing", "progress": 12, "current_layer": 8, "total_layers": 100,
+                })
+
+    def test_missing_or_hostile_initial_filename_cannot_establish_continuity(self):
+        for bad_name in (None, "", "https://example.test/?token=SECRET", "bad\x1b[31m.gcode"):
+            with self.subTest(bad_name=bad_name):
+                emitted = []
+                progress = WatchProgress(on_progress=emitted.append)
+                first = {**PRINTING, "project": {**PRINTING["project"], "filename": bad_name}}
+                self.assertIsNone(progress.update(first))
+                second = {**PRINTING, "project": {**PRINTING["project"], "progress": 20, "curr_layer": 20}}
+                result = progress.update(second)
+                self.assertEqual(result["outcome"], "unknown")
+                self.assertEqual(result["reason"], "identity_unverified")
+                self.assertEqual(result["progress"], 12)
+                self.assertNotIn("SECRET", json.dumps(result) + "\n".join(emitted))
+
+    def test_non_placeholder_task_id_and_unrecognized_subsequent_state(self):
+        progress = WatchProgress()
+        first = {**PRINTING, "project": {**PRINTING["project"], "task_id": "job_1"}}
+        self.assertIsNone(progress.update(first))
+        same = {**PRINTING, "project": {**PRINTING["project"], "task_id": "job_1", "progress": 20, "curr_layer": 20}}
+        self.assertIsNone(progress.update(same))
+        different = {**PRINTING, "project": {**PRINTING["project"], "task_id": "job_2", "progress": 25, "curr_layer": 25}}
+        result = progress.update(different)
+        self.assertEqual(result["reason"], "job_replaced")
+        self.assertEqual(result["progress"], 20)
+
+        progress2 = WatchProgress()
+        self.assertIsNone(progress2.update(PRINTING))
+        unrec = progress2.update({**PRINTING, "project": {**PRINTING["project"], "state": "unexpected_fw_state"}})
+        self.assertEqual(unrec["reason"], "active_job_unverified")
+        self.assertEqual(unrec["progress"], 12)
+
+    def test_stopping_transition_preserves_progress_and_emits_no_unsafe_fields(self):
+        emitted = []
+        progress = WatchProgress(on_progress=emitted.append)
+        hostile_temp = {
+            "curr_nozzle_temp": "https://example.test/?token=PRIVATE",
+            "target_nozzle_temp": 99999,
+            "curr_hotbed_temp": True,
+            "target_hotbed_temp": float("nan"),
+        }
+        self.assertIsNone(progress.update({
+            **PRINTING,
+            "temp": hostile_temp,
+            "project": {**PRINTING["project"], "remain_time": "https://example.test/?s=SECRET"},
+        }))
+        self.assertIsNone(progress.update({
+            **PRINTING,
+            "project": {**PRINTING["project"], "state": "stopping", "progress": 0, "curr_layer": 0},
+        }))
+        result = progress.update({**INFO, "state": "free", "project": None})
+        self.assertEqual(result, {
+            "outcome": "unknown", "reason": "job_disappeared",
+            "phase": "stopping", "progress": 12, "current_layer": 8, "total_layers": 100,
+        })
+        self.assertEqual(emitted, ["printing 12% layer 8/100", "stopping 12% layer 8/100"])
+        self.assertNotIn("PRIVATE", "\n".join(emitted))
+        self.assertNotIn("SECRET", "\n".join(emitted))
+
 
 class WatchTransportTests(unittest.TestCase):
     def test_fresh_query_ignores_both_correlated_stale_and_retained_reports(self):
@@ -234,6 +402,39 @@ class WatchTransportTests(unittest.TestCase):
 
         with patch.object(client, "receive", side_effect=receive):
             self.assertEqual(client.query("info", require_fresh=True)["data"]["state"], "fresh")
+
+    def test_fresh_query_with_skew_enforces_window_retained_and_monotonic_timestamp(self):
+        client = MQTT(config())
+        client.sock = Mock()
+        anchor_ms = 1700000020000
+        reports = iter((
+            (0x30, "response", 0, "ack"),
+            (0x31, "report", -100, "retained_in_window"),
+            (0x30, "report", -5001, "outside_skew"),
+            (0x30, "report", -2000, "equal_min_timestamp"),
+            (0x30, "report", -500, "fresh_skewed"),
+        ))
+
+        def receive(deadline):
+            sent = client.sock.sendall.call_args.args[0]
+            query = json.loads(sent[sent.index(b"{"):])
+            header, kind, offset, state = next(reports)
+            if kind == "response":
+                ack = {"msgid": query["msgid"], "code": 0}
+                return header, string("synthetic/response") + json.dumps(ack).encode()
+            report = {"msgid": "printer-msg", "type": "info",
+                      "timestamp": query["timestamp"] + offset, "data": {"state": state}}
+            return header, string("synthetic/info/report") + json.dumps(report).encode()
+
+        with patch("kobra_lan.mqtt.time.time", return_value=anchor_ms / 1000.0), \
+                patch.object(client, "receive", side_effect=receive):
+            result = client.query(
+                "info",
+                require_fresh=True,
+                max_backward_skew_ms=5000,
+                min_timestamp=anchor_ms - 2000,
+            )
+        self.assertEqual(result["data"]["state"], "fresh_skewed")
 
     def test_real_transport_caps_tls_setup_and_refuses_pin_before_auth(self):
         cfg = transport_config()
@@ -314,7 +515,7 @@ class WatchCliTests(unittest.TestCase):
         self.mqtt = self.enterContext(patch("kobra_lan.watch.MQTT", return_value=self.session))
         self.enterContext(patch("kobra_lan.watch.time.sleep"))
 
-    def invoke(self, args, expected, *, use_state_dir=True):
+    def invoke(self, args, expected, *, use_state_dir=True, return_stderr=False):
         out, err = io.StringIO(), io.StringIO()
         argv = list(args)
         if use_state_dir and "--state-dir" not in argv:
@@ -324,6 +525,8 @@ class WatchCliTests(unittest.TestCase):
                 argv = ["--state-dir", str(self.state_dir), *argv]
         with redirect_stdout(out), redirect_stderr(err):
             self.assertEqual(main(argv), expected)
+        if return_stderr:
+            return out.getvalue(), err.getvalue()
         self.assertEqual(err.getvalue(), "")
         return out.getvalue()
 
@@ -366,7 +569,9 @@ class WatchCliTests(unittest.TestCase):
         with patch("kobra_lan.watch.time.monotonic", side_effect=lambda: now), \
                 patch("kobra_lan.watch.time.sleep", side_effect=sleep), \
                 patch("kobra_lan.watch.time.time", side_effect=[1700000000, 1700000300]):
-            rendered = self.invoke(["--json", "print", "watch", "--timeout", "1"], 0)
+            rendered, err_text = self.invoke(["--json", "print", "watch", "--timeout", "1"], 0, return_stderr=True)
+        self.assertEqual(err_text.strip(), "printing 12% layer 8/100")
+        self.assertNotIn("sample.gcode", err_text)
         envelope = json.loads(rendered)
         self.assertEqual(len(rendered.splitlines()), 1)
         self.assertEqual(envelope["schema_version"], 1)
@@ -410,9 +615,10 @@ class WatchCliTests(unittest.TestCase):
             for mode in ([], ["--json"]):
                 with self.subTest(error=error, mode=mode):
                     self.client.query.side_effect = [{"data": {**PRINTING, "deviceId": "SyntheticDefault"}}, error]
-                    rendered = self.invoke([*mode, "print", "watch"], exit_code)
-                    self.assertNotIn("private network detail", rendered)
-                    self.assertNotIn("sample.gcode", rendered)
+                    rendered, err_text = self.invoke([*mode, "print", "watch"], exit_code, return_stderr=True)
+                    self.assertEqual(err_text.strip(), "printing 12% layer 8/100")
+                    self.assertNotIn("private network detail", rendered + err_text)
+                    self.assertNotIn("sample.gcode", rendered + err_text)
                     if mode:
                         envelope = json.loads(rendered)
                         self.assertFalse(envelope["ok"])
@@ -471,17 +677,19 @@ class WatchCliTests(unittest.TestCase):
                 **INFO, "deviceId": "SyntheticDefault", "state": "free", "project": None,
                 "last_project": {**PRINTING["project"], "state": "finished", "progress": 100},
             }),
-            ("identity_unverified", {**PRINTING, "deviceId": "SyntheticDefault"}),
+            ("identity_unverified", {**PRINTING, "deviceId": "SyntheticDefault",
+                                     "project": {**PRINTING["project"], "progress": 2, "curr_layer": 1}}),
         )
         for reason, second_report in cases:
             with self.subTest(reason=reason):
                 first_report = hostile_active if reason == "job_disappeared" else {**PRINTING, "deviceId": "SyntheticDefault"}
                 self.client.query.side_effect = [{"data": first_report}, {"data": second_report}]
-                rendered = self.invoke(["--json", "print", "watch"], 0)
-                self.assertNotIn("sample.gcode", rendered)
-                self.assertNotIn("SYNTHETIC_TOKEN", rendered)
-                self.assertNotIn("SYNTHETIC_SECRET", rendered)
-                self.assertNotIn("SYNTHETIC_RAW_TELEMETRY", rendered)
+                rendered, err_text = self.invoke(["--json", "print", "watch"], 0, return_stderr=True)
+                self.assertEqual(err_text.strip(), "printing 12% layer 8/100")
+                self.assertNotIn("sample.gcode", rendered + err_text)
+                self.assertNotIn("SYNTHETIC_TOKEN", rendered + err_text)
+                self.assertNotIn("SYNTHETIC_SECRET", rendered + err_text)
+                self.assertNotIn("SYNTHETIC_RAW_TELEMETRY", rendered + err_text)
                 envelope = json.loads(rendered)
                 self.assertEqual(envelope["result"]["reason"], reason)
                 self.assertTrue(envelope["result"]["observation_recorded"])
@@ -536,7 +744,7 @@ class WatchCliTests(unittest.TestCase):
             {"data": {**PRINTING, "deviceId": "SyntheticDefault"}},
             {"data": {**INFO, "deviceId": "SyntheticDefault", "state": "free", "project": None}},
         ]
-        rendered = self.invoke(["--json", "print", "watch"], 0)
+        rendered, _ = self.invoke(["--json", "print", "watch"], 0, return_stderr=True)
         envelope = json.loads(rendered)
         self.assertTrue(envelope["ok"])
         self.assertEqual(envelope["result"]["outcome"], "unknown")
@@ -556,7 +764,7 @@ class WatchCliTests(unittest.TestCase):
         ):
             with self.subTest(expected_exit=expected_exit):
                 self.client.query.side_effect = [{"data": {**PRINTING, "deviceId": "SyntheticDefault"}}, second]
-                rendered = self.invoke(["--json", "print", "watch"], expected_exit)
+                rendered, _ = self.invoke(["--json", "print", "watch"], expected_exit, return_stderr=True)
                 envelope = json.loads(rendered)
                 self.assertEqual(envelope["result"]["outcome"], "unknown")
                 self.assertEqual(envelope["result"]["reason"], expected_reason)
@@ -584,7 +792,7 @@ class WatchCliTests(unittest.TestCase):
             return real_emit(*args, **kwargs)
 
         with patch("kobra_lan.cli.emit", side_effect=interrupt_first_emit):
-            rendered = self.invoke(["--json", "print", "watch"], 130)
+            rendered, _ = self.invoke(["--json", "print", "watch"], 130, return_stderr=True)
         envelope = json.loads(rendered)
         self.assertFalse(envelope["ok"])
         self.assertEqual(envelope["error"]["code"], "interrupted")
@@ -596,3 +804,72 @@ class WatchCliTests(unittest.TestCase):
         saved = json.loads(files[0].read_text())
         self.assertEqual(saved["observation_id"], obs_id)
         self.assertEqual(saved["reason"], "interrupted")
+
+    def test_live_stderr_progress_and_quiet_flag_in_text_and_json_modes(self):
+        digest = hashlib.sha256(b"SyntheticDefault").hexdigest()
+        reports = [
+            {"data": {
+                **INFO, "deviceId": "SyntheticDefault", "state": "busy",
+                "temp": {"curr_nozzle_temp": 140, "target_nozzle_temp": 140,
+                         "curr_hotbed_temp": 60, "target_hotbed_temp": 60},
+                "project": {"state": "auto_leveling", "task_id": "-1", "filename": "sample.gcode"},
+            }},
+            {"data": {
+                **INFO, "deviceId": "SyntheticDefault", "state": "busy",
+                "temp": {"curr_nozzle_temp": 220, "target_nozzle_temp": 220,
+                         "curr_hotbed_temp": 60, "target_hotbed_temp": 60},
+                "project": {"state": "printing", "task_id": "-1", "filename": "sample.gcode",
+                            "progress": 50, "curr_layer": 50, "total_layers": 100, "remain_time": 15},
+            }},
+            {"data": {
+                **INFO, "deviceId": "SyntheticDefault", "state": "busy",
+                "temp": {"curr_nozzle_temp": 221, "target_nozzle_temp": 220,
+                         "curr_hotbed_temp": 60, "target_hotbed_temp": 60},
+                "project": {"state": "printing", "task_id": "-1", "filename": "sample.gcode",
+                            "progress": 50, "curr_layer": 50, "total_layers": 100, "remain_time": 15},
+            }},
+            {"data": {
+                **INFO, "deviceId": "SyntheticDefault", "state": "busy",
+                "temp": {"curr_nozzle_temp": 180, "target_nozzle_temp": 0,
+                         "curr_hotbed_temp": 55, "target_hotbed_temp": 0},
+                "project": {"state": "stopping", "task_id": "-1", "filename": "sample.gcode",
+                            "progress": 50, "curr_layer": 50, "total_layers": 100},
+            }},
+            {"data": {**INFO, "deviceId": "SyntheticDefault", "state": "free", "project": None}},
+        ]
+
+        for mode in ([], ["--json"]):
+            for quiet in (False, True):
+                with self.subTest(mode=mode, quiet=quiet):
+                    self.client.query.side_effect = list(reports)
+                    argv = [*mode, "print", "watch", *(["--quiet"] if quiet else [])]
+                    rendered, err_text = self.invoke(argv, 0, return_stderr=True)
+                    self.assertNotIn("sample.gcode", rendered + err_text)
+                    if quiet:
+                        self.assertEqual(err_text, "")
+                    else:
+                        lines = err_text.splitlines()
+                        self.assertEqual(lines, [
+                            "preparing (auto_leveling) nozzle 140/140C bed 60/60C",
+                            "printing 50% layer 50/100 remaining 15m nozzle 220/220C bed 60/60C",
+                            "stopping 50% layer 50/100 nozzle 180/0C bed 55/0C",
+                        ])
+                    if mode:
+                        self.assertEqual(len(rendered.splitlines()), 1)
+                        envelope = json.loads(rendered)
+                        self.assertTrue(envelope["ok"])
+                        self.assertEqual(envelope["result"]["outcome"], "unknown")
+                        self.assertEqual(envelope["result"]["reason"], "job_disappeared")
+                        self.assertEqual(envelope["result"]["phase"], "stopping")
+                        self.assertEqual(envelope["result"]["progress"], 50)
+                        self.assertEqual(envelope["result"]["current_layer"], 50)
+                        self.assertEqual(envelope["result"]["total_layers"], 100)
+                        obs_id = envelope["result"]["observation_id"]
+                        saved = json.loads((self.state_dir / "observations" / digest[:16] / f"{obs_id}.json").read_text())
+                        self.assertEqual(saved["phase"], "stopping")
+                        self.assertEqual(saved["progress"], 50)
+                    else:
+                        self.assertIn("Outcome: unknown", rendered)
+                        self.assertIn("Reason: job_disappeared", rendered)
+                        self.assertIn("Phase: stopping", rendered)
+                        self.assertIn("Progress: 50", rendered)

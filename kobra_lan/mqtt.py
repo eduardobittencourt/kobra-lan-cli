@@ -199,13 +199,18 @@ class MQTT:
             multiplier *= 128
         raise ProtocolError("Malformed MQTT length")
 
-    def query(self, kind, action="query", data=None, *, require_fresh=False):
+    def query(self, kind, action="query", data=None, *, require_fresh=False,
+              max_backward_skew_ms=0, min_timestamp=None):
         # Keep this public method strictly read-only.
         allowed = {("info", "query"), ("print", "query"), ("status", "query"),
                    ("peripherie", "query"), ("multiColorBox", "getInfo"),
                    ("file", "fileDetails"), ("file", "listLocal")}
         if (kind, action) not in allowed:
             raise ProtocolError("Unqualified MQTT command")
+        if type(max_backward_skew_ms) is not int or max_backward_skew_ms < 0:
+            raise ProtocolError("Invalid MQTT freshness skew bound")
+        if min_timestamp is not None and type(min_timestamp) not in (int, float):
+            raise ProtocolError("Invalid MQTT minimum timestamp")
         self.begin_stage('status')
         msgid = str(uuid.uuid4())
         sent_timestamp = int(time.time() * 1000)
@@ -259,7 +264,8 @@ class MQTT:
                     return result
                 stamp = result.get("timestamp")
                 if ((correlated or acknowledged) and type(stamp) in (int, float)
-                        and sent_timestamp <= stamp <= int(time.time() * 1000) + 5000):
+                        and sent_timestamp - max_backward_skew_ms <= stamp <= int(time.time() * 1000) + 5000
+                        and (min_timestamp is None or stamp > min_timestamp)):
                     return result
 
     def start_once(self, payload):

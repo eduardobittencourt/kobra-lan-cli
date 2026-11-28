@@ -407,5 +407,99 @@ class MQTTVideoAndPeripherieTests(unittest.TestCase):
         self.client.sock.sendall.assert_called_once()
 
 
+class MQTTQueryFreshnessTests(unittest.TestCase):
+    def setUp(self):
+        self.client = MQTT(config())
+        self.client.sock = Mock()
+
+    def publish(self, topic, data, *, qos=0, retained=False):
+        pid = b"\x00\x05" if qos else b""
+        header = 0x30 | (qos << 1) | retained
+        return header, string(topic) + pid + json.dumps(data).encode()
+
+    def ack(self):
+        request = sent_publish_payload(self.client.sock)
+        return self.publish("root/response", {"msgid": request["msgid"], "code": 0})
+
+    def info_report(self, *, timestamp, state, msgid="printer-report", retained=False):
+        return self.publish(
+            "root/info/report",
+            {"type": "info", "action": "query", "code": 200, "msgid": msgid,
+             "timestamp": timestamp, "data": {"state": state}},
+            retained=retained,
+        )
+
+    def test_query_rejects_invalid_skew_and_min_timestamp_before_publish(self):
+        for kwargs in (
+            {"max_backward_skew_ms": -1},
+            {"max_backward_skew_ms": True},
+            {"max_backward_skew_ms": 1.5},
+            {"min_timestamp": True},
+            {"min_timestamp": "12345"},
+        ):
+            with self.subTest(kwargs=kwargs), self.assertRaises(ProtocolError):
+                self.client.query("info", require_fresh=True, **kwargs)
+        self.client.sock.sendall.assert_not_called()
+
+    def test_query_bounded_backward_skew_post_ack_and_min_timestamp(self):
+        def receive():
+            request = sent_publish_payload(self.client.sock)
+            sent = request["timestamp"]
+            # Uncorrelated report before ACK must be ignored even if within skew window.
+            yield self.info_report(timestamp=sent - 1000, state="pre_ack")
+            yield self.ack()
+            # Retained report must be ignored even after ACK and within skew window.
+            yield self.info_report(timestamp=sent, state="retained", retained=True)
+            # Outside backward skew window (> 5000 ms behind) must be ignored.
+            yield self.info_report(timestamp=sent - 5001, state="too_old")
+            # Outside forward skew window (> 5000 ms ahead) must be ignored.
+            yield self.info_report(timestamp=sent + 6000, state="too_future")
+            # Non-increasing timestamps (<= min_timestamp) must be ignored even within skew window.
+            yield self.info_report(timestamp=sent - 2000, state="not_increasing_lt")
+            yield self.info_report(timestamp=sent - 1500, state="not_increasing_eq")
+            # Valid post-ACK report behind host clock within 5000 ms and strictly > min_timestamp.
+            yield self.info_report(timestamp=sent - 1200, state="accepted")
+
+        packets = receive()
+        with patch.object(self.client, "receive", side_effect=lambda _: next(packets)):
+            sent_anchor = int(__import__("time").time() * 1000)
+            with patch("kobra_lan.mqtt.time.time", return_value=sent_anchor / 1000.0):
+                result = self.client.query(
+                    "info",
+                    require_fresh=True,
+                    max_backward_skew_ms=5000,
+                    min_timestamp=sent_anchor - 1500,
+                )
+        self.assertEqual(result["data"]["state"], "accepted")
+        self.assertEqual(result["timestamp"], sent_anchor - 1200)
+        self.client.sock.sendall.assert_called_once()
+
+    def test_query_accepts_exact_backward_skew_boundary_and_default_rejects_negative_skew(self):
+        anchor_ms = 1700000010000
+        # Default max_backward_skew_ms=0 rejects -1 ms, accepts 0 ms.
+        def receive_default():
+            yield self.ack()
+            yield self.info_report(timestamp=anchor_ms - 1, state="rejected_neg")
+            yield self.info_report(timestamp=anchor_ms, state="accepted_zero")
+
+        packets = receive_default()
+        with patch("kobra_lan.mqtt.time.time", return_value=anchor_ms / 1000.0), \
+                patch.object(self.client, "receive", side_effect=lambda _: next(packets)):
+            res = self.client.query("info", require_fresh=True)
+        self.assertEqual(res["data"]["state"], "accepted_zero")
+
+        # Explicit max_backward_skew_ms=5000 accepts exact -5000 ms boundary.
+        self.client.sock.reset_mock()
+        def receive_boundary():
+            yield self.ack()
+            yield self.info_report(timestamp=anchor_ms - 5000, state="accepted_boundary")
+
+        packets = receive_boundary()
+        with patch("kobra_lan.mqtt.time.time", return_value=anchor_ms / 1000.0), \
+                patch.object(self.client, "receive", side_effect=lambda _: next(packets)):
+            res = self.client.query("info", require_fresh=True, max_backward_skew_ms=5000)
+        self.assertEqual(res["data"]["state"], "accepted_boundary")
+
+
 if __name__ == "__main__":
     unittest.main()

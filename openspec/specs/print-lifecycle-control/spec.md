@@ -22,7 +22,8 @@ Execute guarded, single-shot pause, resume, and cancel actions against an active
 - **THEN** the CLI exits 2 with `validation_failed`, publishes no control command, and leaves local state unchanged
 
 ### Requirement: Fresh qualification and strict state preconditions
-Before publishing, the CLI SHALL verify a fresh `info` report over one pinned MQTT session for Kobra X model `20030` / firmware `2.0.2.2` and consistent optional identifiers. `pause` SHALL require `printing`; `resume` SHALL require `paused`; `cancel` SHALL require `printing`, a recognized preparation phase, or `paused`. Idle, already-reached, transitional, or unrecognized states SHALL exit 2 without publishing.
+
+Before publishing, the CLI SHALL verify a fresh `info` report over one pinned MQTT session for Kobra X model `20030` / firmware `2.0.2.2` and consistent optional identifiers. `pause` SHALL require `printing`; `resume` SHALL require `paused`; `cancel` SHALL require `printing`, a recognized firmware `2.0.2.2` preparation or filament-change phase, or `paused`. Idle, already-reached, transitional, or unrecognized states SHALL exit 2 without publishing.
 
 #### Scenario: Pause refused when not printing
 - **WHEN** `print pause --execute` runs while the printer is idle, already `paused`, `pausing`, or in a preparation phase
@@ -34,6 +35,10 @@ Before publishing, the CLI SHALL verify a fresh `info` report over one pinned MQ
 
 #### Scenario: Cancel allowed from active printing, preparation, or paused
 - **WHEN** `print cancel --execute` runs while the fresh active job is `printing`, in a recognized firmware `2.0.2.2` preparation phase, or `paused`
+- **THEN** pre-flight validation succeeds and the CLI proceeds to publish one `stop` command
+
+#### Scenario: Cancel allowed during calibration or filament-change preparation
+- **WHEN** `print cancel --execute` runs while the fresh active job is in `auto_leveling`, `vibrating`, `flow_calibrating`, `filament_cutting`, or `extfilbox_filament_unfeeding`
 - **THEN** pre-flight validation succeeds and the CLI proceeds to publish one `stop` command
 
 #### Scenario: Control refused on idle, transitional, or unqualified target

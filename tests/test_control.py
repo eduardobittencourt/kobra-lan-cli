@@ -19,7 +19,7 @@ from kobra_lan.control import (
 from kobra_lan.mqtt import MQTT, MQTTClosed, MQTTFailure, MQTTIOFailure
 from kobra_lan.profiles import ProfileLocalError, Registry
 from kobra_lan.upload import device_lock
-from kobra_lan.watch import PREPARATION_STATES
+from kobra_lan.watch import PREPARATION_STATES, START_ONLY_PREPARATION_STATES
 from test_client import config
 from test_diagnostics import INFO
 from test_profiles import fixture
@@ -267,6 +267,16 @@ class ControlExecutionAndSafetyTests(unittest.TestCase):
                     self.assertEqual(call.kwargs, {"require_fresh": True})
 
     def test_all_preparation_states_allow_cancel_and_block_pause_and_resume(self):
+        new_fw_states = frozenset({
+            "auto_leveling",
+            "vibrating",
+            "flow_calibrating",
+            "filament_cutting",
+            "extfilbox_filament_unfeeding",
+        })
+        self.assertTrue(new_fw_states <= PREPARATION_STATES)
+        self.assertTrue(START_ONLY_PREPARATION_STATES <= PREPARATION_STATES)
+        self.assertTrue(PREPARATION_STATES.isdisjoint({"paused", "pausing", "resuming", "stopping"}))
         self.assertEqual(PAUSE_ALLOWED, frozenset({"printing"}))
         self.assertEqual(RESUME_ALLOWED, frozenset({"paused"}))
         self.assertTrue(PREPARATION_STATES <= CANCEL_ALLOWED)
@@ -283,6 +293,28 @@ class ControlExecutionAndSafetyTests(unittest.TestCase):
                 result = control_print(self.cfg, "cancel", self.state_dir)
                 self.assertEqual(result["status"], "control_observed_stopped")
                 self.client.control_once.assert_called_once_with("stop", taskid="-1")
+        for prep in sorted(new_fw_states):
+            for blocked in ("pause", "resume"):
+                with self.subTest(prep=prep, blocked=blocked), \
+                        patch("kobra_lan.control.MQTT", return_value=self.session):
+                    self.client.reset_mock()
+                    self.client.query.side_effect = None
+                    self.client.query.return_value = report_with("busy", project_dict(prep))
+                    with self.assertRaises(ProtocolError):
+                        control_print(self.cfg, blocked, self.state_dir)
+                    self.client.control_once.assert_not_called()
+            with self.subTest(resume_confirmed_in=prep), \
+                    patch("kobra_lan.control.MQTT", return_value=self.session), \
+                    patch("kobra_lan.control.time.sleep"):
+                self.client.reset_mock()
+                self.client.query.side_effect = [
+                    report_with("busy", project_dict("paused")),
+                    report_with("busy", project_dict(prep)),
+                ]
+                self.client.control_once.return_value = {"code": 0, "msgid": "mid-resume"}
+                result = control_print(self.cfg, "resume", self.state_dir)
+                self.assertEqual(result["status"], "control_observed_resumed")
+                self.client.control_once.assert_called_once_with("resume", taskid="-1")
 
     def test_acknowledged_not_confirmed_polls_5_times_and_exits_cleanly_without_retry(self):
         with patch("kobra_lan.control.MQTT", return_value=self.session), \

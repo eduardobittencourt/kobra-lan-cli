@@ -626,6 +626,43 @@ class JobsStoreTests(unittest.TestCase):
         self.assertEqual(bad_detail["completeness"], "incomplete")
         self.assertEqual(bad_detail["issues"], ["unreadable_observation"])
 
+    def test_observations_accept_paused_and_stopping_phases_without_mutating_files(self):
+        obs_paused = persist_observation(
+            self.state_dir, self.device_digest, 1700000500, "paused-job.gcode",
+            {"outcome": "unknown", "reason": "deadline_expired", "phase": "paused",
+             "progress": 42, "current_layer": 21, "total_layers": 50},
+        )
+        obs_stopping = persist_observation(
+            self.state_dir, self.device_digest, 1700000600, "stopping-job.gcode",
+            {"outcome": "unknown", "reason": "job_disappeared", "phase": "stopping",
+             "progress": 60, "current_layer": 30, "total_layers": 50},
+        )
+        self.assertIsNotNone(obs_paused)
+        self.assertIsNotNone(obs_stopping)
+        before = self._snapshot()
+
+        listed = list_jobs(self.cfg, self.state_dir, kind="observation")
+        self.assertEqual(listed["total_count"], 2)
+        self.assertEqual(listed["incomplete_count"], 0)
+        by_id = {item["record_id"]: item for item in listed["jobs"]}
+        for obs_id, phase, progress, layer, filename in (
+            (obs_paused, "paused", 42, 21, "paused-job.gcode"),
+            (obs_stopping, "stopping", 60, 30, "stopping-job.gcode"),
+        ):
+            with self.subTest(phase=phase):
+                self.assertEqual(by_id[obs_id]["completeness"], "complete")
+                self.assertEqual(by_id[obs_id]["client_attribution"], "unattributed")
+                detail = job_info(self.cfg, self.state_dir, obs_id)
+                self.assertEqual(detail["completeness"], "complete")
+                self.assertEqual(detail["client_attribution"], "unattributed")
+                self.assertEqual(detail["phase"], phase)
+                self.assertEqual(detail["progress"], progress)
+                self.assertEqual(detail["current_layer"], layer)
+                self.assertEqual(detail["total_layers"], 50)
+                self.assertEqual(detail["observed_filename"], filename)
+                self.assertEqual(detail["issues"], [])
+        self.assertEqual(self._snapshot(), before)
+
     def test_private_directory_safety_and_individual_non_private_degradation(self):
         starts_dir = self._private_dir(self.state_dir / "starts" / self.device16)
         obs_dir = self._private_dir(self.state_dir / "observations" / self.device16)

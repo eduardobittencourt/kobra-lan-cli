@@ -21,7 +21,7 @@ Modeling, mesh editing, orientation, supports, toolpaths and slicing profiles be
 | Filament inventory | Read-only onboard four-slot inventory (`slots list`) and multicolor-aware offline `gcode inspect` (`paint_info`, tools, weights) |
 | Stored files | `files list`, `files info`, local `gcode inspect`, reviewed execution-only `files upload`, and guarded `files delete --execute` (no LAN download endpoint found on stock FW `2.0.2.2`) |
 | Print submission | Read-only `print plan` and experimental `print start` (single-filament, multicolor `--slot-map`, and reviewed `--reprint-from`), with explicit material/slot/preparation choices and reviewed hashes |
-| Observation & control | Read-only `print watch` with local observation persistence, offline `jobs list\|info`, and experimental guarded `print pause\|resume\|cancel` |
+| Observation & control | Read-only `print watch` (continuous coherent tracking across preparation, printing, filament-change, pause, and stopping phases, sanitized `stderr` progress with `--quiet`, bounded clock-skew tolerance, and local observation persistence), offline `jobs list\|info`, and experimental guarded `print pause\|resume\|cancel` |
 | Camera access | Read-only `camera status`, atomic JPEG/PNG `camera snapshot` (optional `ffmpeg`), and raw HTTP-FLV `camera pipe` with strict host validation and token redaction |
 | Compatibility | Centralized hardware qualification rules (`kobra_lan/qualification.py`) and the maintained [compatibility matrix](docs/compatibility.md) |
 | Automation | English text by default, root `--json` version-1 envelope, documented error/exit contracts and offline bash/zsh/fish completion |
@@ -64,9 +64,13 @@ Exit evidence: a published artifact installs outside the checkout, exposes help/
 ## Milestone 3 — A complete everyday print cycle (complete)
 
 The source CLI includes a read-only `print watch` for an already active job.
-It preserves verified progress, saves a sanitized local observation under
-`--state-dir` once an active job is observed, and reports uncertainty when it
-cannot identify the same attempt. See
+It tracks active jobs continuously across firmware `2.0.2.2` preparation,
+filament-change, `printing`, pause, `resuming`, and `stopping` phases with
+regression guards and bounded clock-skew tolerance, emits sanitized live
+progress on `stderr` (with optional `--quiet`), saves a sanitized local
+observation under `--state-dir` once an active job is observed, and honestly
+reports `unknown` when firmware telemetry cannot establish a terminal outcome
+or attempt continuity. See
 [watch outcomes and evidence](docs/usage.md#watch-an-active-print).
 The source CLI also includes reviewed intentional reprints (`--reprint-from`)
 with canonical attempt-keyed start markers and receipts (`<attempt_id>.*`),
