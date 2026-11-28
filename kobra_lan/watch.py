@@ -219,12 +219,13 @@ class WatchProgress:
         self._last_progress_key = key
         self._on_progress(_format_progress_line(self.last, state, remain_time, info.get("temp")))
 
-    def _printing_regression(self, progress, current, total):
+    def _counter_regression(self, progress, current, total, *, allow_zero_progress=False):
         if total is not None and self.observed_total_layers is not None and total != self.observed_total_layers:
             return True
         if not self.saw_printing_progress:
             return False
-        if progress is not None and self.max_progress is not None and progress < self.max_progress:
+        if (progress is not None and (not allow_zero_progress or progress > 0)
+                and self.max_progress is not None and progress < self.max_progress):
             return True
         return current is not None and current > 0 and self.max_layer is not None and current < self.max_layer
 
@@ -233,7 +234,7 @@ class WatchProgress:
         progress = fields.get("progress")
         current = fields.get("current_layer")
         total = fields.get("total_layers")
-        if self._printing_regression(progress, current, total):
+        if self._counter_regression(progress, current, total):
             return self.result("unknown", "identity_unverified")
         merged = self._preserved_scalars()
         if progress is not None:
@@ -253,19 +254,20 @@ class WatchProgress:
         progress = fields.get("progress")
         current = fields.get("current_layer")
         total = fields.get("total_layers")
-        preserved = self._preserved_scalars()
-        candidate = dict(preserved)
-        if progress is not None and progress > 0 and (self.max_progress is None or progress >= self.max_progress):
+        if self._counter_regression(progress, current, total, allow_zero_progress=True):
+            return self.result("unknown", "identity_unverified")
+        candidate = self._preserved_scalars()
+        if progress is not None and progress > 0:
             candidate["progress"] = progress
-        if total is not None and (self.observed_total_layers is None or total == self.observed_total_layers):
+        if total is not None:
             candidate["total_layers"] = total
-        if current is not None and current > 0 and (self.max_layer is None or current >= self.max_layer):
+        if current is not None and current > 0:
             candidate["current_layer"] = current
         if candidate.get("current_layer", 0) > candidate.get("total_layers", 1_000_000):
-            candidate = preserved
-        else:
-            self._record_high_water(candidate)
+            return self.result("unknown", "identity_unverified")
+        self._record_high_water(candidate)
         self.last = {"phase": phase, **candidate}
+        return None
 
     def update(self, info):
         project = info.get("project")
@@ -326,22 +328,24 @@ class WatchProgress:
         state = project.get("state")
         if not isinstance(state, str):
             return self.result("unknown", "active_job_unverified")
+        stop = None
         if state == "printing":
             stop = self._merge_printing(project)
-            if stop is not None:
-                return stop
         elif state in START_ONLY_PREPARATION_STATES:
             if self.saw_printing_progress:
-                return self.result("unknown", "identity_unverified")
-            self.last = {"phase": "preparing", **self._preserved_scalars()}
+                stop = self.result("unknown", "identity_unverified")
+            else:
+                self.last = {"phase": "preparing", **self._preserved_scalars()}
         elif state in PREPARATION_STATES or state == "resuming":
             self.last = {"phase": "preparing", **self._preserved_scalars()}
         elif state in PAUSED_STATES:
-            self._merge_transitional_counters(project, "paused")
+            stop = self._merge_transitional_counters(project, "paused")
         elif state in STOPPING_STATES:
-            self._merge_transitional_counters(project, "stopping")
+            stop = self._merge_transitional_counters(project, "stopping")
         else:
-            return self.result("unknown", "active_job_unverified")
+            stop = self.result("unknown", "active_job_unverified")
+        if stop is not None:
+            return stop
         self._emit_progress(info, project, state)
         return None
 

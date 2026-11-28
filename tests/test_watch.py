@@ -456,6 +456,28 @@ class WatchProgressTests(unittest.TestCase):
             "stopping 25% layer 20/100",
         ])
 
+    def test_paused_and_stopping_reject_conflicting_total_layers_and_positive_regressions(self):
+        cases = (
+            ("paused_conflicting_total", {"state": "paused", "progress": 20, "curr_layer": 16, "total_layers": 200}),
+            ("stopping_conflicting_total", {"state": "stopping", "progress": 20, "curr_layer": 16, "total_layers": 200}),
+            ("paused_positive_progress_drop", {"state": "paused", "progress": 5, "curr_layer": 8, "total_layers": 100}),
+            ("stopping_positive_layer_drop", {"state": "stopping", "progress": 12, "curr_layer": 3, "total_layers": 100}),
+        )
+        for name, update_fields in cases:
+            with self.subTest(case=name):
+                emitted = []
+                progress = WatchProgress(on_progress=emitted.append)
+                self.assertIsNone(progress.update(PRINTING))
+                stopped = progress.update({
+                    **PRINTING,
+                    "project": {**PRINTING["project"], **update_fields},
+                })
+                self.assertEqual(stopped, {
+                    "outcome": "unknown", "reason": "identity_unverified",
+                    "phase": "printing", "progress": 12, "current_layer": 8, "total_layers": 100,
+                })
+                self.assertEqual(emitted, ["printing 12% layer 8/100"])
+
 
 class WatchTransportTests(unittest.TestCase):
     def test_fresh_query_ignores_both_correlated_stale_and_retained_reports(self):
