@@ -48,6 +48,7 @@ UPLOAD_STATUSES = frozenset({
 })
 OBSERVATION_OUTCOMES = frozenset({"unknown"})
 OBSERVATION_REASONS = frozenset({
+    "active_job_unverified",
     "deadline_expired",
     "job_disappeared",
     "job_replaced",
@@ -57,7 +58,7 @@ OBSERVATION_REASONS = frozenset({
     "validation_failed",
     "operation_failed",
 })
-OBSERVATION_PHASES = frozenset({"preparing", "printing"})
+OBSERVATION_PHASES = frozenset({"preparing", "printing", "paused", "stopping"})
 
 
 def valid_record_id(value):

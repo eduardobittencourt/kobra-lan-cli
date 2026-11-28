@@ -8,11 +8,20 @@ Follow an active print on a qualified Kobra X through read-only telemetry and ex
 
 ### Requirement: Observe one active print
 
-`print watch` SHALL use the selected printer's pinned authenticated MQTT connection and fresh qualified reports. It SHALL observe the job active at startup, regardless of which client started it. It SHALL issue only read-only printer queries and leave printer settings, credentials, profiles, upload/start receipts, and attempt markers untouched; local observation persistence SHALL occur only in the separate observations area under `--state-dir` after an active job is observed.
+`print watch` SHALL poll fresh qualified `info` reports over one pinned MQTT session for the active job across recognized firmware `2.0.2.2` preparation/filament-change, `printing`, pause, `resuming`, and `stopping` states. It SHALL tolerate bounded negative clock skew on correlated non-retained post-ACK reports with strictly increasing timestamps, issuing only read-only queries and writing only under `--state-dir/observations/`.
 
 #### Scenario: Job started by another client
 - **WHEN** fresh qualified telemetry reports an active job started from another client
 - **THEN** watch observes that job without requiring a local upload or start receipt
+
+#### Scenario: Active job in calibration, filament-change, pause, or stopping state
+- **WHEN** fresh qualified telemetry reports an active job in `auto_leveling`, `vibrating`, `flow_calibrating`, `filament_cutting`, `extfilbox_filament_unfeeding`, `nozzle_cooling_off`, `paused`, `pausing`, `resuming`, or `stopping`
+- **THEN** watch recognizes the active job, maps it to its normalized phase (`preparing`, `paused`, or `stopping`), and continues polling rather than exiting with `active_job_unverified`
+
+#### Scenario: Small printer clock skew during a long watch
+- **WHEN** a correlated, non-retained post-ACK `info` report carries a timestamp slightly behind the host send clock (within the bounded skew tolerance) and strictly greater than the previous accepted report timestamp
+- **THEN** watch accepts the report and continues polling without timing out
+- **AND** genuinely stale reports outside the skew window, retained reports, or non-increasing timestamps are ignored
 
 #### Scenario: No active job
 - **WHEN** the initial fresh report establishes that the printer is idle without an active job
@@ -25,7 +34,11 @@ Follow an active print on a qualified Kobra X through read-only telemetry and ex
 
 ### Requirement: Attribute outcomes to the observed job
 
-Watch SHALL report `completed`, `canceled` or `failed` only when fresh firmware telemetry supplies a hardware-validated terminal signal attributable to that same print attempt. Watch SHALL stop with `unknown` when the job disappears or is replaced without attributable terminal evidence. It SHALL report only validated progress and keep physical part quality outside its result.
+Watch SHALL report `completed`, `canceled`, or `failed` only on hardware-validated attributable terminal telemetry. While the active job retains a matching filename, matching non-placeholder `task_id` if present, coherent phases, and non-regressing counters, watch SHALL keep updating verified progress even with placeholder `task_id` `"-1"`. It SHALL stop with `unknown` on disappearance, replacement, unattributed `last_project`, missing filename, or regression.
+
+#### Scenario: Continuous coherent observation across preparation, printing, filament change, pause, and idle transition
+- **WHEN** fresh qualified telemetry progresses from `auto_leveling` through `printing` (with increasing `progress` and `curr_layer`), temporary `filament_cutting` / `nozzle_purging` or `paused` / `resuming` transitions, end-of-print layer-counter zeroing at `99%`, and finally `state: "free"` with empty `last_project`
+- **THEN** watch continues polling across the entire run, retains the highest verified progress and layer counters without overwriting them with zero, and exits 0 with `outcome: "unknown"`, `reason: "job_disappeared"`, and the latest verified phase and scalar progress
 
 #### Scenario: Attributable terminal report
 - **WHEN** fresh telemetry supplies a validated terminal signal for the observed attempt
@@ -36,38 +49,51 @@ Watch SHALL report `completed`, `canceled` or `failed` only when fresh firmware 
 - **THEN** watch exits 0 with `unknown`, the reason and any last verified progress
 
 #### Scenario: A different attempt of the same file
-- **WHEN** fresh telemetry shows a different attempt with the same filename
-- **THEN** watch does not follow it or report its progress or outcome as belonging to the original attempt
+- **WHEN** fresh telemetry with the same filename reports regressed printing `progress`, a lower nonzero `curr_layer`, a changed nonzero `total_layers`, or a start-only calibration phase (`auto_leveling`, `z_offset_calibrating`, `vibrating`, `flow_calibrating`) after printing progress was established
+- **THEN** watch stops immediately with `outcome: "unknown"` and `reason: "identity_unverified"` and preserves only the prior verified progress without adopting the replacement's counters
+
+#### Scenario: Missing or hostile filename cannot establish continuity
+- **WHEN** the initial active report lacks a valid printable filename (or supplies a hostile URL/control-character string) and a second active report arrives
+- **THEN** watch stops with `outcome: "unknown"` and `reason: "identity_unverified"` without leaking the untrusted filename
 
 ### Requirement: Bound observation and preserve partial results
 
-Watch SHALL have a finite default and accept a bounded positive observation timeout. It SHALL stop on confirmed outcome, lost attribution, deadline, communication failure or user interruption. It SHALL publish one final result using the shared presentation contract, with optional progress on stderr and no raw telemetry, tokens or credentials.
+Watch SHALL enforce a finite default and bounded positive timeout, stopping on confirmed outcome, lost continuity, deadline, communication failure, or interruption. It SHALL emit one final result on `stdout` using the shared presentation contract. By default, while observing an active job, watch SHALL emit concise sanitized progress lines to `stderr` on scalar status changes (excluding filenames, URLs, credentials, and control characters); `--quiet` SHALL suppress `stderr` progress.
+
+#### Scenario: Live progress on stderr with clean stdout
+- **WHEN** `print watch` runs without `--quiet` in text or `--json` mode while an active job advances across preparation and printing polls
+- **THEN** `stderr` receives sanitized progress updates containing only safe scalar status (without filenames, URLs, credentials, or terminal controls)
+- **AND** `stdout` contains only the single final text summary or single-line JSON envelope
+
+#### Scenario: Quiet flag suppresses stderr progress
+- **WHEN** `print watch --quiet` runs in text or `--json` mode while observing an active job
+- **THEN** `stderr` remains empty and `stdout` emits the normal final result
 
 #### Scenario: Observation deadline
 - **WHEN** the deadline expires while the outcome remains unconfirmed
-- **THEN** watch exits 0 with outcome `unknown`, a deadline reason and any last verified progress
+- **THEN** watch exits 0 with outcome `unknown`, a deadline reason and the latest verified progress
 
 #### Scenario: Connection lost after observation starts
 - **WHEN** the pinned connection fails after the job has been observed
-- **THEN** watch exits 3 with outcome `unknown` in the partial result and preserves any last verified progress
+- **THEN** watch exits 3 with outcome `unknown` in the partial result and preserves the latest verified progress
 - **AND** it does not reconnect or switch targets
 
 #### Scenario: User stops watching
 - **WHEN** the operator interrupts the foreground watcher
-- **THEN** watch exits 130 with an interruption error and, once a job has been observed, outcome `unknown` and any last verified progress
+- **THEN** watch exits 130 with an interruption error and, once a job has been observed, outcome `unknown` and the latest verified progress
 - **AND** it sends no printer control command
 
 ### Requirement: Persist local watch observations
 
-After establishing a verified active phase, `print watch` SHALL atomically write one sanitized private (`0600`) observation record under `<state-dir>/observations/<device-prefix>/` (`0700`, no-follow) before exiting, including on deadline, post-observation error, or interruption. It SHALL write nothing on `no_active_job` or pre-observation failure. If persistence fails due to unsafe paths or I/O errors, watch SHALL preserve its result and exit status and report `observation_recorded: false`.
+After establishing a verified active phase (`preparing`, `printing`, `paused`, or `stopping`), `print watch` SHALL atomically save one private (`0600`) sanitized observation under `<state-dir>/observations/<device-prefix>/` (`0700`, no-follow) before exiting, including on deadline, error, or interrupt. It SHALL write nothing on `no_active_job` or pre-observation failure; unsafe paths or I/O errors SHALL preserve the watch result with `observation_recorded: false`.
 
 #### Scenario: Active job observed until stop or deadline
-- **WHEN** `print watch` observes an active job and stops due to lost attribution, replacement, or deadline expiration
-- **THEN** it writes one private atomic observation record with `observation_id`, `device_digest`, timestamps, validated `observed_filename`, `client_attribution: "unattributed"`, outcome, reason, and verified progress, preserves existing profiles/receipts/markers, and reports `observation_id` and `observation_recorded: true` in stdout without leaking raw telemetry
+- **WHEN** `print watch` observes an active job across one or more polls and stops due to disappearance, replacement, regression, or deadline expiration
+- **THEN** it writes one private atomic observation record with `observation_id`, `device_digest`, timestamps, validated `observed_filename`, `client_attribution: "unattributed"`, outcome, reason, and the latest verified phase (`preparing`, `printing`, `paused`, or `stopping`) and scalar progress, preserves existing profiles/receipts/markers, and reports `observation_id` and `observation_recorded: true` in stdout without leaking raw telemetry
 
 #### Scenario: Active job interrupted or disconnected after observation
 - **WHEN** `print watch` observes an active job and then encounters a connection failure (exit 3) or user interruption (exit 130)
-- **THEN** it persists the partial observation record under `--state-dir` and includes `observation_id` and `observation_recorded: true` in its partial result alongside the existing exit code
+- **THEN** it persists the partial observation record with the latest verified progress under `--state-dir` and includes `observation_id` and `observation_recorded: true` in its partial result alongside the existing exit code
 
 #### Scenario: Idle printer or pre-observation failure writes nothing
 - **WHEN** `print watch` sees `no_active_job` or fails before establishing a verified active phase

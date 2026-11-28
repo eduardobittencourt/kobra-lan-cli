@@ -59,12 +59,19 @@ class CompletionTests(unittest.TestCase):
                                     for line in script.splitlines()))
                 self.assertTrue(any('xcamera snapshot' in line and ' -l output -r -F' in line
                                     for line in script.splitlines()))
+                self.assertTrue(any('xprint watch' in line and ' -l timeout -r' in line
+                                    for line in script.splitlines()))
+                self.assertTrue(any('xprint watch' in line and line.endswith(' -l quiet')
+                                    for line in script.splitlines()))
             else:
                 self.assertTrue(any("'printer discover') candidates=" in line
                                     and '--timeout' in line and '--interface' in line
                                     for line in script.splitlines()))
                 self.assertIn("'files delete') candidates='-h --help --execute'", script)
                 self.assertIn("'camera snapshot:--output')", script)
+                self.assertTrue(any("'print watch') candidates=" in line
+                                    and '--timeout' in line and '--quiet' in line
+                                    for line in script.splitlines()))
             for command in ('plan', 'start'):
                 if shell == 'fish':
                     lines = [line for line in script.splitlines()
@@ -127,6 +134,8 @@ COMP_WORDS=(kobra-lan print wa); COMP_CWORD=2
 _kobra_lan; printf '%s\\n' "${COMPREPLY[@]}"
 COMP_WORDS=(kobra-lan print watch --time); COMP_CWORD=3
 _kobra_lan; printf '%s\\n' "${COMPREPLY[@]}"
+COMP_WORDS=(kobra-lan print watch --qu); COMP_CWORD=3
+_kobra_lan; printf '%s\\n' "${COMPREPLY[@]}"
 COMP_WORDS=(kobra-lan jobs ''); COMP_CWORD=2
 _kobra_lan; printf 'jobs:%s\\n' "${COMPREPLY[@]}"
 COMP_WORDS=(kobra-lan jobs list --kind ''); COMP_CWORD=4
@@ -153,7 +162,7 @@ _kobra_lan; printf '%s\\n' "${COMPREPLY[@]}"
         process = subprocess.run(['bash', '--noprofile', '--norc'], input=script, text=True, capture_output=True)
         self.assertEqual(process.returncode, 0, process.stderr)
         self.assertEqual(process.stderr, '')
-        for expected in ('list', 'info', 'upload', 'on', 'off', 'watch', '--timeout', '--json', 'pyproject.toml',
+        for expected in ('list', 'info', 'upload', 'on', 'off', 'watch', '--timeout', '--quiet', '--json', 'pyproject.toml',
                          'printer:discover', 'printer-discover:--interface', 'printer-discover:--timeout',
                          'root:slots', 'slots:list', 'root:camera', 'camera:status', 'camera:snapshot', 'camera:pipe',
                          'camera-snap:--output', 'camera-snap:--no-start-capture', 'camera-snap-file:pyproject.toml',
@@ -271,6 +280,7 @@ end
 complete -C 'kobra-lan print plan a.gcode --auto-leveling o'
 complete -C 'kobra-lan print wa'
 complete -C 'kobra-lan print watch --time'
+complete -C 'kobra-lan print watch --qu'
 for item in (complete -C 'kobra-lan jobs ')
   printf 'jobs:%s\\n' $item
 end
@@ -293,7 +303,7 @@ complete -C 'kobra-lan --j'
         process = subprocess.run(['fish', '--no-config'], input=script, text=True, capture_output=True)
         self.assertEqual(process.returncode, 0, process.stderr)
         self.assertEqual(process.stderr, '')
-        for expected in ('list', 'info', 'upload', 'on', 'off', 'watch', '--timeout', '--json',
+        for expected in ('list', 'info', 'upload', 'on', 'off', 'watch', '--timeout', '--quiet', '--json',
                          'printer:discover', 'printer-discover:--interface', 'printer-discover:--timeout',
                          'root:slots', 'slots:list', 'root:camera', 'camera:status', 'camera:snapshot', 'camera:pipe',
                          'camera-snap:--no-start-capture', 'camera-pipe:--max-bytes',
@@ -342,6 +352,8 @@ words=(kobra-lan print wa); CURRENT=3
 _kobra_lan
 words=(kobra-lan print watch --time); CURRENT=4
 _kobra_lan
+words=(kobra-lan print watch --qu); CURRENT=4
+_kobra_lan
 words=(kobra-lan jobs ''); CURRENT=3
 for candidate in $(_kobra_lan); do print -r -- "jobs:$candidate"; done
 words=(kobra-lan jobs list --kind ''); CURRENT=5
@@ -366,7 +378,7 @@ _kobra_lan
         process = subprocess.run(['zsh', '-f'], input=script, text=True, capture_output=True)
         self.assertEqual(process.returncode, 0, process.stderr)
         self.assertEqual(process.stderr, '')
-        for expected in ('list', 'info', 'upload', 'on', 'off', 'watch', '--timeout', '--json',
+        for expected in ('list', 'info', 'upload', 'on', 'off', 'watch', '--timeout', '--quiet', '--json',
                          'printer:discover', 'printer-discover:--interface', 'printer-discover:--timeout',
                          'root:slots', 'slots:list', 'root:camera', 'camera:status', 'camera:snapshot', 'camera:pipe',
                          'camera-snap:--no-start-capture', 'camera-pipe:--max-bytes',

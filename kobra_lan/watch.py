@@ -1,14 +1,16 @@
 """Read-only observation over one pinned printer session."""
 from contextlib import ExitStack
 import hashlib
+import math
 import os
 from pathlib import Path
 import re
 import time
 import uuid
 
+from .cli_output import safe_text
 from .config import ProtocolError
-from .mqtt import MQTT, MQTTClosed, MQTTFailure, MQTTIOFailure
+from .mqtt import MQTT, MQTTClosed, MQTTFailure, MQTTIOFailure, TASKID_RE
 from .printer import payload_data
 from .profiles import open_directory
 from .qualification import info_compatibility_issue
@@ -17,10 +19,33 @@ from .upload import atomic_json_at
 DEFAULT_TIMEOUT = 86400
 MAX_TIMEOUT = 259200
 POLL_INTERVAL = 5
+WATCH_BACKWARD_SKEW_MS = 5000
 PREPARATION_STATES = frozenset({
-    "extfilbox_filament_feeding", "frequency_sweeping", "hotbed_cooling_off", "hotbed_heating",
-    "nozzle_cooling", "nozzle_heating", "nozzle_purging", "nozzle_wiping", "z_offset_calibrating",
+    "auto_leveling",
+    "extfilbox_filament_feeding",
+    "extfilbox_filament_unfeeding",
+    "filament_cutting",
+    "flow_calibrating",
+    "frequency_sweeping",
+    "hotbed_cooling_off",
+    "hotbed_heating",
+    "nozzle_cooling",
+    "nozzle_cooling_off",
+    "nozzle_heating",
+    "nozzle_purging",
+    "nozzle_wiping",
+    "vibrating",
+    "z_offset_calibrating",
 })
+START_ONLY_PREPARATION_STATES = frozenset({
+    "auto_leveling",
+    "flow_calibrating",
+    "frequency_sweeping",
+    "vibrating",
+    "z_offset_calibrating",
+})
+PAUSED_STATES = frozenset({"paused", "pausing"})
+STOPPING_STATES = frozenset({"stopping"})
 
 
 def progress_fields(project):
@@ -45,6 +70,58 @@ def project_filename(project):
     return None
 
 
+def project_task_id(project):
+    if not isinstance(project, dict):
+        return None
+    for key in ("task_id", "taskid"):
+        value = project.get(key)
+        if isinstance(value, str) and TASKID_RE.fullmatch(value) is not None:
+            return None if value == "-1" else value
+    return None
+
+
+def _safe_remain_time(project):
+    if not isinstance(project, dict):
+        return None
+    remain = project.get("remain_time")
+    if type(remain) is int and 1 <= remain <= 1_000_000:
+        return remain
+    return None
+
+
+def _safe_temp(value):
+    if type(value) is int and -50 <= value <= 500:
+        return str(value)
+    if type(value) is float and math.isfinite(value) and -50.0 <= value <= 500.0:
+        return f"{value:g}"
+    return None
+
+
+def _format_progress_line(last, state, remain_time, temp):
+    parts = [last["phase"]]
+    if (isinstance(state, str) and state != last["phase"]
+            and len(state) <= 80 and state.isascii() and state.isidentifier()):
+        parts.append(f"({state})")
+    if "progress" in last:
+        parts.append(f"{last['progress']}%")
+    if "current_layer" in last and "total_layers" in last:
+        parts.append(f"layer {last['current_layer']}/{last['total_layers']}")
+    elif "current_layer" in last:
+        parts.append(f"layer {last['current_layer']}")
+    if remain_time is not None:
+        parts.append(f"remaining {remain_time}m")
+    if isinstance(temp, dict):
+        curr_nozzle = _safe_temp(temp.get("curr_nozzle_temp"))
+        target_nozzle = _safe_temp(temp.get("target_nozzle_temp"))
+        if curr_nozzle is not None and target_nozzle is not None:
+            parts.append(f"nozzle {curr_nozzle}/{target_nozzle}C")
+        curr_bed = _safe_temp(temp.get("curr_hotbed_temp"))
+        target_bed = _safe_temp(temp.get("target_hotbed_temp"))
+        if curr_bed is not None and target_bed is not None:
+            parts.append(f"bed {curr_bed}/{target_bed}C")
+    return safe_text(" ".join(parts))
+
+
 def last_project_baseline(last):
     if not isinstance(last, dict) or not last:
         return None
@@ -61,13 +138,20 @@ def last_project_baseline(last):
 class WatchProgress:
     """Keep only scalar progress established for the job selected at startup."""
 
-    def __init__(self):
+    def __init__(self, *, on_progress=None):
         self.last = None
         self.observed_at = None
         self.device_digest = None
         self.observation_id = None
         self.initial_filename = None
+        self.initial_task_id = None
         self.initial_last_project = None
+        self.saw_printing_progress = False
+        self.max_progress = None
+        self.max_layer = None
+        self.observed_total_layers = None
+        self._on_progress = on_progress
+        self._last_progress_key = None
 
     def bind_device(self, config):
         self.device_digest = hashlib.sha256(config.printer_id.encode()).hexdigest()
@@ -97,36 +181,174 @@ class WatchProgress:
             return {**result, "observation_recorded": False}
         return {**result, "observation_id": observation_id, "observation_recorded": True}
 
+    def _preserved_scalars(self):
+        if not self.last:
+            return {}
+        return {k: self.last[k] for k in ("progress", "current_layer", "total_layers") if k in self.last}
+
+    def _record_high_water(self, fields):
+        progress = fields.get("progress")
+        current = fields.get("current_layer")
+        total = fields.get("total_layers")
+        if progress is not None:
+            if self.max_progress is None or progress > self.max_progress:
+                self.max_progress = progress
+            if progress > 0:
+                self.saw_printing_progress = True
+        if current is not None:
+            if self.max_layer is None or current > self.max_layer:
+                self.max_layer = current
+            if current > 0:
+                self.saw_printing_progress = True
+        if total is not None and self.observed_total_layers is None:
+            self.observed_total_layers = total
+
+    def _emit_progress(self, info, project, state):
+        if self._on_progress is None or self.last is None:
+            return
+        remain_time = _safe_remain_time(project)
+        key = (
+            self.last["phase"],
+            state,
+            self.last.get("progress"),
+            self.last.get("current_layer"),
+            self.last.get("total_layers"),
+            remain_time,
+        )
+        if key == self._last_progress_key:
+            return
+        self._last_progress_key = key
+        self._on_progress(_format_progress_line(self.last, state, remain_time, info.get("temp")))
+
+    def _counter_regression(self, progress, current, total, *, allow_zero_progress=False):
+        if total is not None and self.observed_total_layers is not None and total != self.observed_total_layers:
+            return True
+        if not self.saw_printing_progress:
+            return False
+        if (progress is not None and (not allow_zero_progress or progress > 0)
+                and self.max_progress is not None and progress < self.max_progress):
+            return True
+        return current is not None and current > 0 and self.max_layer is not None and current < self.max_layer
+
+    def _merge_printing(self, project):
+        fields = progress_fields(project)
+        progress = fields.get("progress")
+        current = fields.get("current_layer")
+        total = fields.get("total_layers")
+        if self._counter_regression(progress, current, total):
+            return self.result("unknown", "identity_unverified")
+        merged = self._preserved_scalars()
+        if progress is not None:
+            merged["progress"] = progress
+        if total is not None:
+            merged["total_layers"] = total
+        if current is not None and (current > 0 or "current_layer" not in merged):
+            merged["current_layer"] = current
+        if merged.get("current_layer", 0) > merged.get("total_layers", 1_000_000):
+            return self.result("unknown", "identity_unverified")
+        self._record_high_water(merged)
+        self.last = {"phase": "printing", **merged}
+        return None
+
+    def _merge_transitional_counters(self, project, phase):
+        fields = progress_fields(project)
+        progress = fields.get("progress")
+        current = fields.get("current_layer")
+        total = fields.get("total_layers")
+        if self._counter_regression(progress, current, total, allow_zero_progress=True):
+            return self.result("unknown", "identity_unverified")
+        candidate = self._preserved_scalars()
+        if progress is not None and progress > 0:
+            candidate["progress"] = progress
+        if total is not None:
+            candidate["total_layers"] = total
+        if current is not None and current > 0:
+            candidate["current_layer"] = current
+        if candidate.get("current_layer", 0) > candidate.get("total_layers", 1_000_000):
+            return self.result("unknown", "identity_unverified")
+        self._record_high_water(candidate)
+        self.last = {"phase": phase, **candidate}
+        return None
+
     def update(self, info):
         project = info.get("project")
         if self.last is None:
             idle = info["state"] == "free"
             if idle and (project is None or project == {}):
                 return self.result("no_active_job", "idle")
-            phase = project.get("state") if isinstance(project, dict) else None
-            if idle or not isinstance(phase, str):
+            state = project.get("state") if isinstance(project, dict) else None
+            if idle or not isinstance(state, str):
                 return self.result("unknown", "active_job_unverified")
-            if phase in PREPARATION_STATES:
+            if state in PREPARATION_STATES or state == "resuming":
                 self.last = {"phase": "preparing"}
-            elif phase == "printing":
-                self.last = {"phase": "printing", **progress_fields(project)}
+            elif state == "printing":
+                fields = progress_fields(project)
+                self.last = {"phase": "printing", **fields}
+                self._record_high_water(fields)
+            elif state in PAUSED_STATES:
+                fields = progress_fields(project)
+                if fields.get("progress", 0) > 0 or fields.get("current_layer", 0) > 0 or "total_layers" in fields:
+                    self.last = {"phase": "paused", **fields}
+                    self._record_high_water(fields)
+                else:
+                    self.last = {"phase": "paused"}
+            elif state in STOPPING_STATES:
+                fields = progress_fields(project)
+                if fields.get("progress", 0) > 0 or fields.get("current_layer", 0) > 0 or "total_layers" in fields:
+                    self.last = {"phase": "stopping", **fields}
+                    self._record_high_water(fields)
+                else:
+                    self.last = {"phase": "stopping"}
             else:
                 return self.result("unknown", "active_job_unverified")
             self.observed_at = int(time.time())
             self.initial_filename = project_filename(project)
+            self.initial_task_id = project_task_id(project)
             self.initial_last_project = last_project_baseline(info.get("last_project"))
+            self._emit_progress(info, project, state)
             return None
 
         latest_last_project = last_project_baseline(info.get("last_project"))
         if latest_last_project is not None and latest_last_project != self.initial_last_project:
             return self.result("unknown", "last_project_unattributed")
-        if project is None or project == {}:
+        if info.get("state") == "free" or project is None or project == {}:
             return self.result("unknown", "job_disappeared")
-        filename = project_filename(project) if isinstance(project, dict) else None
-        if self.initial_filename and filename and filename != self.initial_filename:
+        if not isinstance(project, dict):
+            return self.result("unknown", "active_job_unverified")
+        filename = project_filename(project)
+        if self.initial_filename is None or filename is None:
+            return self.result("unknown", "identity_unverified")
+        if filename != self.initial_filename:
             return self.result("unknown", "job_replaced")
-        # Filenames can be reused, and the observed task_id is a start placeholder.
-        return self.result("unknown", "identity_unverified")
+        current_task_id = project_task_id(project)
+        if self.initial_task_id is not None and current_task_id is not None and current_task_id != self.initial_task_id:
+            return self.result("unknown", "job_replaced")
+        if self.initial_task_id is None and current_task_id is not None:
+            self.initial_task_id = current_task_id
+
+        state = project.get("state")
+        if not isinstance(state, str):
+            return self.result("unknown", "active_job_unverified")
+        stop = None
+        if state == "printing":
+            stop = self._merge_printing(project)
+        elif state in START_ONLY_PREPARATION_STATES:
+            if self.saw_printing_progress:
+                stop = self.result("unknown", "identity_unverified")
+            else:
+                self.last = {"phase": "preparing", **self._preserved_scalars()}
+        elif state in PREPARATION_STATES or state == "resuming":
+            self.last = {"phase": "preparing", **self._preserved_scalars()}
+        elif state in PAUSED_STATES:
+            stop = self._merge_transitional_counters(project, "paused")
+        elif state in STOPPING_STATES:
+            stop = self._merge_transitional_counters(project, "stopping")
+        else:
+            stop = self.result("unknown", "active_job_unverified")
+        if stop is not None:
+            return stop
+        self._emit_progress(info, project, state)
+        return None
 
 
 def persist_observation(state_dir, device_digest, observed_at, observed_filename, result, *, observation_id=None):
@@ -171,6 +393,7 @@ def persist_observation(state_dir, device_digest, observed_at, observed_filename
 def observe(registry, config, name, timeout, on_report, *, on_target=None):
     """Deliver fresh qualified info to on_report until it returns a result or time expires."""
     deadline = time.monotonic() + timeout
+    last_timestamp = None
     try:
         with ExitStack() as session:
             with registry.access(config, name) as (cfg, _):
@@ -179,11 +402,20 @@ def observe(registry, config, name, timeout, on_report, *, on_target=None):
                 client = session.enter_context(MQTT(cfg, deadline=deadline))
 
             while time.monotonic() < deadline:
-                info = payload_data(client.query("info", require_fresh=True))
+                report = client.query(
+                    "info",
+                    require_fresh=True,
+                    max_backward_skew_ms=WATCH_BACKWARD_SKEW_MS,
+                    min_timestamp=last_timestamp,
+                )
+                info = payload_data(report)
                 if time.monotonic() >= deadline:
                     break
                 if info_compatibility_issue(cfg.type_id, cfg.printer_id, info):
                     raise ProtocolError("Fresh status could not establish qualified Kobra X identity and firmware")
+                stamp = report.get("timestamp") if isinstance(report, dict) else None
+                if type(stamp) in (int, float):
+                    last_timestamp = stamp
                 result = on_report(info)
                 if result is not None:
                     return result

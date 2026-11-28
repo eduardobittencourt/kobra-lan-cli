@@ -330,9 +330,12 @@ def build_parser():
             p.add_argument("--plan-sha256", required=True, help="Reviewed hash from print plan")
     p = printing.add_parser("watch", help="Observe the active print without controlling it",
                             description=f"Read-only observation on {QUALIFICATION_SUMMARY}. "
+                                        "Emits sanitized progress updates to stderr unless --quiet is set. "
                                         "Reports an unknown outcome when telemetry cannot establish it.")
     p.add_argument("--timeout", type=watch_timeout, default=DEFAULT_TIMEOUT, metavar="SECONDS",
                    help=f"Observation deadline in seconds (1 to {MAX_TIMEOUT}, default {DEFAULT_TIMEOUT})")
+    p.add_argument("--quiet", action="store_true",
+                   help="Suppress live progress updates on stderr; stdout still emits the final result")
     control_docs = {
         "pause": (
             "Experimental guarded pause of an active print; requires --execute",
@@ -447,7 +450,8 @@ def main(argv=None):
                 raise ArgumentFailure("Start requires a full --plan-sha256 from print plan and --execute")
             args.plan_sha256 = args.plan_sha256.lower()
         if args.command == "print" and args.print_command == "watch":
-            watch = WatchProgress()
+            on_progress = None if args.quiet else (lambda line: print(line, file=sys.stderr, flush=True))
+            watch = WatchProgress(on_progress=on_progress)
         if args.command == "print" and args.print_command in ("pause", "resume", "cancel"):
             if args.filename is not None:
                 try:

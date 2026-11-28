@@ -374,10 +374,12 @@ completes the transition shortly afterward.
   - `print pause` (wire action `pause`): requires active `project.state == "printing"`.
   - `print resume` (wire action `resume`): requires `project.state == "paused"`.
   - `print cancel` (wire action `stop`): requires `project.state` in `printing`,
-    a recognized firmware `2.0.2.2` preparation phase (`extfilbox_filament_feeding`,
-    `frequency_sweeping`, `hotbed_cooling_off`, `hotbed_heating`, `nozzle_cooling`,
-    `nozzle_heating`, `nozzle_purging`, `nozzle_wiping`, `z_offset_calibrating`),
-    or `paused`.
+    a recognized firmware `2.0.2.2` preparation or filament-change phase
+    (`auto_leveling`, `extfilbox_filament_feeding`,
+    `extfilbox_filament_unfeeding`, `filament_cutting`, `flow_calibrating`,
+    `frequency_sweeping`, `hotbed_cooling_off`, `hotbed_heating`,
+    `nozzle_cooling`, `nozzle_cooling_off`, `nozzle_heating`, `nozzle_purging`,
+    `nozzle_wiping`, `vibrating`, `z_offset_calibrating`), or `paused`.
   - Idle (`state == "free"`), already-reached states, transitional states
     (`pausing`, `resuming`, `stopping`), and unrecognized states fail with exit
     2 (`validation_failed`) without publishing.
@@ -417,6 +419,7 @@ completes the transition shortly afterward.
 ```sh
 kobra-lan --printer bench print watch --timeout 3600
 kobra-lan --json --printer bench print watch
+kobra-lan --json --printer bench print watch --quiet
 ```
 
 Watch observes the job already active at startup on a Kobra X model 20030 /
@@ -426,45 +429,74 @@ lease as soon as that session is established. It requests status every five
 seconds after the initial query. The timeout accepts 1 to 259200 whole seconds
 and defaults to 86400. It includes connection setup, polls and closing the session.
 
-The command sends one final summary to stdout. Exit 0 means the observer returned
-a result. The outcome `no_active_job` describes verified idle at startup.
-`unknown` covers cases such as an expired deadline, a lost job or telemetry
-that cannot distinguish attempts. An acknowledgement, idle transition, unchanged
-last project or 100 percent progress alone is insufficient evidence of completion.
+While observing an active job, watch emits concise, deduplicated, sanitized
+progress updates to `stderr` whenever the observed phase, state, progress
+percentage, layer counters, or remaining time changes. These `stderr` lines
+include only validated scalar fields (normalized phase, ASCII state, progress,
+layer counters, optional remaining time, and safe nozzle/bed temperatures) and
+never emit filenames, URLs, credentials, raw fields, or terminal controls. Pass
+`--quiet` to suppress live `stderr` updates. `no_active_job` and pre-observation
+failures emit nothing to `stderr`.
+
+The command sends one final summary to `stdout` (text or single-line `--json`).
+Exit 0 means the observer returned a result. The outcome `no_active_job`
+describes verified idle at startup. `unknown` covers cases such as an expired
+deadline, a lost or replaced job, or telemetry that cannot establish continuity
+or terminal attribution. An acknowledgement, idle transition, unchanged last
+project or 100 percent progress alone is insufficient evidence of completion.
 Only terminal signals attributable to the same attempt and validated in hardware
 can qualify for `completed`, `canceled` or `failed`.
 
 A live observation on 2026-11-21 verified increasing percent and layer
-counters, followed by an idle report with the initial `last_project` still
-empty; a live cancellation on 2026-11-23 likewise settled to idle `free` with
-`last_project` still empty. The active report had the `task_id` placeholder
-`"-1"`. A repeated filename and that placeholder are insufficient to follow the
-same attempt. Watch preserves the first verified progress and returns `unknown`
-if a subsequent report cannot establish continuity. No terminal outcome mappings
-are enabled for this firmware.
+counters, end-of-print layer-counter zeroing at 99 percent, and a final idle
+report with `last_project` still empty; a live cancellation on 2026-11-23
+likewise settled to idle `free` with `last_project` still empty. Active jobs on
+firmware `2.0.2.2` always report the placeholder `task_id` `"-1"`. Watch follows
+the active job continuously across recognized firmware `2.0.2.2` preparation
+and filament-change phases (`auto_leveling`, `vibrating`, `flow_calibrating`,
+`filament_cutting`, `extfilbox_filament_unfeeding`, `nozzle_cooling_off`, and
+the other recognized preparation states), `printing`, pause (`paused`, `pausing`),
+`resuming`, and `stopping` while the validated filename (and non-placeholder `task_id`, if
+present) matches and printing progress/layer counters do not regress. High-water
+printing progress and layer counters are preserved across temporary non-printing
+transitions and end-of-print layer-counter zeroing. Watch stops immediately with
+`unknown` and `identity_unverified` if the initial filename is missing or
+hostile, printing counters regress, `total_layers` changes, or a start-only
+calibration phase (`auto_leveling`, `vibrating`, `flow_calibrating`,
+`z_offset_calibrating`, `frequency_sweeping`) reappears after printing progress
+was established; it stops with `job_replaced` on a filename or non-placeholder
+`task_id` change, `last_project_unattributed` on an unattributed `last_project`
+change, `active_job_unverified` on an unrecognized state, and `job_disappeared`
+when the printer returns to `free` or clears the active project. No terminal
+outcome mappings (`completed`, `canceled`, `failed`) are enabled for this
+firmware.
 
 Exit 2 indicates argument, trust, qualification or protocol refusal. Exit 3
 indicates a configuration or communication failure and 130 indicates a user
-interrupt. A failure after observing a job includes the last verified progress
-as a partial result. Clock skew between the printer and the host can cause a
-report to fail the freshness check and time out. Part quality requires separate
-physical inspection.
+interrupt. A failure after observing a job includes the latest verified progress
+as a partial result. For `print watch`, the freshness check accepts correlated
+or post-ACK non-retained `info` reports within a bounded ±5-second host/printer
+clock-skew window (`max_backward_skew_ms=5000`, symmetric with the `+5000 ms`
+forward window) while requiring strictly increasing report timestamps across
+polls; clock skew beyond 5 seconds still fails the freshness check and times
+out. Part quality requires separate physical inspection.
 
-Once `print watch` establishes a verified active phase, it atomically saves one
-sanitized private (`0600`) observation record (`obs-<32hex>.json`) under
+Once `print watch` establishes a verified active phase (`preparing`, `printing`,
+`paused`, or `stopping`), it atomically saves one sanitized private (`0600`)
+observation record (`obs-<32hex>.json`) under
 `<state-dir>/observations/<device-prefix>/` (`0700`, walked without following
 symlinks) before exiting, including on deadline expiration, post-observation
 failure, or interruption. The saved record stores `client_attribution: "unattributed"`,
 timestamps, validated `observed_filename` when available, outcome, reason, and
-verified scalar progress without raw telemetry, credentials, or token URLs.
-Stdout reports `observation_recorded` and `observation_id` without exposing
-`observed_filename`. Idle runs (`no_active_job`) and pre-observation failures
-create no directories or files. Existing profiles, credentials, upload/start
-receipts, and `.attempt` markers are never modified. If the observation
-directory is a symlink, has non-private permissions, or cannot be written,
-`print watch` preserves its outcome and exit status, reports
-`observation_recorded: false` (without `observation_id`), and neither follows
-symlinks nor alters permissions.
+the latest verified phase and scalar progress without raw telemetry,
+credentials, or token URLs. Stdout reports `observation_recorded` and
+`observation_id` without exposing `observed_filename`. Idle runs
+(`no_active_job`) and pre-observation failures create no directories or files.
+Existing profiles, credentials, upload/start receipts, and `.attempt` markers
+are never modified. If the observation directory is a symlink, has non-private
+permissions, or cannot be written, `print watch` preserves its outcome and exit
+status, reports `observation_recorded: false` (without `observation_id`), and
+neither follows symlinks nor alters permissions.
 
 ## Inspect local job history
 

@@ -70,6 +70,7 @@ class CommandTreeTests(unittest.TestCase):
             (["printer"], ("discover", "pair", "list", "info", "use", "remove", "read-only")),
             (["printer", "discover"], ("ac:3dprinter:fdm", "--timeout SECONDS", "--interface IPv4",
                                        "unauthenticated", "hardware_discovery_validated: true", "printer pair")),
+            (["print", "watch"], ("--timeout SECONDS", "--quiet", "stderr")),
         ):
             with self.subTest(argv=argv), patch("kobra_lan.cli.Registry") as registry:
                 out = io.StringIO()
