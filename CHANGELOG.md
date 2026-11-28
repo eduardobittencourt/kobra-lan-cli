@@ -14,10 +14,11 @@
     `active_job_unverified`, or `job_disappeared` as appropriate (terminal
     outcomes remain honestly `unknown` on firmware `2.0.2.2`).
   - Expand `PREPARATION_STATES` with live-observed firmware `2.0.2.2`
-    calibration and filament-change states (`auto_leveling`, `vibrating`,
-    `flow_calibrating`, `filament_cutting`, `extfilbox_filament_unfeeding`),
-    automatically shared with `print cancel` pre-flight validation and
-    `print resume` post-ACK confirmation.
+    calibration, filament-change, and cooldown states (`auto_leveling`,
+    `vibrating`, `flow_calibrating`, `filament_cutting`,
+    `extfilbox_filament_unfeeding`, `nozzle_cooling_off`), automatically shared
+    with `print cancel` pre-flight validation and `print resume` post-ACK
+    confirmation.
   - Emit deduplicated, sanitized scalar live progress updates on `stderr` during
     active `print watch` runs (excluding filenames, URLs, credentials, and
     terminal controls), and add optional `--quiet` (exposed in CLI help and

@@ -38,7 +38,7 @@ Before publishing, the CLI SHALL verify a fresh `info` report over one pinned MQ
 - **THEN** pre-flight validation succeeds and the CLI proceeds to publish one `stop` command
 
 #### Scenario: Cancel allowed during calibration or filament-change preparation
-- **WHEN** `print cancel --execute` runs while the fresh active job is in `auto_leveling`, `vibrating`, `flow_calibrating`, `filament_cutting`, or `extfilbox_filament_unfeeding`
+- **WHEN** `print cancel --execute` runs while the fresh active job is in `auto_leveling`, `vibrating`, `flow_calibrating`, `filament_cutting`, `extfilbox_filament_unfeeding`, or `nozzle_cooling_off`
 - **THEN** pre-flight validation succeeds and the CLI proceeds to publish one `stop` command
 
 #### Scenario: Control refused on idle, transitional, or unqualified target

@@ -30,6 +30,7 @@ PREPARATION_STATES = frozenset({
     "hotbed_cooling_off",
     "hotbed_heating",
     "nozzle_cooling",
+    "nozzle_cooling_off",
     "nozzle_heating",
     "nozzle_purging",
     "nozzle_wiping",

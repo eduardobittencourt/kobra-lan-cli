@@ -273,6 +273,7 @@ class ControlExecutionAndSafetyTests(unittest.TestCase):
             "flow_calibrating",
             "filament_cutting",
             "extfilbox_filament_unfeeding",
+            "nozzle_cooling_off",
         })
         self.assertLessEqual(new_fw_states, PREPARATION_STATES)
         self.assertLessEqual(START_ONLY_PREPARATION_STATES, PREPARATION_STATES)

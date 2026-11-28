@@ -15,7 +15,7 @@ Follow an active print on a qualified Kobra X through read-only telemetry and ex
 - **THEN** watch observes that job without requiring a local upload or start receipt
 
 #### Scenario: Active job in calibration, filament-change, pause, or stopping state
-- **WHEN** fresh qualified telemetry reports an active job in `auto_leveling`, `vibrating`, `flow_calibrating`, `filament_cutting`, `extfilbox_filament_unfeeding`, `paused`, `pausing`, `resuming`, or `stopping`
+- **WHEN** fresh qualified telemetry reports an active job in `auto_leveling`, `vibrating`, `flow_calibrating`, `filament_cutting`, `extfilbox_filament_unfeeding`, `nozzle_cooling_off`, `paused`, `pausing`, `resuming`, or `stopping`
 - **THEN** watch recognizes the active job, maps it to its normalized phase (`preparing`, `paused`, or `stopping`), and continues polling rather than exiting with `active_job_unverified`
 
 #### Scenario: Small printer clock skew during a long watch

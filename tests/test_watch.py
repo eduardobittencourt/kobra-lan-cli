@@ -264,6 +264,8 @@ class WatchProgressTests(unittest.TestCase):
             report("printing", pct=99, curr=100, total=100, remain=1),
             # End-of-print layer-counter zeroing at 99% preserves high-water 100/100.
             report("printing", pct=99, curr=0, total=0, remain=1),
+            # End-of-print nozzle cooldown before returning to free preserves 99%, 100/100.
+            report("nozzle_cooling_off", pct=99, curr=0, total=0, remain=0),
         ]
         for step in sequence:
             self.assertIsNone(progress.update(step))
@@ -271,13 +273,14 @@ class WatchProgressTests(unittest.TestCase):
         result = progress.update({**INFO, "state": "free", "project": None, "last_project": empty_last})
         self.assertEqual(result, {
             "outcome": "unknown", "reason": "job_disappeared",
-            "phase": "printing", "progress": 99, "current_layer": 100, "total_layers": 100,
+            "phase": "preparing", "progress": 99, "current_layer": 100, "total_layers": 100,
         })
-        # Verify deduplication: 14 distinct progress states (temp jitter and zeroing kept same key).
-        self.assertEqual(len(emitted), 14)
+        # Verify deduplication: 15 distinct progress states (temp jitter and zeroing kept same key).
+        self.assertEqual(len(emitted), 15)
         self.assertIn("preparing (auto_leveling)", emitted[0])
         self.assertIn("printing 10% layer 10/100 remaining 25m nozzle 220/220C bed 60/60C", emitted[4])
         self.assertIn("paused 50% layer 50/100 remaining 12m", emitted[11])
+        self.assertIn("preparing (nozzle_cooling_off) 99% layer 100/100", emitted[14])
         for line in emitted:
             self.assertNotIn("sample.gcode", line)
 
@@ -288,6 +291,7 @@ class WatchProgressTests(unittest.TestCase):
             ("flow_calibrating", "preparing"),
             ("filament_cutting", "preparing"),
             ("extfilbox_filament_unfeeding", "preparing"),
+            ("nozzle_cooling_off", "preparing"),
             ("resuming", "preparing"),
             ("paused", "paused"),
             ("pausing", "paused"),

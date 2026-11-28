@@ -378,8 +378,8 @@ completes the transition shortly afterward.
     (`auto_leveling`, `extfilbox_filament_feeding`,
     `extfilbox_filament_unfeeding`, `filament_cutting`, `flow_calibrating`,
     `frequency_sweeping`, `hotbed_cooling_off`, `hotbed_heating`,
-    `nozzle_cooling`, `nozzle_heating`, `nozzle_purging`, `nozzle_wiping`,
-    `vibrating`, `z_offset_calibrating`), or `paused`.
+    `nozzle_cooling`, `nozzle_cooling_off`, `nozzle_heating`, `nozzle_purging`,
+    `nozzle_wiping`, `vibrating`, `z_offset_calibrating`), or `paused`.
   - Idle (`state == "free"`), already-reached states, transitional states
     (`pausing`, `resuming`, `stopping`), and unrecognized states fail with exit
     2 (`validation_failed`) without publishing.
@@ -454,9 +454,9 @@ likewise settled to idle `free` with `last_project` still empty. Active jobs on
 firmware `2.0.2.2` always report the placeholder `task_id` `"-1"`. Watch follows
 the active job continuously across recognized firmware `2.0.2.2` preparation
 and filament-change phases (`auto_leveling`, `vibrating`, `flow_calibrating`,
-`filament_cutting`, `extfilbox_filament_unfeeding`, and the other recognized
-preparation states), `printing`, pause (`paused`, `pausing`), `resuming`, and
-`stopping` while the validated filename (and non-placeholder `task_id`, if
+`filament_cutting`, `extfilbox_filament_unfeeding`, `nozzle_cooling_off`, and
+the other recognized preparation states), `printing`, pause (`paused`, `pausing`),
+`resuming`, and `stopping` while the validated filename (and non-placeholder `task_id`, if
 present) matches and printing progress/layer counters do not regress. High-water
 printing progress and layer counters are preserved across temporary non-printing
 transitions and end-of-print layer-counter zeroing. Watch stops immediately with
