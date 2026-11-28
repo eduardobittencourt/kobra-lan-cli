@@ -219,17 +219,21 @@ class WatchProgress:
         self._last_progress_key = key
         self._on_progress(_format_progress_line(self.last, state, remain_time, info.get("temp")))
 
+    def _printing_regression(self, progress, current, total):
+        if total is not None and self.observed_total_layers is not None and total != self.observed_total_layers:
+            return True
+        if not self.saw_printing_progress:
+            return False
+        if progress is not None and self.max_progress is not None and progress < self.max_progress:
+            return True
+        return current is not None and current > 0 and self.max_layer is not None and current < self.max_layer
+
     def _merge_printing(self, project):
         fields = progress_fields(project)
         progress = fields.get("progress")
         current = fields.get("current_layer")
         total = fields.get("total_layers")
-        if self.saw_printing_progress:
-            if progress is not None and self.max_progress is not None and progress < self.max_progress:
-                return self.result("unknown", "identity_unverified")
-            if current is not None and current > 0 and self.max_layer is not None and current < self.max_layer:
-                return self.result("unknown", "identity_unverified")
-        if total is not None and self.observed_total_layers is not None and total != self.observed_total_layers:
+        if self._printing_regression(progress, current, total):
             return self.result("unknown", "identity_unverified")
         merged = self._preserved_scalars()
         if progress is not None:
@@ -238,8 +242,7 @@ class WatchProgress:
             merged["total_layers"] = total
         if current is not None and (current > 0 or "current_layer" not in merged):
             merged["current_layer"] = current
-        if ("current_layer" in merged and "total_layers" in merged
-                and merged["current_layer"] > merged["total_layers"]):
+        if merged.get("current_layer", 0) > merged.get("total_layers", 1_000_000):
             return self.result("unknown", "identity_unverified")
         self._record_high_water(merged)
         self.last = {"phase": "printing", **merged}
@@ -258,8 +261,7 @@ class WatchProgress:
             candidate["total_layers"] = total
         if current is not None and current > 0 and (self.max_layer is None or current >= self.max_layer):
             candidate["current_layer"] = current
-        if ("current_layer" in candidate and "total_layers" in candidate
-                and candidate["current_layer"] > candidate["total_layers"]):
+        if candidate.get("current_layer", 0) > candidate.get("total_layers", 1_000_000):
             candidate = preserved
         else:
             self._record_high_water(candidate)
